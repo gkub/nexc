@@ -1,0 +1,968 @@
+# NEX — Language & Compiler Project Overview
+
+## High-Level Vision
+
+NEX is a lightweight systems programming language focused on:
+
+- explicit concurrency
+- predictable execution
+- visible runtime costs
+- realtime-safe execution regions
+- native code generation
+- low runtime overhead
+- mathematical clarity without hidden computational cost
+- edge/embedded-oriented systems programming
+
+Core philosophy:
+
+> Nothing expensive is implicit.
+
+The language is intentionally designed so that:
+
+- allocations are explicit
+- blocking operations are explicit
+- concurrency boundaries are explicit
+- copies are explicit
+- expensive operations are visible in source and IR
+- resource usage can be made observable when explicitly requested
+- high-level math abstractions remain compatible with low-level performance reasoning
+
+The project is intended both as:
+
+1. a serious educational compiler project
+2. a portfolio-grade MLIR/LLVM systems compiler
+3. a long-term exploration of explicit, optimizable systems programming
+
+---
+
+# Language Identity
+
+## Language Name
+
+NEX
+
+## Compiler Name
+
+```txt
+nexc
+```
+
+## Philosophy
+
+NEX is designed around:
+
+- predictable behavior
+- explicit execution semantics
+- constrained/realtime-safe regions
+- concurrency visibility
+- low-level systems clarity
+- compiler-visible effects
+- optional resource observability
+- math abstractions with visible costs
+
+It is NOT intended to:
+
+- replace Rust
+- be fully memory safe
+- provide garbage collection
+- abstract away performance costs
+- hide concurrency or blocking behavior
+- silently introduce expensive temporaries or allocations
+
+Instead, it aims to provide:
+
+- transparent execution
+- explicit costs
+- lightweight concurrency
+- strong compiler reasoning about runtime behavior
+- meaningful diagnostics around effects, resources, and performance-sensitive operations
+
+---
+
+# File Extensions
+
+## Source Files
+
+```txt
+.nexs
+```
+
+Examples:
+
+```txt
+main.nexs
+runtime.nexs
+```
+
+## Interface/Header Files
+
+```txt
+.nexh
+```
+
+Examples:
+
+```txt
+channels.nexh
+math.nexh
+```
+
+These act similarly to C/C++ headers, but without textual preprocessing.
+
+---
+
+# Toolchain Naming
+
+## Compiler
+
+```txt
+nexc
+```
+
+## Future Tooling
+
+```txt
+nexfmt    formatter
+nexls     language server
+libnexrt  runtime library
+libnexmath math/runtime support library
+```
+
+---
+
+# Repository Strategy
+
+The initial repository is the compiler/toolchain repository:
+
+```txt
+nexc/
+```
+
+The repository contains both the implementation and the living language/project documentation.
+
+Recommended layout:
+
+```txt
+nexc/
+  README.md
+  nex.md
+  docs/
+    language/
+    design/
+  examples/
+  src/
+  include/
+  runtime/
+  tests/
+```
+
+`README.md` is the concise public entry point.
+
+`nex.md` is the living project overview and AI/context document.
+
+`docs/language/` is for the formal user-facing language definition.
+
+`docs/design/` is for rationale, architecture notes, optimization plans, and implementation strategy.
+
+---
+
+# Documentation Strategy
+
+NEX is docs-first.
+
+Features should be defined in writing before implementation. A feature should generally enter the compiler only after the project has defined:
+
+1. purpose
+2. syntax
+3. semantics
+4. constraints
+5. valid examples
+6. invalid examples
+7. expected diagnostics
+8. rough compiler representation
+
+The language definition should not accidentally emerge from whatever the compiler happens to implement first.
+
+---
+
+# Intended Language Characteristics
+
+## C-like Syntax
+
+The language intentionally resembles:
+
+- C
+- lightweight C++
+- Rust-style function syntax
+
+Example:
+
+```c
+fn add(a: i32, b: i32) -> i32 {
+    return a + b;
+}
+```
+
+---
+
+# Core Design Pillars
+
+## 1. Explicit Concurrency
+
+Concurrency is visible in source.
+
+Example:
+
+```c
+channel<i32> ch;
+
+spawn producer(ch);
+spawn consumer(ch);
+```
+
+Key operations:
+
+- `spawn`
+- `send`
+- `recv`
+- channels
+- tasks
+
+Goal:
+
+- avoid hidden threading/runtime behavior
+- encourage message-passing over shared mutable state
+- make blocking and scheduling-relevant operations visible
+
+---
+
+## 2. No Hidden Work
+
+NEX avoids:
+
+- hidden allocations
+- hidden copies
+- hidden async suspension
+- hidden thread creation
+- hidden blocking behavior
+- hidden expensive math temporaries
+
+Examples:
+
+```c
+copy(buffer);
+alloc<i32>(128);
+spawn worker();
+recv(ch);
+```
+
+All expensive work should be visible at source level or reportable by compiler diagnostics/tooling.
+
+---
+
+## 3. Predictable / Realtime-Safe Execution
+
+NEX intends to support compiler-verified constrained execution regions.
+
+Example:
+
+```c
+realtime fn control_loop() {
+    ...
+}
+```
+
+Potential restrictions:
+
+- no heap allocation
+- no blocking calls
+- no unknown foreign calls
+- no unbounded loops
+- no thread spawning
+- restricted copies
+- restricted instrumentation
+- restricted math operations if they allocate, block, or call unknown runtime code
+
+Compiler should track effects through semantic analysis.
+
+---
+
+## 4. Mathematical Clarity Without Hidden Computational Cost
+
+NEX should support expressive numerical code while preserving low-level performance visibility.
+
+Target areas:
+
+- fixed-size vectors
+- fixed-size matrices
+- shape-aware type checking
+- matrix/vector multiplication
+- dot products
+- cross products
+- transposition
+- output-buffer APIs for expensive operations
+- future automatic differentiation and numerical integration experiments
+
+Example direction:
+
+```c
+let a: mat<4, 4, f32>;
+let b: mat<4, 4, f32>;
+let c: mat<4, 4, f32> = a * b;
+```
+
+When operations may allocate or create temporaries, the compiler should either make that visible or provide explicit alternatives such as:
+
+```c
+matmul_into(out, a, b);
+```
+
+NEX math should feel like writing optimized C manually, but with the compiler checking dimensions, preventing avoidable mistakes, and eventually lowering fixed-size operations efficiently.
+
+---
+
+## 5. Resource Usage Should Be Observable When Requested
+
+NEX should support optional resource observability.
+
+Resource observability means the compiler and runtime can cooperate to report information such as:
+
+- current memory usage per task
+- peak memory usage per task
+- memory usage per region
+- allocation counts
+- channel queue depths
+- blocking points
+- realtime-region violations
+- source-attributed allocation sites
+
+Tracking itself has cost, so tracking must be explicit and opt-in.
+
+Potential tracking tiers:
+
+```txt
+Level 0: off
+Level 1: counters only
+Level 2: traced allocation/blocking events
+Level 3: full debug/resource timeline
+```
+
+Normal builds should have minimal overhead. Debug/profile builds may enable instrumentation.
+
+---
+
+# Planned Language Features
+
+## Phase 1 — Minimal Scalar Language
+
+Features:
+
+- functions
+- integer types
+- booleans
+- local variables
+- arithmetic
+- return statements
+- function calls
+
+Example:
+
+```c
+fn square(x: i32) -> i32 {
+    return x * x;
+}
+```
+
+---
+
+## Phase 2 — Control Flow
+
+Features:
+
+- if/else
+- while loops
+- scoped blocks
+- comparisons
+
+Example:
+
+```c
+if (x > 0) {
+    return x;
+}
+```
+
+---
+
+## Phase 3 — Mutable Variables
+
+Features:
+
+- `mut`
+- assignment
+- stack storage semantics
+
+Example:
+
+```c
+let mut x: i32 = 0;
+x = x + 1;
+```
+
+---
+
+## Phase 4 — Arrays / Buffers
+
+Features:
+
+- fixed-size arrays
+- indexing
+- loops over arrays
+- basic bounds checking model
+- eventual bounds-check elimination
+
+Example:
+
+```c
+let mut arr: [4]i32;
+arr[0] = 10;
+```
+
+---
+
+## Phase 5 — Explicit Concurrency
+
+Features:
+
+- task functions
+- channels
+- spawn/send/recv
+- bounded channels
+- blocking-effect tracking
+
+Example:
+
+```c
+task fn producer(out: channel<i32>) {
+    send(out, 42);
+}
+```
+
+---
+
+## Phase 6 — Realtime Regions / Effect Tracking
+
+Features:
+
+- `realtime fn`
+- semantic effect tracking
+- restricted operations
+
+Compiler should detect:
+
+- allocation
+- blocking
+- spawning
+- large copies
+- unknown external calls
+- unbounded loops
+
+---
+
+## Phase 7 — Mathematical Types and Operations
+
+Features:
+
+- primitive floating-point types
+- fixed-size vectors
+- fixed-size matrices
+- shape-aware type checking
+- dot product
+- matrix multiplication
+- transposition
+- output-buffer math APIs
+- eventual vectorization/lowering through MLIR vector facilities
+
+Initial goal:
+
+- prioritize shape-aware linear algebra before calculus-like features
+
+Long-term research direction:
+
+- automatic differentiation
+- numerical integration
+- optimization primitives
+- accelerator-aware lowering
+
+---
+
+## Phase 8 — Resource Observability
+
+Features:
+
+- explicit memory regions
+- tracked regions
+- tracked tasks
+- optional runtime counters
+- optional traced allocation/blocking events
+- source-attributed reports
+- zero or near-zero cost when disabled
+
+Example direction:
+
+```txt
+nexc run --track-resources examples/app.nexs
+```
+
+Potential report:
+
+```txt
+Regions:
+  scratch      used=384B peak=768B cap=2048B
+  frame_pool   used=8MiB peak=12MiB cap=16MiB
+
+Tasks:
+  camera_0     frame_pool=8MiB blocked_on=send
+  inference    scratch_peak=768B running
+```
+
+---
+
+# Compiler Architecture
+
+The compiler is intentionally designed to teach:
+
+- compiler fundamentals
+- lexical analysis
+- parsing
+- AST design
+- semantic analysis
+- effect tracking
+- MLIR lowering
+- LLVM lowering
+- modern compiler architecture
+- target-profile-aware code generation
+
+---
+
+# Pipeline
+
+```txt
+Source Code
+    ↓
+Lexer
+    ↓
+Parser
+    ↓
+AST
+    ↓
+Semantic Analysis
+    ↓
+NEX-specific analyses and optimizations
+    ↓
+MLIR Generation
+    ↓
+MLIR Lowering Passes
+    ↓
+LLVM Dialect
+    ↓
+LLVM IR
+    ↓
+Target Code
+```
+
+---
+
+# Lexer
+
+Planned:
+
+- hand-written lexer
+- source locations tracked from day one
+- no lexer generators
+
+Responsibilities:
+
+- tokenization
+- comments
+- keywords
+- literals
+- operators
+- punctuation
+- source spans
+
+---
+
+# Parser
+
+Planned:
+
+- hand-written recursive descent parser
+- Pratt parsing or precedence climbing for expressions
+
+Goal:
+
+- deeply understand parsing mechanics
+- avoid parser-generator abstraction
+- produce clear ASTs and diagnostics
+
+---
+
+# AST
+
+Explicit AST node hierarchy.
+
+Examples:
+
+- FunctionDecl
+- BlockStmt
+- ReturnStmt
+- BinaryExpr
+- CallExpr
+- VariableExpr
+- LetStmt
+- IfStmt
+- WhileStmt
+- TypeExpr
+- MatrixTypeExpr
+- ChannelTypeExpr
+
+AST dumping should exist early for debugging.
+
+Example:
+
+```txt
+FunctionDecl main
+  ReturnStmt
+    IntegerLiteral 42
+```
+
+---
+
+# Semantic Analysis
+
+Planned responsibilities:
+
+- symbol resolution
+- scoped symbol tables
+- type checking
+- function signature validation
+- assignment checking
+- return checking
+- mutability checking
+- shape checking for arrays/vectors/matrices
+- effect tracking
+- realtime-region validation
+- copy/allocation/blocking diagnostics
+
+---
+
+# Optimization Strategy
+
+NEX should use existing LLVM/MLIR optimization machinery for generic compiler optimizations and implement NEX-specific analyses where the language has extra semantic information.
+
+General compiler optimizations:
+
+- constant folding
+- constant propagation
+- dead code elimination
+- control-flow simplification
+- SSA promotion through LLVM
+- loop-invariant code motion where appropriate
+
+NEX-specific optimization and analysis goals:
+
+- effect-aware optimization
+- realtime-region verification
+- explicit copy/allocation diagnostics
+- optional resource instrumentation
+- shape-aware linear algebra lowering
+- matrix/vector expression fusion
+- bounds-check elimination for fixed-size buffers
+- region-based memory analysis
+- task/channel/resource diagnostics
+- RISC-V target-profile support
+
+Detailed optimization goals live in:
+
+```txt
+docs/design/optimization_goals.md
+```
+
+---
+
+# MLIR Strategy
+
+Initially:
+
+- use standard MLIR dialects
+
+Examples:
+
+- `func`
+- `arith`
+- `scf`
+- `memref`
+- `vector`
+- `affine`
+- `llvm`
+
+Avoid custom dialects initially.
+
+Goal:
+
+- understand lowering pipelines first
+- use existing MLIR structures where possible
+- add custom NEX dialect only if the language needs it
+
+---
+
+# Future MLIR Direction
+
+Potential custom NEX dialect later.
+
+Possible operations:
+
+- `nex.spawn`
+- `nex.send`
+- `nex.recv`
+- `nex.alloc_region`
+- `nex.copy`
+- `nex.realtime_region`
+- `nex.track_resource`
+- `nex.matmul`
+- `nex.matmul_into`
+
+These would lower into:
+
+- standard MLIR dialects
+- runtime calls
+- threading primitives
+- LLVM dialect
+- target-specific code
+
+---
+
+# Runtime Philosophy
+
+Small runtime.
+
+Likely implemented in:
+
+- C
+- or lightweight C++
+
+Responsibilities:
+
+- print functions
+- task runtime
+- channel implementation
+- threading primitives
+- synchronization primitives
+- optional resource tracking
+- region allocators
+- math runtime helpers where compiler lowering is not enough
+
+Avoid:
+
+- garbage collection
+- massive runtime complexity
+- hidden allocation
+- mandatory heavy profiling infrastructure
+
+---
+
+# Planned Runtime Model
+
+Likely:
+
+- pthread-backed tasks initially for hosted targets
+- bounded channels
+- explicit blocking semantics
+- optional tracking counters
+- optional traced instrumentation
+
+Potential future:
+
+- lock-free structures
+- realtime-safe queues
+- thread pools
+- deterministic scheduling experiments
+- static region allocators
+- embedded/FreeRTOS-backed task integration
+
+---
+
+# Target Model
+
+NEX programs are compiled for a target profile.
+
+A target profile may define:
+
+- architecture
+- pointer width
+- integer ABI
+- floating-point support
+- available runtime services
+- heap availability
+- task/channel support
+- resource-tracking support
+- realtime restrictions
+- platform intrinsics
+- linker/runtime assumptions
+
+Initial practical targets:
+
+```txt
+host-linux-x86_64
+riscv32-baremetal
+riscv32-embedded
+```
+
+RISC-V is the preferred first serious non-host ISA target.
+
+C emission is not the primary strategy. NEX should primarily lower through MLIR/LLVM to native code.
+
+---
+
+# ESP32 / Embedded Direction
+
+NEX should be designed with embedded profiles in mind.
+
+ESP32-class support is most realistic on RISC-V variants such as ESP32-C3/C6-style hardware rather than classic Xtensa-first support.
+
+Embedded profile direction:
+
+- no implicit heap
+- static regions preferred
+- bounded channels only
+- limited runtime
+- optional lightweight counters
+- no mandatory heavy tracing
+- predictable codegen
+- target-profile-aware restrictions
+
+---
+
+# Implementation Language
+
+The initial compiler is implemented in modern C++.
+
+Reasons:
+
+- LLVM and MLIR are C++ ecosystems
+- C++ is appropriate for systems/compiler work
+- the project is intended to build practical C++ experience
+- direct integration with LLVM APIs is valuable
+
+---
+
+# Bootstrapping / Self-Hosting Goal
+
+A long-term goal of NEX is partial or full self-hosting.
+
+Initial stages:
+
+```txt
+Stage 0: nexc written in C++
+Stage 1: small NEX programs compile and run
+Stage 2: runtime helpers or examples written in NEX
+Stage 3: developer tools written in NEX
+Stage 4: parts of the compiler frontend written in NEX
+Stage 5: nexc can compile substantial parts of itself
+Stage 6: full self-hosting
+```
+
+Self-hosting is not a near-term milestone. It is a long-term validation target for the language's expressiveness, systems capability, and compiler maturity.
+
+---
+
+# Educational Goals
+
+The project is intentionally structured to:
+
+- relearn compiler fundamentals deeply
+- become comfortable with MLIR/LLVM
+- understand lowering stages
+- understand modern IR design
+- understand semantic analysis and effect systems
+- understand optimization pipelines
+- become interview/job-ready for compiler/systems roles
+
+The emphasis is:
+
+- understanding
+- architecture
+- correctness
+- visibility
+- maintainability
+
+NOT:
+
+- rushing features
+- making a giant language
+- reinventing all of Rust/C++
+- hiding complexity behind tools too early
+
+---
+
+# Important Non-Goals
+
+NEX is NOT intended to initially support:
+
+- classes
+- inheritance
+- templates
+- generics
+- macros
+- textual preprocessing
+- garbage collection
+- async/await
+- exceptions
+- advanced type inference
+- closures
+- complex metaprogramming
+
+The project intentionally prioritizes:
+
+- simplicity
+- coherence
+- compiler quality
+- execution transparency
+
+---
+
+# Long-Term Interesting Ideas
+
+Potential future research directions:
+
+- compiler-enforced realtime regions
+- explicit vectorization/SIMD constructs
+- edge/accelerator-aware lowering
+- effect systems
+- allocation visibility tooling
+- execution-cost diagnostics
+- deterministic concurrency verification
+- shape-aware linear algebra optimization
+- automatic differentiation
+- numerical integration
+- resource timelines and live observability
+- RISC-V/embedded target profiles
+- partial/full self-hosting
+
+---
+
+# Core Slogans
+
+Primary:
+
+> Nothing expensive is implicit.
+
+Additional concepts:
+
+- explicit concurrency
+- visible execution
+- predictable systems programming
+- compiler-verifiable execution constraints
+- mathematical clarity without hidden computational cost
+- resource usage should be visible, attributable, and optional to observe

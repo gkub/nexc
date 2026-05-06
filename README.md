@@ -1,1 +1,100 @@
 # nexc
+
+`nexc` is the reference compiler for **NEX**, a lightweight systems programming language focused on explicit costs, predictable execution, concurrency visibility, realtime-safe regions, mathematical clarity, and native code generation.
+
+Core slogan:
+
+> Nothing expensive is implicit.
+
+NEX is currently in the **language-definition and compiler-planning stage**. The project is intentionally docs-first: syntax, semantics, examples, and design constraints should be defined before implementation.
+
+## Project Goals
+
+- Build a serious educational compiler project
+- Implement the compiler in modern C++
+- Use a hand-written lexer and parser
+- Lower through MLIR and LLVM
+- Generate native code rather than transpiling to C
+- Support RISC-V as a serious future target
+- Keep embedded and realtime constraints in mind from the start
+- Support compiler-visible math abstractions such as shape-aware linear algebra
+- Explore NEX-specific optimization problems around effects, resources, copies, regions, and realtime execution
+- Eventually explore partial or full self-hosting
+
+## Current Focus
+
+1. Define the NEX language model
+2. Document core syntax and semantics
+3. Design the compiler architecture
+4. Implement the frontend incrementally
+5. Add semantic analysis and effect tracking
+6. Add MLIR/LLVM lowering after the frontend is solid
+7. Build NEX-specific analyses and optimizations incrementally
+
+## Planned Compiler Pipeline
+
+Source code  
+→ Lexer  
+→ Parser  
+→ AST  
+→ Semantic analysis  
+→ MLIR generation  
+→ MLIR lowering  
+→ LLVM IR  
+→ Native code
+
+## Repository Layout
+
+```txt
+docs/       Language specification and design notes
+examples/   Example NEX programs
+src/        Compiler implementation
+include/    Public/internal C++ headers
+runtime/    Future NEX runtime support
+tests/      Compiler tests
+nex.md      Living project overview and AI/context document
+```
+
+## Key Documents
+
+- [`nex.md`](./nex.md) — living project overview and language-planning context
+- [`docs/design/optimization_goals.md`](./docs/design/optimization_goals.md) — optimization and static-analysis goals
+
+## Language Direction
+
+NEX is intended to support:
+
+- explicit allocation and copying
+- explicit blocking and concurrency
+- task/channel-based concurrency
+- fixed-size arrays and buffers
+- shape-aware linear algebra
+- optional resource observability
+- realtime-safe function regions
+- compiler-visible effect tracking
+- low-overhead embedded-oriented profiles
+
+NEX is not intended to initially support:
+
+- garbage collection
+- classes or inheritance
+- exceptions
+- async/await
+- macros
+- templates
+- advanced metaprogramming
+- hidden runtime behavior
+
+## Implementation Language
+
+The initial compiler is written in **C++**, primarily because LLVM and MLIR are C++ ecosystems and the project is intended to build practical systems/compiler experience.
+
+Long term, NEX may become partially or fully self-hosting once the language is mature enough.
+
+## Status
+
+Early-stage. No stable compiler implementation yet.
+
+## License
+
+TBD.
