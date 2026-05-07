@@ -1,0 +1,3 @@
+fn f() -> void {
+    const X: i32 = 1;
+}

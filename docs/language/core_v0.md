@@ -2,7 +2,7 @@
 
 This document is the **normative specification** for the first implementable subset of NEX: what the reference compiler (`nexc`) should accept, reject, and mean for programs that use only Core v0 features.
 
-Later phases (arrays, concurrency, realtime regions, rich math types, and so on) extend this core. They are described at a high level in [`nex.md`](../../nex.md); when they land, they get their own spec sections or versioned addenda.
+Later phases (arrays, concurrency, realtime regions, rich math types, and so on) extend this core. They are described at a high level in `[nex.md](../../nex.md)`; when they land, they get their own spec sections or versioned addenda.
 
 ---
 
@@ -70,7 +70,7 @@ Whitespace (space, tab, newline, carriage return) is **insignificant** except as
 ### 3.2 Comments
 
 - **Line comment:** `//` starts a comment that runs to the end of the line.
-- **Block comment:** `/*` … `*/`. Block comments **do not nest**.
+- **Block comment:** `/`* … `*/`. Block comments **do not nest**.
 
 ### 3.3 Identifiers
 
@@ -112,12 +112,14 @@ At minimum, Core v0 uses:
 
 Core v0 includes fixed-width integers and Boolean:
 
-| Type  | Meaning              |
-| ----- | -------------------- |
-| `i8`, `i16`, `i32`, `i64` | Signed two’s-complement integers |
-| `u8`, `u16`, `u32`, `u64` | Unsigned integers    |
-| `bool`                    | Boolean              |
+
+| Type                      | Meaning                            |
+| ------------------------- | ---------------------------------- |
+| `i8`, `i16`, `i32`, `i64` | Signed two’s-complement integers   |
+| `u8`, `u16`, `u32`, `u64` | Unsigned integers                  |
+| `bool`                    | Boolean                            |
 | `void`                    | “No value” (function returns only) |
+
 
 There is no implicit `void` value; `void` is only a **return type**.
 
@@ -125,7 +127,7 @@ There is no implicit `void` value; `void` is only a **return type**.
 
 `bool` is a real type with values `true` and `false`.
 
-For **`if` and `while` conditions** (and later, similar contexts), the expression may be:
+For `**if` and `while` conditions** (and later, similar contexts), the expression may be:
 
 - of type `bool`, or
 - of any **integer** type: **zero** is false, **any nonzero** value is true (C-like truthiness).
@@ -136,9 +138,9 @@ This is **not** the same as JavaScript’s notion of “truthy” objects or arr
 
 In JavaScript, `const` means “this binding cannot be reassigned,” but **object contents** may still mutate. NEX avoids that confusion:
 
-- **`let`** introduces a **runtime** binding inside a function: a name for a value in a stack frame (conceptually). It is **immutable** unless `mut` is used.
-- **`let mut`** introduces a **mutable** runtime binding: reassignment with `=` is allowed.
-- **`const`** at module or block scope introduces a **compile-time constant**: its initializer must be a **constant expression** evaluable at compile time. `const` names a single immutable value for use in types and expressions; it does **not** mean “`let` but I promise not to reassign” in the JS sense.
+- `**let`** introduces a **runtime** binding inside a function: a name for a value in a stack frame (conceptually). It is **immutable** unless `mut` is used.
+- `**let mut`** introduces a **mutable** runtime binding: reassignment with `=` is allowed.
+- `**const`** at module or block scope introduces a **compile-time constant**: its initializer must be a **constant expression** evaluable at compile time. `const` names a single immutable value for use in types and expressions; it does **not** mean an immutable runtime `let` binding in the JavaScript sense.
 
 For Core v0, `const` appears at **module (top) level** and optionally in inner scopes if the implementation chooses; the initializer must be a constant expression.
 
@@ -150,7 +152,7 @@ All integer arithmetic is **defined**. There is **no undefined behavior** for ov
 
 ### 5.1 Unsigned integers
 
-For `u8` … `u64`, arithmetic operations **wrap** modulo \(2^n\) for the bit width \(n\).
+For `u8` … `u64`, arithmetic operations **wrap** modulo 2^n for the bit width n.
 
 ### 5.2 Signed integers
 
@@ -251,10 +253,10 @@ Implementations should attach **source spans** to every diagnostic: at least a s
 
 The reference compiler should expose:
 
-- **`--dump-tokens`**: token stream with kinds and spans (for lexer debugging).
-- **`--dump-ast`**: human-readable tree of the parsed program (for parser debugging).
+- `**--dump-tokens`**: token stream with kinds and spans (for lexer debugging).
+- `**--dump-ast`**: human-readable tree of the parsed program (for parser debugging).
 
-A natural extension is **`--dump-ast-dot`** (or similar): emit a [Graphviz](https://graphviz.org/) `dot` graph of the AST for a function or whole unit so it can be rendered as an image. This is a tooling feature, not a language semantic, but it is part of the expected developer experience for NEX.
+A natural extension is `**--dump-ast-dot**` (or similar): emit a [Graphviz](https://graphviz.org/) `dot` graph of the AST for a function or whole unit so it can be rendered as an image. This is a tooling feature, not a language semantic, but it is part of the expected developer experience for NEX.
 
 ---
 
@@ -303,19 +305,22 @@ let x: i32 = 1; // error: let only inside functions
 
 ## 13. Relation to later phases
 
-Features sketched in [`nex.md`](../../nex.md) (arrays, `spawn`, channels, `realtime fn`, matrix types, resource tracking) **extend** Core v0. Until they are specified in this `docs/language/` tree, they are **not** part of the normative Core v0 grammar.
+Features sketched in `[nex.md](../../nex.md)` (arrays, `spawn`, channels, `realtime fn`, matrix types, resource tracking) **extend** Core v0. Until they are specified in this `docs/language/` tree, they are **not** part of the normative Core v0 grammar.
 
 ---
 
 ## Summary
 
-| Topic | Core v0 rule |
-| ----- | ------------ |
-| Top level | Declarations only (`fn`, `const`) |
-| Entry | `fn main() -> void` or `fn main() -> i32` for executables |
-| Statements | `;` terminated; no top-level statements |
-| Integers | Fixed-width signed/unsigned; wrapping arithmetic; compile-time overflow diagnostics |
-| Conditions | `bool` or integer (zero / nonzero) |
-| Bindings | `let`, `let mut`, `const` (compile-time) |
-| `const` | Not JS `const`; compile-time constant only |
-| Tooling | `--dump-tokens`, `--dump-ast`; Graphviz optional |
+
+| Topic      | Core v0 rule                                                                        |
+| ---------- | ----------------------------------------------------------------------------------- |
+| Top level  | Declarations only (`fn`, `const`)                                                   |
+| Entry      | `fn main() -> void` or `fn main() -> i32` for executables                           |
+| Statements | `;` terminated; no top-level statements                                             |
+| Integers   | Fixed-width signed/unsigned; wrapping arithmetic; compile-time overflow diagnostics |
+| Conditions | `bool` or integer (zero / nonzero)                                                  |
+| Bindings   | `let`, `let mut`, `const` (compile-time)                                            |
+| `const`    | Not JS `const`; compile-time constant only                                          |
+| Tooling    | `--dump-tokens`, `--dump-ast`; Graphviz optional                                    |
+
+

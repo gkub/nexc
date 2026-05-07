@@ -59,9 +59,12 @@ nex.md      Living project overview and AI/context document
 
 ## Key Documents
 
-- [`docs/language/core_v0.md`](./docs/language/core_v0.md) — normative **Core v0** language (first compiler milestone)
-- [`nex.md`](./nex.md) — living project overview and language-planning context
-- [`docs/design/optimization_goals.md`](./docs/design/optimization_goals.md) — optimization and static-analysis goals
+- `[docs/language/core_v0.md](./docs/language/core_v0.md)` — normative **Core v0** language (first compiler milestone)
+- `[docs/design/frontend_contract.md](./docs/design/frontend_contract.md)` — lexer/parser/AST contract for the first frontend implementation
+- `[docs/design/frontend_walkthrough.md](./docs/design/frontend_walkthrough.md)` — educational walkthrough of the current frontend code
+- `[docs/user/frontend.md](./docs/user/frontend.md)` — practical guide for `--dump-tokens` and `--dump-ast`
+- `[nex.md](./nex.md)` — living project overview and language-planning context
+- `[docs/design/optimization_goals.md](./docs/design/optimization_goals.md)` — optimization and static-analysis goals
 
 ## Language Direction
 
