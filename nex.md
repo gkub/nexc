@@ -183,6 +183,8 @@ Features should be defined in writing before implementation. A feature should ge
 
 The language definition should not accidentally emerge from whatever the compiler happens to implement first.
 
+The first **normative** slice of the grammar and semantics is **[`docs/language/core_v0.md`](./docs/language/core_v0.md)** (scalar types, functions, control flow, `let` / `mut` / `const`, entry point, and tooling hooks). Phases below remain the roadmap; Core v0 is what the initial lexer, parser, and semantic pass implement.
+
 ---
 
 # Intended Language Characteristics
@@ -355,6 +357,8 @@ Normal builds should have minimal overhead. Debug/profile builds may enable inst
 
 ## Phase 1 — Minimal Scalar Language
 
+Concrete syntax, types, overflow rules, and entry-point requirements for this phase are specified in [`docs/language/core_v0.md`](./docs/language/core_v0.md).
+
 Features:
 
 - functions
@@ -377,6 +381,8 @@ fn square(x: i32) -> i32 {
 
 ## Phase 2 — Control Flow
 
+Specified in Core v0 ([`docs/language/core_v0.md`](./docs/language/core_v0.md)).
+
 Features:
 
 - if/else
@@ -395,6 +401,8 @@ if (x > 0) {
 ---
 
 ## Phase 3 — Mutable Variables
+
+Specified in Core v0 ([`docs/language/core_v0.md`](./docs/language/core_v0.md)).
 
 Features:
 
@@ -627,7 +635,7 @@ Examples:
 - MatrixTypeExpr
 - ChannelTypeExpr
 
-AST dumping should exist early for debugging.
+AST dumping should exist early for debugging: a textual tree from the compiler, and optionally **Graphviz** (`dot`) output to render expression and statement structure as a graph.
 
 Example:
 

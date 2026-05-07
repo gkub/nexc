@@ -55,11 +55,13 @@ Before serious optimization, the compiler needs:
 - tokenization
 - parsing
 - AST construction
-- AST dumping
+- AST dumping (textual tree; optional Graphviz `dot` output for visualization)
 - basic type checking
 - scoped symbol tables
 - mutability checking
 - return checking
+
+**Integer semantics** for constant folding and literal handling follow the Core language definition: fixed-width two’s-complement types, **defined wrapping** at runtime for both signed and unsigned operations, and **compile-time diagnostics** for overflow in constant expressions. See [`docs/language/core_v0.md`](../language/core_v0.md) §5.
 
 Early optimization should not obscure correctness.
 
@@ -85,7 +87,7 @@ can be treated as:
 let x: i32 = 14;
 ```
 
-This requires type-aware literal handling and clear integer overflow semantics.
+This requires type-aware literal handling; overflow rules are defined in [`docs/language/core_v0.md`](../language/core_v0.md) §5 (no undefined overflow; wrapping arithmetic; compile-time overflow diagnostics for constants).
 
 ## Constant Propagation
 

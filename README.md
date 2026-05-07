@@ -47,6 +47,8 @@ Source code
 
 ```txt
 docs/       Language specification and design notes
+  language/ Normative language slices (e.g. Core v0)
+  design/   Architecture, optimization, implementation strategy
 examples/   Example NEX programs
 src/        Compiler implementation
 include/    Public/internal C++ headers
@@ -57,6 +59,7 @@ nex.md      Living project overview and AI/context document
 
 ## Key Documents
 
+- [`docs/language/core_v0.md`](./docs/language/core_v0.md) — normative **Core v0** language (first compiler milestone)
 - [`nex.md`](./nex.md) — living project overview and language-planning context
 - [`docs/design/optimization_goals.md`](./docs/design/optimization_goals.md) — optimization and static-analysis goals
 
