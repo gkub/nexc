@@ -47,6 +47,7 @@ Useful inspection commands:
 ./nexc.sh tokens examples/minimal.nexs
 ./nexc.sh check-file examples/hello.nexs
 ./nexc.sh ast examples/add.nexs
+./nexc.sh ir examples/add.nexs
 ./nexc.sh ast-graph examples/add.nexs
 ./nexc.sh check-file examples/add.nexs
 ```
@@ -65,6 +66,7 @@ Source code
 → Parser  
 → AST  
 → Semantic analysis  
+→ typed IR  
 → MLIR generation  
 → MLIR lowering  
 → LLVM IR  
@@ -90,6 +92,7 @@ nex.md      Living project overview and AI/context document
 - [docs/language/core_v0.md](./docs/language/core_v0.md) - normative **Core v0** language (first compiler milestone)
 - [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md) - beginner guide for writing current nex programs
 - [docs/design/frontend_contract.md](./docs/design/frontend_contract.md) - lexer/parser/AST contract for the first frontend implementation
+- [docs/design/core_v0_typed_ir.md](./docs/design/core_v0_typed_ir.md) - design note for the first backend-facing typed IR
 - [NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md) - educational guide to the compiler as it grows
 - [docs/user/frontend.md](./docs/user/frontend.md) - practical guide for frontend inspection and semantic checking
 - [nex.md](./nex.md) - living project overview and language-planning context

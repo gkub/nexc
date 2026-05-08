@@ -1,0 +1,6 @@
+Module
+  Function @main() -> void
+    Block
+      %0: str = StringLiteral "Hello, world!"
+      Call @builtin.println(%0)
+      Return

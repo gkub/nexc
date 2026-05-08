@@ -6,10 +6,10 @@ It is an index, not a full spec.
 ## Current Project State
 
 `nexc` is a C++ compiler project for the nex language. The current implementation
-is a **checked Core v0 frontend**:
+is a **checked Core v0 frontend with typed IR dumps**:
 
 ```text
-source -> lexer -> tokens -> parser -> AST -> semantic analysis
+source -> lexer -> tokens -> parser -> AST -> semantic analysis -> typed IR
 ```
 
 Current frontend capabilities:
@@ -19,6 +19,7 @@ Current frontend capabilities:
 - AST Graphviz DOT dumping: `./nexc.sh ast-dot <file.nexs>`
 - AST Graphviz DOT + SVG generation: `./nexc.sh ast-graph <file.nexs> [prefix]`
 - semantic checking: `./nexc.sh check-file <file.nexs>`
+- typed IR dumping: `./nexc.sh ir <file.nexs>`
 
 Not implemented yet:
 
@@ -47,6 +48,7 @@ Useful one-file commands:
 ./nexc.sh check-file examples/hello.nexs
 ./nexc.sh tokens examples/hello.nexs
 ./nexc.sh ast examples/hello.nexs
+./nexc.sh ir examples/hello.nexs
 ./nexc.sh ast-graph examples/hello.nexs
 ```
 
@@ -61,9 +63,11 @@ Useful one-file commands:
 | Normative Core v0 language rules | [docs/language/core_v0.md](./docs/language/core_v0.md) |
 | Educational compiler guide | [NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md) |
 | Frontend implementation contract | [docs/design/frontend_contract.md](./docs/design/frontend_contract.md) |
+| Core v0 typed IR design note | [docs/design/core_v0_typed_ir.md](./docs/design/core_v0_typed_ir.md) |
 | Optimization / analysis direction | [docs/design/optimization_goals.md](./docs/design/optimization_goals.md) |
 | Lexer/parser/AST/semantic headers | [include/nexc/frontend/](./include/nexc/frontend/) |
 | Frontend implementation | [src/frontend/](./src/frontend/) |
+| Typed IR model, builder, dumper | [include/nexc/ir/](./include/nexc/ir/), [src/ir/](./src/ir/) |
 | CLI driver | [src/tools/nexc/main.cpp](./src/tools/nexc/main.cpp) |
 | Example nex programs | [examples/](./examples/) |
 | Invalid/semantic test fixtures | [tests/](./tests/) |
@@ -99,6 +103,7 @@ Current categories:
 
 - smoke tests for token/AST dumping
 - golden output tests for tokens, AST, Graphviz DOT, and selected diagnostics
+- golden output tests for typed IR dumps
 - parser-negative fixtures
 - semantic success fixtures
 - semantic-negative fixtures
@@ -111,11 +116,15 @@ Run them with:
 
 ## Near-Term Direction
 
-The next major discussion is backend/IR strategy. Options to consider:
+The next major implementation direction is lowering from the tiny typed IR. See
+[docs/design/core_v0_typed_ir.md](./docs/design/core_v0_typed_ir.md).
 
-1. A tiny nex typed IR before MLIR/LLVM.
-2. Direct textual LLVM IR for a very small subset.
-3. First MLIR generation for Core v0 scalar programs.
+Recommended next slice:
+
+1. Keep IR golden tests growing as Core v0 grows.
+2. Choose an initial lowering target: MLIR `func`/`arith`/`scf` or tiny textual LLVM IR.
+3. Lower `fn main() -> i32 { return 42; }`.
+4. Add runtime strategy only after scalar lowering is clear.
 
 Before or during that, keep docs updated:
 
@@ -129,6 +138,11 @@ Before or during that, keep docs updated:
 - Do not jump to MLIR/LLVM before checking current frontend assumptions.
 - Keep parser syntax checks separate from semantic meaning checks.
 - Prefer small, well-documented compiler stages.
+- Treat this compiler as an educational resource first: public headers and
+  nontrivial source files should have thorough comments explaining what each
+  compiler concept is, why it exists, and how it connects to the surrounding
+  stage. Do not leave new compiler structures as uncommented production-style
+  data bags.
 - Add tests with every behavior change.
 - Keep `NEXC_HOLY_BOOK.md` educational, not just a changelog.
 - Keep user docs free of compiler-internal jargon unless it helps explain an error.

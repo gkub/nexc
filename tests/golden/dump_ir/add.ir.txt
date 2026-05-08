@@ -1,0 +1,20 @@
+Module
+  Const @N: i32
+    Block
+      %0: i32 = IntegerLiteral 4
+      InitValue %0
+  Function @add($0 a: i32, $1 b: i32) -> i32
+    Locals
+      $0 a: i32 parameter
+      $1 b: i32 parameter
+    Block
+      %0: i32 = LoadLocal $0
+      %1: i32 = LoadLocal $1
+      %2: i32 = Binary Plus %0, %1
+      ReturnValue %2
+  Function @main() -> i32
+    Block
+      %0: i32 = LoadConst @N
+      %1: i32 = IntegerLiteral 38
+      %2: i32 = Call @add(%0, %1)
+      ReturnValue %2

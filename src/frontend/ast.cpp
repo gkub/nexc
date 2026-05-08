@@ -7,6 +7,11 @@ namespace nexc {
 
 namespace {
 
+// AstDumper prints the AST as an indented tree.
+//
+// This view is intentionally source-shaped: it shows parser output before name
+// resolution, type checking, or IR lowering. That makes it useful when learning
+// whether the parser understood a piece of syntax the way we expected.
 class AstDumper {
 public:
     explicit AstDumper(std::ostream& out) : out_(out) {}
@@ -22,6 +27,8 @@ public:
 
 private:
     void line(std::string_view text) {
+        // The text dump uses spaces rather than tree-drawing characters so the
+        // golden files stay plain ASCII and easy to update by hand.
         for (int i = 0; i < indent_; ++i) {
             out_ << ' ';
         }
@@ -29,6 +36,9 @@ private:
     }
 
     void dumpItem(const Item& item) {
+        // AST nodes are stored through base-class pointers, so dumping uses
+        // dynamic_cast to recover the concrete node type. This is simple and
+        // explicit for a small educational AST.
         if (const auto* function = dynamic_cast<const FunctionDecl*>(&item)) {
             line("FunctionDecl " + function->name);
             indent_ += 2;
@@ -138,6 +148,9 @@ private:
     }
 
     void dumpExpr(const Expr& expr) {
+        // The dumper preserves source-level expression shape. For example,
+        // ParenExpr is printed even though later semantic/IR stages can usually
+        // ignore parentheses.
         if (const auto* integer = dynamic_cast<const IntegerLiteralExpr*>(&expr)) {
             line("IntegerLiteral " + integer->raw);
             return;
@@ -209,6 +222,8 @@ std::string dotEscape(std::string_view text) {
     escaped.reserve(text.size());
 
     for (const char c : text) {
+        // DOT labels use quoted strings, so characters that are meaningful to
+        // DOT must be escaped before writing the graph.
         switch (c) {
         case '\\':
             escaped += "\\\\";
@@ -228,6 +243,9 @@ std::string dotEscape(std::string_view text) {
     return escaped;
 }
 
+// AstDotDumper emits the same AST shape as a Graphviz graph. The graph is useful
+// when expression nesting or control-flow nesting is easier to understand
+// visually than in the compact text dump.
 class AstDotDumper {
 public:
     explicit AstDotDumper(std::ostream& out) : out_(out) {}
@@ -248,12 +266,16 @@ public:
 
 private:
     std::size_t node(std::string_view label) {
+        // Node IDs are synthetic and local to one graph. Labels carry the
+        // educational content; IDs only let DOT connect edges.
         const std::size_t id = nextId_++;
         out_ << "  n" << id << " [label=\"" << dotEscape(label) << "\"];\n";
         return id;
     }
 
     void edge(std::size_t from, std::size_t to, std::string_view label = {}) {
+        // Edge labels identify child roles such as `condition`, `then`, or
+        // `body` where the relationship is not obvious from node order alone.
         out_ << "  n" << from << " -> n" << to;
         if (!label.empty()) {
             out_ << " [label=\"" << dotEscape(label) << "\"]";
@@ -401,6 +423,8 @@ private:
 } // namespace
 
 std::string_view builtinTypeName(BuiltinTypeKind kind) {
+    // This spelling is shared by AST dumps, diagnostics, and IR dumps. Keeping
+    // it centralized prevents drift between compiler stages.
     switch (kind) {
     case BuiltinTypeKind::I8:
         return "i8";

@@ -1,0 +1,13 @@
+Module
+  Function @main() -> i32
+    Block
+      %0: bool = BoolLiteral true
+      If %0
+        Then
+          Block
+            %1: i32 = IntegerLiteral 1
+            ReturnValue %1
+        Else
+          Block
+            %2: i32 = IntegerLiteral 0
+            ReturnValue %2

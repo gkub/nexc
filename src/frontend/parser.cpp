@@ -11,6 +11,8 @@ Parser::Parser(const SourceFile& source, std::span<const Token> tokens,
 TranslationUnit Parser::parseTranslationUnit() {
     TranslationUnit unit;
 
+    // The translation unit is the parser's root. Core v0 accepts only top-level
+    // items here, so each loop iteration should consume one `fn` or `const`.
     while (!isAtEnd()) {
         if (std::unique_ptr<Item> item = parseItem()) {
             unit.items.push_back(std::move(item));
@@ -27,6 +29,8 @@ TranslationUnit Parser::parseTranslationUnit() {
 const Token& Parser::peek(std::size_t offset) const {
     const std::size_t index = current_ + offset;
     if (index >= tokens_.size()) {
+        // The lexer always appends EOF. Returning it for out-of-range lookahead
+        // lets parser code ask for peek(1) without special vector-bound checks.
         return tokens_.back();
     }
     return tokens_[index];
@@ -73,6 +77,9 @@ Token Parser::expect(TokenKind kind, std::string_view message) {
 }
 
 std::unique_ptr<Item> Parser::parseItem() {
+    // Top-level parsing is intentionally strict. A stray statement at module
+    // scope should be diagnosed as an item-level error, not parsed and rejected
+    // later by semantic analysis.
     if (check(TokenKind::KwFn)) {
         return parseFunctionDecl();
     }
@@ -87,6 +94,8 @@ std::unique_ptr<Item> Parser::parseItem() {
 }
 
 std::unique_ptr<FunctionDecl> Parser::parseFunctionDecl() {
+    // Function parsing follows the concrete source order:
+    // `fn name(params) -> return_type body`.
     const Token fn = expect(TokenKind::KwFn, "expected `fn`");
     const Token name = expect(TokenKind::Identifier, "expected function name");
     expect(TokenKind::LeftParen, "expected `(` after function name");
@@ -103,6 +112,9 @@ std::unique_ptr<FunctionDecl> Parser::parseFunctionDecl() {
 }
 
 std::unique_ptr<ConstDecl> Parser::parseConstDecl() {
+    // Core v0 constants are module-level only. The parser handles that by only
+    // calling this routine from parseItem(); inner `const` is rejected in
+    // parseStmt().
     const Token keyword = expect(TokenKind::KwConst, "expected `const`");
     const Token name = expect(TokenKind::Identifier, "expected constant name");
     expect(TokenKind::Colon, "expected `:` after constant name");
@@ -178,6 +190,8 @@ std::unique_ptr<BlockStmt> Parser::parseBlockStmt() {
         if (std::unique_ptr<Stmt> stmt = parseStmt()) {
             block->statements.push_back(std::move(stmt));
         } else if (!check(TokenKind::RightBrace)) {
+            // Minimal recovery: consume one token after a failed statement so
+            // the parser can keep looking for the closing brace.
             advance();
         }
     }
@@ -188,6 +202,8 @@ std::unique_ptr<BlockStmt> Parser::parseBlockStmt() {
 }
 
 std::unique_ptr<Stmt> Parser::parseStmt() {
+    // Statement dispatch is based on the first token. This is recursive descent:
+    // each source construct has a small parser routine that mirrors the grammar.
     if (check(TokenKind::LeftBrace)) {
         return parseBlockStmt();
     }
@@ -220,6 +236,8 @@ std::unique_ptr<Stmt> Parser::parseStmt() {
 }
 
 std::unique_ptr<Stmt> Parser::parseLetStmt() {
+    // `let mut` is represented as one LetStmt node with an isMutable flag. The
+    // parser records the syntax; semantic analysis enforces assignment rules.
     const Token keyword = expect(TokenKind::KwLet, "expected `let`");
     const bool isMutable = match(TokenKind::KwMut);
     const Token name = expect(TokenKind::Identifier, "expected local name");
@@ -239,6 +257,7 @@ std::unique_ptr<Stmt> Parser::parseReturnStmt() {
     const Token keyword = expect(TokenKind::KwReturn, "expected `return`");
 
     if (match(TokenKind::Semicolon)) {
+        // `return;` is represented by a ReturnStmt with no value expression.
         return std::make_unique<ReturnStmt>(
             SourceSpan{.start = keyword.span.start, .end = previous().span.end},
             nullptr);
@@ -383,6 +402,8 @@ std::unique_ptr<Expr> Parser::parsePostfixExpr() {
 }
 
 std::unique_ptr<Expr> Parser::parsePrimaryExpr() {
+    // Primary expressions are the leaves of the expression grammar: literals,
+    // names, and parenthesized subexpressions.
     if (match(TokenKind::IntegerLiteral)) {
         const Token token = previous();
         return std::make_unique<IntegerLiteralExpr>(token.span, tokenText(token));
@@ -418,6 +439,8 @@ std::unique_ptr<Expr> Parser::parsePrimaryExpr() {
 
     diagnostics_.error(peek().span, "expected expression");
     const Token token = advance();
+    // Return a placeholder expression so callers can keep building a partial
+    // tree after reporting the syntax error.
     return std::make_unique<NameExpr>(token.span, "<error>");
 }
 

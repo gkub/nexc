@@ -14,6 +14,11 @@ namespace nexc {
 
 namespace {
 
+// Semantic Type is deliberately separate from TypeSyntax.
+//
+// TypeSyntax records what the parser saw in source. Type is the semantic pass's
+// meaning-level view: it answers questions such as "is this an integer?" and
+// "is this void?" without exposing parser details to every check.
 struct Type {
     BuiltinTypeKind kind = BuiltinTypeKind::Invalid;
 
@@ -45,6 +50,8 @@ struct Type {
 };
 
 bool sameType(Type left, Type right) {
+    // Invalid types are treated as compatible so one earlier error does not
+    // cascade into many redundant "type mismatch" diagnostics.
     return left.kind == right.kind || left.isInvalid() || right.isInvalid();
 }
 
@@ -57,9 +64,13 @@ Type typeFromSyntax(TypeSyntax syntax) {
 }
 
 bool canBeCondition(Type type) {
+    // Core v0 allows bool and integer conditions. Invalid is accepted here only
+    // to avoid cascading diagnostics after an expression already failed.
     return type.isBool() || type.isInteger() || type.isInvalid();
 }
 
+// FunctionSymbol is the semantic table entry for a function name. It stores only
+// the signature facts needed to check calls and `main`.
 struct FunctionSymbol {
     SourceSpan nameSpan;
     std::vector<Type> parameterTypes;
@@ -67,6 +78,9 @@ struct FunctionSymbol {
     bool isBuiltin = false;
 };
 
+// ValueSymbol is the semantic table entry for a value-like name: locals,
+// parameters, and module constants. Functions intentionally live in a separate
+// table because Core v0 does not let functions be used as first-class values.
 struct ValueSymbol {
     Type type;
     bool isMutable = false;
@@ -74,6 +88,11 @@ struct ValueSymbol {
     SourceSpan nameSpan;
 };
 
+// ExprInfo is the result of semantically analyzing an expression.
+//
+// It carries the expression type and the tiny amount of constant-evaluation
+// state needed for current Core v0 checks. This is not yet a full constant-value
+// model; it only tracks unsigned integer payloads where that is enough.
 struct ExprInfo {
     Type type;
     bool isConstant = false;
@@ -81,6 +100,8 @@ struct ExprInfo {
 };
 
 std::optional<unsigned long long> parseUnsignedInteger(std::string_view raw) {
+    // The lexer already validated the surface spelling. Semantic analysis parses
+    // the value so it can check type ranges and simple constant expressions.
     int base = 10;
     if (raw.size() >= 2 && raw[0] == '0' && (raw[1] == 'x' || raw[1] == 'X')) {
         raw.remove_prefix(2);
@@ -98,6 +119,8 @@ std::optional<unsigned long long> parseUnsignedInteger(std::string_view raw) {
 }
 
 unsigned bitWidth(Type type) {
+    // Integer widths are needed for literal range checks and constant overflow
+    // diagnostics. Non-integer types return 0 because they have no integer range.
     switch (type.kind) {
     case BuiltinTypeKind::I8:
     case BuiltinTypeKind::U8:
@@ -122,6 +145,8 @@ unsigned bitWidth(Type type) {
 }
 
 bool isSigned(Type type) {
+    // Signedness only matters for integer types. Returning false for non-integers
+    // keeps helper code simple after callers have already checked isInteger().
     switch (type.kind) {
     case BuiltinTypeKind::I8:
     case BuiltinTypeKind::I16:
@@ -152,15 +177,27 @@ unsigned long long maxIntegerValue(Type type) {
         return std::numeric_limits<unsigned long long>::max();
     }
 
+    // Signed Core v0 integers use one sign bit, so the positive literal range is
+    // 2^(width - 1) - 1. Unsigned integers use all bits for the value.
     const unsigned valueBits = isSigned(type) ? width - 1 : width;
     return (1ULL << valueBits) - 1;
 }
 
+// AnalyzerImpl owns one semantic-analysis run.
+//
+// The public SemanticAnalyzer class is a thin stable API. Keeping the mutable
+// implementation here lets the pass use scoped symbol tables and current
+// function state without exposing those details in the header.
 class AnalyzerImpl {
 public:
     explicit AnalyzerImpl(DiagnosticBag& diagnostics) : diagnostics_(diagnostics) {}
 
     void analyze(const TranslationUnit& unit) {
+        // Analysis has two broad phases:
+        //
+        // 1. collect top-level names and signatures so calls can reference
+        //    functions declared later in the file
+        // 2. analyze constant/function bodies using those tables
         installBuiltins();
         collectItems(unit);
         validateMainIfPresent();
@@ -181,6 +218,9 @@ private:
         const Type voidType{.kind = BuiltinTypeKind::Void};
         const SourceSpan builtinSpan{};
 
+        // Built-ins enter the same function table as user functions so call
+        // checking can be uniform. `isBuiltin` lets us reject source attempts to
+        // redefine them.
         functions_["print"] = FunctionSymbol{
             .nameSpan = builtinSpan,
             .parameterTypes = {str},
@@ -196,6 +236,9 @@ private:
     }
 
     void collectItems(const TranslationUnit& unit) {
+        // This pass is intentionally shallow: inspect declarations and record
+        // names/signatures, but do not analyze initializer or body expressions
+        // yet. That supports forward function calls.
         for (const std::unique_ptr<Item>& item : unit.items) {
             if (const auto* function = dynamic_cast<const FunctionDecl*>(item.get())) {
                 declareTopLevel(function->name, function->nameSpan);
@@ -234,6 +277,7 @@ private:
     }
 
     void declareTopLevel(const std::string& name, SourceSpan span) {
+        // Functions and constants share one module namespace in Core v0.
         if (topLevelNames_.contains(name)) {
             diagnostics_.error(span, "duplicate top-level name `" + name + "`");
             diagnostics_.note(topLevelNames_[name],
@@ -244,6 +288,9 @@ private:
     }
 
     void validateMainIfPresent() {
+        // `main` is optional because a source file may be a library unit. If it
+        // exists, Core v0 restricts its shape so future execution has a clear
+        // entry convention.
         const auto it = functions_.find("main");
         if (it == functions_.end()) {
             return;
@@ -262,6 +309,9 @@ private:
     }
 
     void analyzeConstDecl(const ConstDecl& constant) {
+        // Module consts must be type-correct and compile-time evaluable. The
+        // current evaluator is deliberately small but already catches literals,
+        // booleans, strings, and basic integer arithmetic cases.
         ExprInfo init = analyzeExpr(*constant.init, typeFromSyntax(constant.type));
         if (!sameType(typeFromSyntax(constant.type), init.type)) {
             diagnostics_.error(constant.init->span,
@@ -277,12 +327,15 @@ private:
     }
 
     void analyzeFunction(const FunctionDecl& function) {
+        // Function analysis resets per-function state: return type, local scopes,
+        // and return-path tracking.
         currentReturnType_ = typeFromSyntax(function.returnType);
         sawReturnValue_ = false;
         scopes_.clear();
         pushScope();
 
         for (const ParameterSyntax& parameter : function.parameters) {
+            // Parameters behave like immutable locals inside the function body.
             declareLocal(parameter.name, parameter.nameSpan, typeFromSyntax(parameter.type),
                          false);
         }
@@ -290,6 +343,9 @@ private:
         const bool allPathsReturn = analyzeStmt(*function.body);
 
         if (!currentReturnType_.isVoid() && !allPathsReturn) {
+            // This is a simple structured return-path check. It knows that a
+            // block returns if some child returns, and an if returns only if both
+            // branches return. It does not yet reason about loop conditions.
             diagnostics_.error(function.nameSpan,
                                "not all paths in function `" + function.name +
                                    "` return a value of type `" +
@@ -304,6 +360,9 @@ private:
 
     void declareLocal(const std::string& name, SourceSpan span, Type type,
                       bool isMutable) {
+        // Duplicates are only rejected within the current lexical scope. Shadowing
+        // an outer local is allowed by this implementation unless the language
+        // spec later forbids it.
         auto& scope = scopes_.back();
         if (scope.contains(name)) {
             diagnostics_.error(span, "duplicate local name `" + name + "`");
@@ -321,6 +380,9 @@ private:
     }
 
     const ValueSymbol* lookupValue(const std::string& name) const {
+        // Lexical lookup walks from innermost scope outward, then falls back to
+        // module constants. Function names are handled separately by call
+        // analysis because functions are not values in Core v0.
         for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
             if (const auto it = scope->find(name); it != scope->end()) {
                 return &it->second;
@@ -336,6 +398,8 @@ private:
 
     bool analyzeStmt(const Stmt& stmt) {
         if (const auto* block = dynamic_cast<const BlockStmt*>(&stmt)) {
+            // Blocks introduce scopes. The returned bool summarizes whether
+            // control flow definitely returns somewhere in this structured block.
             pushScope();
             bool blockReturns = false;
             for (const std::unique_ptr<Stmt>& child : block->statements) {
@@ -347,6 +411,8 @@ private:
         }
 
         if (const auto* let = dynamic_cast<const LetStmt*>(&stmt)) {
+            // Analyze the initializer before declaring the local, so `let x: i32
+            // = x;` does not accidentally refer to the binding being declared.
             const Type declared = typeFromSyntax(let->type);
             ExprInfo init = analyzeExpr(*let->init, declared);
             if (!sameType(declared, init.type)) {
@@ -361,6 +427,8 @@ private:
         }
 
         if (const auto* assign = dynamic_cast<const AssignStmt*>(&stmt)) {
+            // Assignment checks three separate semantic facts: the name exists,
+            // the binding is mutable, and the assigned value has the right type.
             const ValueSymbol* symbol = lookupValue(assign->name);
             if (!symbol) {
                 diagnostics_.error(assign->nameSpan,
@@ -389,6 +457,8 @@ private:
         }
 
         if (const auto* ifStmt = dynamic_cast<const IfStmt*>(&stmt)) {
+            // For return-path analysis, an if expression returns only when both
+            // branches exist and both branches return.
             analyzeCondition(*ifStmt->condition, "`if` condition");
             const bool thenReturns = analyzeStmt(*ifStmt->thenBranch);
             bool elseReturns = false;
@@ -399,12 +469,17 @@ private:
         }
 
         if (const auto* whileStmt = dynamic_cast<const WhileStmt*>(&stmt)) {
+            // This first analyzer does not prove loops execute, so while never
+            // counts as a guaranteed return path.
             analyzeCondition(*whileStmt->condition, "`while` condition");
             analyzeStmt(*whileStmt->body);
             return false;
         }
 
         if (const auto* callStmt = dynamic_cast<const CallStmt*>(&stmt)) {
+            // Parser syntax allows any call expression as a statement. Semantic
+            // analysis enforces the Core v0 rule that only void call results may
+            // be discarded.
             ExprInfo call = analyzeCallExpr(*callStmt->call);
             if (!call.type.isVoid() && !call.type.isInvalid()) {
                 diagnostics_.error(callStmt->span,
@@ -419,6 +494,7 @@ private:
 
     void analyzeReturn(const ReturnStmt& ret) {
         if (!ret.value) {
+            // Bare `return;` is only valid in void functions.
             if (!currentReturnType_.isVoid()) {
                 diagnostics_.error(ret.span,
                                    "non-void function must return a value of type `" +
@@ -428,6 +504,7 @@ private:
         }
 
         if (currentReturnType_.isVoid()) {
+            // A void function may return, but it may not return a value.
             diagnostics_.error(ret.value->span,
                                "`void` function cannot return a value");
             analyzeExpr(*ret.value, std::nullopt);
@@ -445,6 +522,9 @@ private:
     }
 
     void analyzeCondition(const Expr& condition, std::string_view label) {
+        // Conditions deliberately do not pass an expected type. Integer and bool
+        // are both accepted in Core v0, so the expression should choose its
+        // natural/default type before canBeCondition checks it.
         ExprInfo info = analyzeExpr(condition, std::nullopt);
         if (!canBeCondition(info.type)) {
             diagnostics_.error(condition.span,
@@ -456,6 +536,8 @@ private:
 
     ExprInfo analyzeExpr(const Expr& expr, std::optional<Type> expected) {
         if (const auto* integer = dynamic_cast<const IntegerLiteralExpr*>(&expr)) {
+            // Unsuffixed integer literals get their type from context when there
+            // is one, otherwise they default to i32 for Core v0.
             Type type = expected.value_or(Type{.kind = BuiltinTypeKind::I32});
             if (!type.isInteger()) {
                 diagnostics_.error(expr.span,
@@ -489,6 +571,9 @@ private:
         }
 
         if (const auto* name = dynamic_cast<const NameExpr*>(&expr)) {
+            // A bare name must resolve to a value-like symbol. If it matches a
+            // function, report that more specific mistake instead of a generic
+            // undefined-name error.
             const ValueSymbol* symbol = lookupValue(name->name);
             if (!symbol) {
                 if (functions_.contains(name->name)) {
@@ -517,6 +602,8 @@ private:
         }
 
         if (const auto* paren = dynamic_cast<const ParenExpr*>(&expr)) {
+            // Parentheses affect parsing but not semantic type, so forward the
+            // expected type into the inner expression.
             return analyzeExpr(*paren->inner, expected);
         }
 
@@ -526,6 +613,8 @@ private:
     ExprInfo analyzeCallExpr(const CallExpr& call) {
         const auto* callee = dynamic_cast<const NameExpr*>(call.callee.get());
         if (!callee) {
+            // The AST can represent a general callee expression, but Core v0
+            // only allows direct calls by function name.
             diagnostics_.error(call.callee->span,
                                "callee must be a function name in Core v0");
             for (const std::unique_ptr<Expr>& argument : call.arguments) {
@@ -536,6 +625,8 @@ private:
 
         const auto function = functions_.find(callee->name);
         if (function == functions_.end()) {
+            // Still analyze arguments after an unknown callee so diagnostics
+            // inside the argument expressions are not hidden.
             diagnostics_.error(callee->span,
                                "undefined function `" + callee->name + "`");
             for (const std::unique_ptr<Expr>& argument : call.arguments) {
@@ -556,6 +647,9 @@ private:
         const std::size_t count =
             std::min(call.arguments.size(), symbol.parameterTypes.size());
         for (std::size_t i = 0; i < count; ++i) {
+            // Passing each parameter type as the expected expression type lets
+            // integer literals be checked in the context of the function
+            // signature, e.g. f(u8) constrains `f(255)`.
             const Type expected = symbol.parameterTypes[i];
             ExprInfo actual = analyzeExpr(*call.arguments[i], expected);
             if (!sameType(expected, actual.type)) {
@@ -576,6 +670,8 @@ private:
 
     ExprInfo analyzeUnaryExpr(const UnaryExpr& unary, std::optional<Type> expected) {
         if (unary.op == TokenKind::Bang) {
+            // `!` always produces bool. Core v0 accepts either bool or integer
+            // operands as condition-like values.
             ExprInfo operand = analyzeExpr(*unary.operand, std::nullopt);
             if (!canBeCondition(operand.type)) {
                 diagnostics_.error(unary.operand->span,
@@ -587,6 +683,8 @@ private:
         }
 
         if (unary.op == TokenKind::Minus) {
+            // Unary minus defaults integer literals to i32 unless an outer
+            // expression or declaration provides a more specific expected type.
             Type expectedInteger = expected.value_or(Type{.kind = BuiltinTypeKind::I32});
             ExprInfo operand = analyzeExpr(*unary.operand, expectedInteger);
             if (!operand.type.isInteger()) {
@@ -602,6 +700,8 @@ private:
 
     ExprInfo analyzeBinaryExpr(const BinaryExpr& binary, std::optional<Type> expected) {
         if (binary.op == TokenKind::AmpAmp || binary.op == TokenKind::PipePipe) {
+            // Logical binary operators are condition-like on both sides and
+            // always produce bool.
             ExprInfo left = analyzeExpr(*binary.left, std::nullopt);
             ExprInfo right = analyzeExpr(*binary.right, std::nullopt);
             if (!canBeCondition(left.type)) {
@@ -616,6 +716,9 @@ private:
                             .isConstant = left.isConstant && right.isConstant};
         }
 
+        // For arithmetic/comparison/equality, infer/check the left side first,
+        // then use its type as context for the right. This keeps literals like
+        // `x + 1` typed consistently with `x`.
         ExprInfo left = analyzeExpr(*binary.left, expected);
         ExprInfo right = analyzeExpr(*binary.right, left.type);
 
@@ -650,9 +753,13 @@ private:
         }
 
         if (arithmetic) {
+            // Arithmetic keeps the operand type. If both sides are constant, the
+            // helper below also performs the small Core v0 overflow checks.
             return analyzeConstantArithmetic(binary, left, right);
         }
         if (comparison || equality) {
+            // Comparisons and equality produce bool even when their operands are
+            // integers.
             return ExprInfo{.type = Type{.kind = BuiltinTypeKind::Bool},
                             .isConstant = left.isConstant && right.isConstant};
         }
@@ -662,6 +769,9 @@ private:
 
     ExprInfo analyzeConstantArithmetic(const BinaryExpr& binary, ExprInfo left,
                                        ExprInfo right) {
+        // This is intentionally not a full constant evaluator. It only evaluates
+        // simple unsigned integer payloads far enough to diagnose overflow and
+        // division/remainder by zero in current Core v0 tests.
         ExprInfo result{
             .type = left.type,
             .isConstant = left.isConstant && right.isConstant,
@@ -677,6 +787,8 @@ private:
         const unsigned long long max = maxIntegerValue(left.type);
 
         auto overflow = [&]() {
+            // Report overflow at the whole binary expression because the problem
+            // is created by the operation, not by either operand alone.
             diagnostics_.error(binary.span,
                                "constant expression overflows type `" +
                                    typeName(left.type) + "`");
@@ -732,6 +844,9 @@ private:
     }
 
     void checkIntegerLiteralRange(const IntegerLiteralExpr& literal, Type type) {
+        // Literal range checks use the selected semantic type. The same spelling
+        // can be valid in one context and invalid in another, e.g. `255` for u8
+        // vs i8.
         const std::optional<unsigned long long> value =
             parseUnsignedInteger(literal.raw);
         if (!value) {
@@ -747,10 +862,18 @@ private:
     }
 
     DiagnosticBag& diagnostics_;
+
+    // Top-level namespace shared by functions and module constants.
     std::unordered_map<std::string, SourceSpan> topLevelNames_;
+
+    // Function and global value tables collected before body analysis.
     std::unordered_map<std::string, FunctionSymbol> functions_;
     std::unordered_map<std::string, ValueSymbol> globals_;
+
+    // Lexical local scopes for the function currently being analyzed.
     std::vector<std::unordered_map<std::string, ValueSymbol>> scopes_;
+
+    // Current function state used while analyzing return statements.
     Type currentReturnType_;
     bool sawReturnValue_ = false;
 };

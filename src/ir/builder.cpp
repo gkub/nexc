@@ -1,0 +1,610 @@
+#include "nexc/ir/builder.h"
+
+#include <algorithm>
+#include <stdexcept>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+
+namespace nexc::ir {
+
+namespace {
+
+// The builder needs function signatures before it can lower function bodies,
+// because a call expression must know the expected argument types and the result
+// type. This mirrors the semantic analyzer's top-level collection pass.
+struct FunctionSignature {
+    std::vector<Type> parameterTypes;
+    Type returnType;
+    bool isBuiltin = false;
+};
+
+// ValueSymbol is the builder's resolved answer for a source name used as a
+// value. It can represent either a function local slot or a module-level const.
+struct ValueSymbol {
+    Type type;
+    LocalRef local;
+    bool isConst = false;
+};
+
+Type typeFromSyntax(TypeSyntax syntax) {
+    return Type{.kind = syntax.kind};
+}
+
+// TypedIrBuilder owns the stateful AST walk that emits one IR module.
+//
+// The builder is intentionally private to this .cpp file. The public API is the
+// simpler buildTypedIr() function in builder.h; callers should not depend on the
+// builder's temporary symbol tables or current-block pointers.
+class TypedIrBuilder {
+public:
+    Module build(const TranslationUnit& unit) {
+        // Built-ins and user-defined top-level declarations must be known before
+        // any body is lowered, otherwise calls and const references could not be
+        // resolved into typed IR operations.
+        installBuiltins();
+        collectTopLevelSymbols(unit);
+
+        Module module;
+
+        for (const std::unique_ptr<Item>& item : unit.items) {
+            if (const auto* constant = dynamic_cast<const ConstDecl*>(item.get())) {
+                module.constants.push_back(buildConst(*constant));
+            } else if (const auto* function =
+                           dynamic_cast<const FunctionDecl*>(item.get())) {
+                module.functions.push_back(buildFunction(*function));
+            }
+        }
+
+        return module;
+    }
+
+private:
+    void installBuiltins() {
+        const Type str{.kind = BuiltinTypeKind::Str};
+        const Type voidType{.kind = BuiltinTypeKind::Void};
+
+        functions_["print"] = FunctionSignature{
+            .parameterTypes = {str},
+            .returnType = voidType,
+            .isBuiltin = true,
+        };
+        functions_["println"] = FunctionSignature{
+            .parameterTypes = {str},
+            .returnType = voidType,
+            .isBuiltin = true,
+        };
+    }
+
+    // Collect just enough top-level information for IR construction. Semantic
+    // analysis already diagnosed duplicates, bad main shapes, and bad calls; the
+    // builder only needs the accepted symbol facts.
+    void collectTopLevelSymbols(const TranslationUnit& unit) {
+        for (const std::unique_ptr<Item>& item : unit.items) {
+            if (const auto* constant = dynamic_cast<const ConstDecl*>(item.get())) {
+                constants_[constant->name] = typeFromSyntax(constant->type);
+                continue;
+            }
+
+            if (const auto* function = dynamic_cast<const FunctionDecl*>(item.get())) {
+                std::vector<Type> parameterTypes;
+                parameterTypes.reserve(function->parameters.size());
+                for (const ParameterSyntax& parameter : function->parameters) {
+                    parameterTypes.push_back(typeFromSyntax(parameter.type));
+                }
+
+                functions_[function->name] = FunctionSignature{
+                    .parameterTypes = std::move(parameterTypes),
+                    .returnType = typeFromSyntax(function->returnType),
+                };
+            }
+        }
+    }
+
+    Const buildConst(const ConstDecl& decl) {
+        Const constant{
+            .name = decl.name,
+            .type = typeFromSyntax(decl.type),
+            .span = decl.span,
+            .initializer = Block{.span = decl.init->span},
+        };
+
+        // A const initializer has its own temporary value namespace. It is not
+        // inside a function, so currentFunction_ stays null while makeValue()
+        // increments constant.nextValueId.
+        currentConst_ = &constant;
+        currentFunction_ = nullptr;
+        currentBlock_ = &constant.initializer;
+        scopes_.clear();
+
+        const ValueRef init = buildExpr(*decl.init, constant.type);
+        constant.initializer.terminator = Terminator{
+            .kind = Terminator::Kind::InitValue,
+            .span = decl.init->span,
+            .value = init,
+        };
+
+        currentBlock_ = nullptr;
+        currentConst_ = nullptr;
+        return constant;
+    }
+
+    Function buildFunction(const FunctionDecl& decl) {
+        Function function{
+            .name = decl.name,
+            .returnType = typeFromSyntax(decl.returnType),
+            .span = decl.span,
+            .body = Block{.span = decl.body->span},
+        };
+
+        // Function construction owns local slots and temporary value IDs. The
+        // current* pointers let small emission helpers append to the function
+        // currently being built without threading many references through every
+        // recursive call.
+        currentFunction_ = &function;
+        currentConst_ = nullptr;
+        currentBlock_ = &function.body;
+        scopes_.clear();
+        pushScope();
+
+        function.parameters.reserve(decl.parameters.size());
+        for (const ParameterSyntax& parameter : decl.parameters) {
+            const Type type = typeFromSyntax(parameter.type);
+            // Parameters are declared as locals because the body reads them with
+            // the same LoadLocal operation used for `let` bindings.
+            const LocalRef local = declareLocal(parameter.name, parameter.nameSpan, type,
+                                                false, Local::Kind::Parameter);
+            function.parameters.push_back(Parameter{
+                .name = parameter.name,
+                .type = type,
+                .local = local,
+                .span = parameter.span,
+            });
+        }
+
+        buildBlockStatements(*decl.body);
+        popScope();
+
+        currentBlock_ = nullptr;
+        currentFunction_ = nullptr;
+        return function;
+    }
+
+    void buildBlockStatements(const BlockStmt& block) {
+        // AST blocks are lexical scopes. A nested block can shadow outer names,
+        // so the IR builder mirrors semantic analysis with a scope stack.
+        pushScope();
+        for (const std::unique_ptr<Stmt>& statement : block.statements) {
+            buildStmt(*statement);
+            if (currentBlock_->terminator.kind != Terminator::Kind::None) {
+                // Once a block returns, later AST statements are unreachable for
+                // this structured IR dump. Semantic analysis already decided
+                // whether return paths are valid.
+                break;
+            }
+        }
+        popScope();
+    }
+
+    void buildStmt(const Stmt& stmt) {
+        if (const auto* block = dynamic_cast<const BlockStmt*>(&stmt)) {
+            buildBlockStatements(*block);
+            return;
+        }
+
+        if (const auto* let = dynamic_cast<const LetStmt*>(&stmt)) {
+            const Type type = typeFromSyntax(let->type);
+            const ValueRef init = buildExpr(*let->init, type);
+            const LocalRef local =
+                declareLocal(let->name, let->nameSpan, type, let->isMutable,
+                             Local::Kind::Local);
+            // A `let` has two IR effects: evaluate the initializer to a value,
+            // then create a local slot initialized with that value.
+            Operation op{
+                .kind = Operation::Kind::DeclareLocal,
+                .span = let->span,
+            };
+            op.local = local;
+            op.value = init;
+            op.isMutable = let->isMutable;
+            append(std::move(op));
+            return;
+        }
+
+        if (const auto* assign = dynamic_cast<const AssignStmt*>(&stmt)) {
+            const ValueSymbol symbol = lookupValue(assign->name);
+            const ValueRef value = buildExpr(*assign->value, symbol.type);
+            // Assignment stores into an existing local slot. It is not a
+            // value-producing operation.
+            Operation op{
+                .kind = Operation::Kind::StoreLocal,
+                .span = assign->span,
+            };
+            op.local = symbol.local;
+            op.value = value;
+            append(std::move(op));
+            return;
+        }
+
+        if (const auto* ret = dynamic_cast<const ReturnStmt*>(&stmt)) {
+            if (ret->value) {
+                const ValueRef value = buildExpr(*ret->value, currentReturnType());
+                currentBlock_->terminator = Terminator{
+                    .kind = Terminator::Kind::ReturnValue,
+                    .span = ret->span,
+                    .value = value,
+                };
+            } else {
+                currentBlock_->terminator = Terminator{
+                    .kind = Terminator::Kind::Return,
+                    .span = ret->span,
+                };
+            }
+            return;
+        }
+
+        if (const auto* ifStmt = dynamic_cast<const IfStmt*>(&stmt)) {
+            const ValueRef condition = buildExpr(*ifStmt->condition, std::nullopt);
+            Operation op{
+                .kind = Operation::Kind::If,
+                .span = ifStmt->span,
+            };
+            op.condition = condition;
+            // Keep `if` structured for now. A later lower-level pass can turn
+            // this into blocks and branches if LLVM-style CFG lowering needs it.
+            op.thenBlock = buildNestedStatementBlock(*ifStmt->thenBranch);
+            if (ifStmt->elseBranch) {
+                op.elseBlock = buildNestedStatementBlock(*ifStmt->elseBranch);
+            }
+            append(std::move(op));
+            return;
+        }
+
+        if (const auto* whileStmt = dynamic_cast<const WhileStmt*>(&stmt)) {
+            Operation op{
+                .kind = Operation::Kind::While,
+                .span = whileStmt->span,
+            };
+            // A while condition is a block because evaluating it may require
+            // multiple operations before producing the final condition value.
+            op.conditionBlock = buildConditionBlock(*whileStmt->condition);
+            op.bodyBlock = buildNestedStatementBlock(*whileStmt->body);
+            append(std::move(op));
+            return;
+        }
+
+        if (const auto* callStmt = dynamic_cast<const CallStmt*>(&stmt)) {
+            buildCall(*callStmt->call);
+            return;
+        }
+
+        throw std::logic_error("unsupported statement in typed IR builder");
+    }
+
+    std::unique_ptr<Block> buildNestedStatementBlock(const Stmt& stmt) {
+        auto block = std::make_unique<Block>(Block{.span = stmt.span});
+
+        // Temporarily redirect emission into the nested structured block. The
+        // enclosing currentBlock_ is restored before returning.
+        Block* outerBlock = currentBlock_;
+        currentBlock_ = block.get();
+        buildStmt(stmt);
+        currentBlock_ = outerBlock;
+
+        return block;
+    }
+
+    std::unique_ptr<Block> buildConditionBlock(const Expr& condition) {
+        auto block = std::make_unique<Block>(Block{.span = condition.span});
+
+        // Conditions are represented as normal operation sequences ending in a
+        // ConditionValue terminator. This makes complex conditions easy to dump:
+        // all intermediate values appear before the final condition.
+        Block* outerBlock = currentBlock_;
+        currentBlock_ = block.get();
+        const ValueRef value = buildExpr(condition, std::nullopt);
+        block->terminator = Terminator{
+            .kind = Terminator::Kind::ConditionValue,
+            .span = condition.span,
+            .value = value,
+        };
+        currentBlock_ = outerBlock;
+
+        return block;
+    }
+
+    ValueRef buildExpr(const Expr& expr, std::optional<Type> expected) {
+        if (const auto* integer = dynamic_cast<const IntegerLiteralExpr*>(&expr)) {
+            Type type = expected.value_or(Type{.kind = BuiltinTypeKind::I32});
+            if (!type.isInteger()) {
+                // This should only happen if semantic analysis failed to reject
+                // the program first. Preserve an invalid type rather than
+                // guessing a lowering type.
+                type = Type{};
+            }
+
+            Operation op{
+                .kind = Operation::Kind::IntegerLiteral,
+                .span = integer->span,
+                .result = makeValue(type),
+                .text = integer->raw,
+            };
+            const ValueRef result = *op.result;
+            append(std::move(op));
+            return result;
+        }
+
+        if (const auto* boolean = dynamic_cast<const BoolLiteralExpr*>(&expr)) {
+            Operation op{
+                .kind = Operation::Kind::BoolLiteral,
+                .span = boolean->span,
+                .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+                .boolValue = boolean->value,
+            };
+            const ValueRef result = *op.result;
+            append(std::move(op));
+            return result;
+        }
+
+        if (const auto* string = dynamic_cast<const StringLiteralExpr*>(&expr)) {
+            Operation op{
+                .kind = Operation::Kind::StringLiteral,
+                .span = string->span,
+                .result = makeValue(Type{.kind = BuiltinTypeKind::Str}),
+                .text = string->raw,
+            };
+            const ValueRef result = *op.result;
+            append(std::move(op));
+            return result;
+        }
+
+        if (const auto* name = dynamic_cast<const NameExpr*>(&expr)) {
+            const ValueSymbol symbol = lookupValue(name->name);
+            // Source names disappear here. The IR records whether the name was a
+            // local storage slot or a module const and emits the corresponding
+            // resolved load operation.
+            Operation op{
+                .kind = symbol.isConst ? Operation::Kind::LoadConst
+                                       : Operation::Kind::LoadLocal,
+                .span = name->span,
+                .result = makeValue(symbol.type),
+                .text = name->name,
+            };
+            op.local = symbol.local;
+            const ValueRef result = *op.result;
+            append(std::move(op));
+            return result;
+        }
+
+        if (const auto* call = dynamic_cast<const CallExpr*>(&expr)) {
+            const std::optional<ValueRef> result = buildCall(*call);
+            if (!result) {
+                // Semantic analysis rejects using a void expression as a value.
+                // Reaching this path means the builder was called on an invalid
+                // AST or the semantic contract changed without updating IR.
+                throw std::logic_error("void call used where typed IR value is required");
+            }
+            return *result;
+        }
+
+        if (const auto* unary = dynamic_cast<const UnaryExpr*>(&expr)) {
+            if (unary->op == TokenKind::Bang) {
+                const ValueRef operand = buildExpr(*unary->operand, std::nullopt);
+                Operation op{
+                    .kind = Operation::Kind::Unary,
+                    .span = unary->span,
+                    .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+                    .op = unary->op,
+                };
+                op.value = operand;
+                const ValueRef result = *op.result;
+                append(std::move(op));
+                return result;
+            }
+
+            const Type type = expected.value_or(Type{.kind = BuiltinTypeKind::I32});
+            const ValueRef operand = buildExpr(*unary->operand, type);
+            Operation op{
+                .kind = Operation::Kind::Unary,
+                .span = unary->span,
+                .result = makeValue(operand.type),
+                .op = unary->op,
+            };
+            op.value = operand;
+            const ValueRef result = *op.result;
+            append(std::move(op));
+            return result;
+        }
+
+        if (const auto* binary = dynamic_cast<const BinaryExpr*>(&expr)) {
+            return buildBinary(*binary, expected);
+        }
+
+        if (const auto* paren = dynamic_cast<const ParenExpr*>(&expr)) {
+            return buildExpr(*paren->inner, expected);
+        }
+
+        throw std::logic_error("unsupported expression in typed IR builder");
+    }
+
+    ValueRef buildBinary(const BinaryExpr& binary, std::optional<Type> expected) {
+        if (binary.op == TokenKind::AmpAmp || binary.op == TokenKind::PipePipe) {
+            // Logical operators always produce bool in Core v0. Their operands
+            // may be bool or integer, so we do not force an expected operand
+            // type here.
+            const ValueRef left = buildExpr(*binary.left, std::nullopt);
+            const ValueRef right = buildExpr(*binary.right, std::nullopt);
+            return appendBinary(binary, left, right,
+                                Type{.kind = BuiltinTypeKind::Bool});
+        }
+
+        // For arithmetic/equality/comparison, semantic analysis has already
+        // ensured both operands have the same type. Passing the left type as the
+        // right expected type keeps integer literal typing aligned.
+        const ValueRef left = buildExpr(*binary.left, expected);
+        const ValueRef right = buildExpr(*binary.right, left.type);
+
+        const bool comparison = binary.op == TokenKind::Less ||
+                                binary.op == TokenKind::LessEqual ||
+                                binary.op == TokenKind::Greater ||
+                                binary.op == TokenKind::GreaterEqual ||
+                                binary.op == TokenKind::EqualEqual ||
+                                binary.op == TokenKind::BangEqual;
+        const Type resultType =
+            comparison ? Type{.kind = BuiltinTypeKind::Bool} : left.type;
+        return appendBinary(binary, left, right, resultType);
+    }
+
+    ValueRef appendBinary(const BinaryExpr& binary, ValueRef left, ValueRef right,
+                          Type resultType) {
+        Operation op{
+            .kind = Operation::Kind::Binary,
+            .span = binary.span,
+            .result = makeValue(resultType),
+            .op = binary.op,
+        };
+        op.left = left;
+        op.right = right;
+        const ValueRef result = *op.result;
+        append(std::move(op));
+        return result;
+    }
+
+    std::optional<ValueRef> buildCall(const CallExpr& call) {
+        const auto* callee = dynamic_cast<const NameExpr*>(call.callee.get());
+        if (!callee) {
+            throw std::logic_error("typed IR only supports named callees in Core v0");
+        }
+
+        const auto signature = functions_.find(callee->name);
+        if (signature == functions_.end()) {
+            throw std::logic_error("typed IR call target was not resolved");
+        }
+
+        Operation op{
+            .kind = Operation::Kind::Call,
+            .span = call.span,
+            .text = callee->name,
+            .isBuiltin = signature->second.isBuiltin,
+        };
+
+        // Build arguments before allocating the call result so value IDs appear
+        // in the same order operations are emitted in the dump.
+        const std::size_t count =
+            std::min(call.arguments.size(), signature->second.parameterTypes.size());
+        for (std::size_t i = 0; i < count; ++i) {
+            op.arguments.push_back(
+                buildExpr(*call.arguments[i], signature->second.parameterTypes[i]));
+        }
+
+        if (!signature->second.returnType.isVoid()) {
+            op.result = makeValue(signature->second.returnType);
+        }
+
+        const std::optional<ValueRef> result = op.result;
+        append(std::move(op));
+        return result;
+    }
+
+    void pushScope() { scopes_.push_back({}); }
+
+    void popScope() { scopes_.pop_back(); }
+
+    LocalRef declareLocal(std::string_view name, SourceSpan span, Type type,
+                          bool isMutable, Local::Kind kind) {
+        if (!currentFunction_) {
+            throw std::logic_error("typed IR locals can only be declared in functions");
+        }
+
+        // Local IDs are function-local and stable for the duration of the
+        // function. They are assigned when parameters/lets are declared, not
+        // when the local is first loaded.
+        const LocalRef ref{.id = currentFunction_->locals.size()};
+        currentFunction_->locals.push_back(Local{
+            .ref = ref,
+            .name = std::string(name),
+            .type = type,
+            .isMutable = isMutable,
+            .kind = kind,
+            .span = span,
+        });
+        scopes_.back()[std::string(name)] = ValueSymbol{
+            .type = type,
+            .local = ref,
+            .isConst = false,
+        };
+        return ref;
+    }
+
+    ValueSymbol lookupValue(const std::string& name) const {
+        // Lookup mirrors source lexical scoping: innermost local scope first,
+        // then module-level constants. Functions are intentionally not values in
+        // Core v0; calls resolve functions through buildCall().
+        for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
+            if (const auto found = scope->find(name); found != scope->end()) {
+                return found->second;
+            }
+        }
+
+        if (const auto found = constants_.find(name); found != constants_.end()) {
+            return ValueSymbol{
+                .type = found->second,
+                .isConst = true,
+            };
+        }
+
+        throw std::logic_error("typed IR value was not resolved: " + name);
+    }
+
+    ValueRef makeValue(Type type) {
+        std::size_t id = 0;
+        if (currentFunction_) {
+            id = currentFunction_->nextValueId++;
+        } else if (currentConst_) {
+            id = currentConst_->nextValueId++;
+        } else {
+            throw std::logic_error("typed IR value allocated outside a body");
+        }
+        // Value IDs are local to the body being emitted. A function and a const
+        // initializer can both have `%0` because they are separate IR bodies.
+        return ValueRef{.id = id, .type = type};
+    }
+
+    void append(Operation op) {
+        if (!currentBlock_) {
+            throw std::logic_error("typed IR operation emitted outside a block");
+        }
+        // All operation emission funnels through this helper so invalid
+        // current-block state fails loudly during development.
+        currentBlock_->operations.push_back(std::move(op));
+    }
+
+    Type currentReturnType() const {
+        if (!currentFunction_) {
+            throw std::logic_error("return type requested outside a function");
+        }
+        return currentFunction_->returnType;
+    }
+
+    // Top-level tables collected before lowering bodies.
+    std::unordered_map<std::string, FunctionSignature> functions_;
+    std::unordered_map<std::string, Type> constants_;
+
+    // Lexical value scopes for the function currently being built.
+    std::vector<std::unordered_map<std::string, ValueSymbol>> scopes_;
+
+    // Current emission targets. Exactly one of currentConst_ or currentFunction_
+    // is non-null while values are being emitted, and currentBlock_ points at
+    // the block receiving operations.
+    Const* currentConst_ = nullptr;
+    Function* currentFunction_ = nullptr;
+    Block* currentBlock_ = nullptr;
+};
+
+} // namespace
+
+Module buildTypedIr(const TranslationUnit& unit) {
+    return TypedIrBuilder().build(unit);
+}
+
+} // namespace nexc::ir

@@ -1,0 +1,21 @@
+Module
+  Function @count() -> void
+    Locals
+      $0 x: i32 mutable
+    Block
+      %0: i32 = IntegerLiteral 0
+      DeclareLocal $0 mutable = %0
+      While
+        Condition
+          Block
+            %1: i32 = LoadLocal $0
+            %2: i32 = IntegerLiteral 10
+            %3: bool = Binary Less %1, %2
+            ConditionValue %3
+        Body
+          Block
+            %4: i32 = LoadLocal $0
+            %5: i32 = IntegerLiteral 1
+            %6: i32 = Binary Plus %4, %5
+            StoreLocal $0 = %6
+      Return

@@ -6,6 +6,9 @@ namespace nexc {
 
 namespace {
 
+// Core v0 syntax is ASCII-only outside comments and string literals. These
+// helpers intentionally avoid locale-sensitive <cctype> classification so the
+// lexer behaves the same on every developer machine.
 bool isAsciiAlpha(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
@@ -19,6 +22,8 @@ bool isIdentifierContinue(char c) {
 }
 
 bool isHexDigit(char c) {
+    // Hex literal validation accepts both lowercase and uppercase digits after
+    // the 0x/0X prefix.
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
            (c >= 'A' && c <= 'F');
 }
@@ -262,6 +267,9 @@ Token Lexer::lexIntegerLiteral() {
 }
 
 Token Lexer::lexStringLiteral(std::size_t start) {
+    // String support is intentionally small: preserve the raw spelling and
+    // validate only the escape sequences Core v0 recognizes. Actual runtime
+    // string representation is a later backend/runtime concern.
     while (!isAtEnd()) {
         const char c = advance();
 
@@ -282,6 +290,8 @@ Token Lexer::lexStringLiteral(std::size_t start) {
         }
 
         if (c == '\\') {
+            // Consume the escaped byte so a quote in `\"` does not terminate the
+            // string. Unsupported escapes are diagnosed but lexing continues.
             if (isAtEnd()) {
                 break;
             }

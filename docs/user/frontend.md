@@ -134,6 +134,33 @@ tests/semantic_return_type_mismatch.nexs:2:12: error: cannot return value of typ
 This pass checks names, function calls, scalar types, mutability, returns,
 `main` shape, module-level `const` initializers, and integer literal ranges.
 
+## Dump Typed IR
+
+After parsing and semantic analysis succeed, the compiler can build a small typed
+IR for backend-facing inspection:
+
+```sh
+./nexc.sh ir examples/add.nexs
+```
+
+Example shape:
+
+```text
+Module
+  Function @add($0 a: i32, $1 b: i32) -> i32
+    Locals
+      $0 a: i32 parameter
+      $1 b: i32 parameter
+    Block
+      %0: i32 = LoadLocal $0
+      %1: i32 = LoadLocal $1
+      %2: i32 = Binary Plus %0, %1
+      ReturnValue %2
+```
+
+The typed IR is not executable yet. It is the first explicit bridge from checked
+Core v0 programs toward future MLIR/LLVM lowering.
+
 ## What Exists Now
 
 The current frontend supports the Core v0 parser surface:
@@ -148,6 +175,7 @@ The current frontend supports the Core v0 parser surface:
 - binary arithmetic, comparison, equality, `&&`, and `||`
 - textual and Graphviz AST dumps
 - semantic checking with `--check`
+- typed IR dumping with `--dump-ir`
 
 Semantic analysis intentionally remains small. It does not yet implement
 coercions/promotions, definite assignment analysis, arbitrary constant-expression
@@ -158,7 +186,7 @@ overflow evaluation, or inter-file/module resolution.
 The frontend is split into stages:
 
 ```text
-source text -> lexer -> tokens -> parser -> AST -> semantic analysis
+source text -> lexer -> tokens -> parser -> AST -> semantic analysis -> typed IR
 ```
 
 Each stage should answer only one kind of question:

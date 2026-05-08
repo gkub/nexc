@@ -4,6 +4,9 @@
 
 namespace nexc {
 
+// Token names are written exactly as the educational token dump should display
+// them. Keeping this as a switch instead of relying on enum integer values makes
+// the dump stable even if TokenKind is reordered later.
 std::string_view tokenKindName(TokenKind kind) {
     switch (kind) {
     case TokenKind::EndOfFile:
@@ -90,6 +93,8 @@ std::string_view tokenKindName(TokenKind kind) {
 }
 
 TokenKind keywordKind(std::string_view text) {
+    // Keyword recognition happens after identifier scanning. This preserves the
+    // maximal-munch rule: `whilex` is one Identifier, not KwWhile followed by x.
     if (text == "bool") {
         return TokenKind::KwBool;
     }
@@ -137,6 +142,8 @@ void dumpToken(std::ostream& out, const SourceFile& source, const Token& token) 
     if (token.kind == TokenKind::Identifier ||
         token.kind == TokenKind::IntegerLiteral ||
         token.kind == TokenKind::StringLiteral) {
+        // Only token kinds with useful source spellings print their text. Most
+        // punctuation and keywords are already fully described by TokenKind.
         out << " `" << source.slice(token.span) << '`';
     }
 

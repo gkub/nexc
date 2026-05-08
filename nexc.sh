@@ -29,6 +29,7 @@ Frontend inspection:
   tokens <file.nexs>     Build if needed, then run --dump-tokens
   ast <file.nexs>        Build if needed, then run --dump-ast
   ast-dot <file.nexs>    Build if needed, then run --dump-ast-dot
+  ir <file.nexs>         Build if needed, then run --dump-ir
   ast-graph <file.nexs> [prefix]
                            Write Graphviz DOT and SVG files
   check-file <file.nexs> Build if needed, then run --check
@@ -36,6 +37,7 @@ Frontend inspection:
 Examples:
   ./nexc.sh check
   ./nexc.sh ast examples/add.nexs
+  ./nexc.sh ir examples/add.nexs
   ./nexc.sh check-file examples/add.nexs
   ./nexc.sh ast-dot examples/add.nexs > ast.dot
   ./nexc.sh ast-graph examples/add.nexs
@@ -186,6 +188,13 @@ case "$1" in
             exit 2
         fi
         compiler --dump-ast-dot "$2"
+        ;;
+    ir)
+        if [[ $# -ne 2 ]]; then
+            echo "usage: ./nexc.sh ir <file.nexs>" >&2
+            exit 2
+        fi
+        compiler --dump-ir "$2"
         ;;
     ast-graph)
         shift

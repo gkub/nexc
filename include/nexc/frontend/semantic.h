@@ -15,6 +15,12 @@ class SemanticAnalyzer {
 public:
     SemanticAnalyzer(const SourceFile& source, DiagnosticBag& diagnostics);
 
+    // Analyze a parsed translation unit and append semantic diagnostics.
+    //
+    // This pass does not rewrite the AST or produce IR. It is currently a
+    // validation pass: if diagnostics has no errors afterward, later stages can
+    // assume names, types, mutability, calls, returns, and constants obey Core
+    // v0 rules.
     void analyze(const TranslationUnit& unit);
 
 private:

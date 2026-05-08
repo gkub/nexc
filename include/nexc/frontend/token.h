@@ -57,12 +57,23 @@ enum class TokenKind {
 
 struct Token {
     TokenKind kind = TokenKind::EndOfFile;
+
+    // Token text is not stored here. The lexer records only the token kind and
+    // span, and callers recover the spelling from SourceFile when needed. That
+    // keeps tokens small and avoids copying every identifier/literal string.
     SourceSpan span;
 };
 
+// Convert token kinds to stable dump/debug names. These names are part of the
+// token golden-test surface, so intentional changes should update goldens.
 std::string_view tokenKindName(TokenKind kind);
+
+// Return the keyword token for a spelling, or Identifier when the spelling is
+// not reserved. This lets the lexer scan identifiers with one rule and classify
+// keywords only after the full spelling is known.
 TokenKind keywordKind(std::string_view text);
 
+// Human-readable token dump used by `--dump-tokens` and golden tests.
 void dumpToken(std::ostream& out, const SourceFile& source, const Token& token);
 
 } // namespace nexc

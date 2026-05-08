@@ -31,6 +31,8 @@ enum class BuiltinTypeKind {
 
 struct TypeSyntax {
     BuiltinTypeKind kind = BuiltinTypeKind::Invalid;
+
+    // The source span covers the type spelling, such as `i32` or `void`.
     SourceSpan span;
 };
 
@@ -47,6 +49,9 @@ struct Expr {
     explicit Expr(SourceSpan span) : span(span) {}
     virtual ~Expr() = default;
 
+    // Every expression carries the source range that produced it. This makes it
+    // possible for semantic analysis to point at the exact subexpression that is
+    // invalid, such as the `true` in `return true;`.
     SourceSpan span;
 };
 
@@ -70,9 +75,15 @@ struct StringLiteralExpr final : Expr {
     StringLiteralExpr(SourceSpan span, std::string raw)
         : Expr(span), raw(std::move(raw)) {}
 
+    // Includes the source spelling, including quotes and escapes. Runtime string
+    // decoding is not implemented yet, so preserving the raw text keeps dumps
+    // and future diagnostics honest.
     std::string raw;
 };
 
+// A name expression is just a spelling in the AST. Semantic analysis later
+// decides whether the name refers to a local, module constant, function error,
+// or nothing at all.
 struct NameExpr final : Expr {
     NameExpr(SourceSpan span, std::string name)
         : Expr(span), name(std::move(name)) {}
@@ -86,6 +97,9 @@ struct CallExpr final : Expr {
         : Expr(span), callee(std::move(callee)),
           arguments(std::move(arguments)) {}
 
+    // The callee is an expression so the AST can represent the syntax shape
+    // generically. Core v0 semantic analysis later restricts this to a function
+    // name; future language versions might allow richer callable expressions.
     std::unique_ptr<Expr> callee;
     std::vector<std::unique_ptr<Expr>> arguments;
 };
@@ -122,6 +136,9 @@ struct Stmt {
     explicit Stmt(SourceSpan span) : span(span) {}
     virtual ~Stmt() = default;
 
+    // Statement spans cover the full statement, including delimiters such as
+    // semicolons or braces. This lets diagnostics underline whole statements
+    // when the problem is statement-level.
     SourceSpan span;
 };
 
@@ -139,6 +156,8 @@ struct LetStmt final : Stmt {
         : Stmt(span), isMutable(isMutable), name(std::move(name)),
           nameSpan(nameSpan), type(type), init(std::move(init)) {}
 
+    // `let` and `let mut` share one AST node. Mutability is a semantic property
+    // checked later when assignment statements target this binding.
     bool isMutable = false;
     std::string name;
     SourceSpan nameSpan;
@@ -161,6 +180,7 @@ struct ReturnStmt final : Stmt {
     ReturnStmt(SourceSpan span, std::unique_ptr<Expr> value)
         : Stmt(span), value(std::move(value)) {}
 
+    // Null means `return;`; non-null means `return expr;`.
     std::unique_ptr<Expr> value;
 };
 
@@ -172,6 +192,7 @@ struct IfStmt final : Stmt {
 
     std::unique_ptr<Expr> condition;
     std::unique_ptr<Stmt> thenBranch;
+    // Null means there was no `else` branch in source.
     std::unique_ptr<Stmt> elseBranch;
 };
 
@@ -233,9 +254,14 @@ struct ConstDecl final : Item {
 // this compiler invocation translates." For nex Core v0, that is simply one
 // `.nexs` file containing top-level declarations such as `fn` and `const`.
 struct TranslationUnit {
+    // Top-level items stay in source order. That keeps dumps predictable and
+    // lets later passes preserve user-facing order when reporting diagnostics.
     std::vector<std::unique_ptr<Item>> items;
 };
 
+// AST dump helpers are deliberately simple educational views, not stable binary
+// serialization formats. Their text output is still tested with golden files so
+// accidental AST shape changes are caught.
 std::string_view builtinTypeName(BuiltinTypeKind kind);
 void dumpAst(std::ostream& out, const TranslationUnit& unit);
 void dumpAstDot(std::ostream& out, const TranslationUnit& unit);

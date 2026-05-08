@@ -8,6 +8,8 @@ namespace nexc {
 
 namespace {
 
+// Diagnostics use lowercase severity names because the output is meant to feel
+// like familiar compiler errors: `file:line:column: error: ...`.
 std::string_view severityName(DiagnosticSeverity severity) {
     switch (severity) {
     case DiagnosticSeverity::Error:
@@ -23,12 +25,18 @@ std::string_view severityName(DiagnosticSeverity severity) {
 
 std::size_t lineStart(std::string_view text, std::size_t offset) {
     const std::size_t clamped = std::min(offset, text.size());
+
+    // Find the newline before the diagnostic position. If there is none, the
+    // diagnostic is on the first source line.
     const std::size_t newline = text.rfind('\n', clamped);
     return newline == std::string_view::npos ? 0 : newline + 1;
 }
 
 std::size_t lineEnd(std::string_view text, std::size_t offset) {
     const std::size_t clamped = std::min(offset, text.size());
+
+    // Find the newline after the diagnostic position. If there is none, the
+    // current line extends to EOF.
     const std::size_t newline = text.find('\n', clamped);
     return newline == std::string_view::npos ? text.size() : newline;
 }
@@ -54,6 +62,8 @@ void printSourceLine(std::ostream& out, const SourceFile& source,
     out << "  | " << line << '\n';
     out << "  | ";
     for (std::size_t i = 0; i < caretColumn; ++i) {
+        // Preserve tabs in the leading whitespace so the caret stays aligned
+        // with source that uses tabs. Spaces are emitted for all other bytes.
         out << (line[i] == '\t' ? '\t' : ' ');
     }
 
@@ -81,6 +91,8 @@ void DiagnosticBag::note(SourceSpan span, std::string message) {
 void DiagnosticBag::add(DiagnosticSeverity severity, SourceSpan span,
                         std::string message) {
     if (severity == DiagnosticSeverity::Error) {
+        // `hasErrors_` is cached so the driver can cheaply decide whether later
+        // stages such as semantic analysis or IR construction should run.
         hasErrors_ = true;
     }
 
@@ -94,6 +106,8 @@ void DiagnosticBag::add(DiagnosticSeverity severity, SourceSpan span,
 void printDiagnostics(std::ostream& out, const SourceFile& source,
                       const DiagnosticBag& diagnostics) {
     for (const Diagnostic& diagnostic : diagnostics.diagnostics()) {
+        // Convert byte offsets to line/column only at the output boundary. The
+        // rest of the compiler can stay byte-offset based.
         const LineColumn location = source.lineColumn(diagnostic.span.start);
         out << source.path() << ':' << location.line << ':' << location.column
             << ": " << severityName(diagnostic.severity) << ": "

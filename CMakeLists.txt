@@ -6,6 +6,29 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(NEXC_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
+
+function(nexc_target_warnings target)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(${target}
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+
+        if(NEXC_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE -Werror)
+        endif()
+    elseif(MSVC)
+        target_compile_options(${target} PRIVATE /W4)
+
+        if(NEXC_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE /WX)
+        endif()
+    endif()
+endfunction()
+
 add_library(nexc_frontend
     src/frontend/ast.cpp
     src/frontend/diagnostic.cpp
@@ -21,16 +44,25 @@ target_include_directories(nexc_frontend
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_compile_options(nexc_frontend
-    PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
+nexc_target_warnings(nexc_frontend)
+
+add_library(nexc_ir
+    src/ir/builder.cpp
+    src/ir/dump.cpp
+    src/ir/ir.cpp
 )
 
+target_include_directories(nexc_ir
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(nexc_ir PUBLIC nexc_frontend)
+nexc_target_warnings(nexc_ir)
+
 add_executable(nexc src/tools/nexc/main.cpp)
-target_link_libraries(nexc PRIVATE nexc_frontend)
-target_compile_options(nexc PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(nexc PRIVATE nexc_ir)
+nexc_target_warnings(nexc)
 
 enable_testing()
 
@@ -98,6 +130,34 @@ add_nexc_golden_test(
     --dump-ast-dot
     examples/add.nexs
     tests/golden/dump_ast_dot/add.dot
+)
+
+add_nexc_golden_test(
+    dump_ir_add_golden
+    --dump-ir
+    examples/add.nexs
+    tests/golden/dump_ir/add.ir.txt
+)
+
+add_nexc_golden_test(
+    dump_ir_control_flow_golden
+    --dump-ir
+    examples/control_flow.nexs
+    tests/golden/dump_ir/control_flow.ir.txt
+)
+
+add_nexc_golden_test(
+    dump_ir_hello_golden
+    --dump-ir
+    examples/hello.nexs
+    tests/golden/dump_ir/hello.ir.txt
+)
+
+add_nexc_golden_test(
+    dump_ir_if_else_returns_golden
+    --dump-ir
+    tests/semantic_if_else_returns.nexs
+    tests/golden/dump_ir/if_else_returns.ir.txt
 )
 
 add_test(
