@@ -1,0 +1,19 @@
+TranslationUnit
+  FunctionDecl count
+    Parameters
+    ReturnType void
+    BlockStmt
+      LetStmt mut x: i32
+        IntegerLiteral 0
+      WhileStmt
+        Condition
+          BinaryExpr Less
+            NameExpr x
+            IntegerLiteral 10
+        Body
+          BlockStmt
+            AssignStmt x
+              BinaryExpr Plus
+                NameExpr x
+                IntegerLiteral 1
+      ReturnStmt

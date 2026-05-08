@@ -1,0 +1,11 @@
+KwFn [0, 2)
+Identifier [3, 7) `main`
+LeftParen [7, 8)
+RightParen [8, 9)
+Arrow [10, 12)
+KwVoid [13, 17)
+LeftBrace [18, 19)
+KwReturn [24, 30)
+Semicolon [30, 31)
+RightBrace [32, 33)
+EndOfFile [34, 34)

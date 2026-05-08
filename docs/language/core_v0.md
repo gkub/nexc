@@ -253,10 +253,10 @@ Implementations should attach **source spans** to every diagnostic: at least a s
 
 The reference compiler should expose:
 
-- `**--dump-tokens`**: token stream with kinds and spans (for lexer debugging).
-- `**--dump-ast`**: human-readable tree of the parsed program (for parser debugging).
+- **`--dump-tokens`**: token stream with kinds and spans (for lexer debugging).
+- **`--dump-ast`**: human-readable tree of the parsed program (for parser debugging).
 
-A natural extension is `**--dump-ast-dot**` (or similar): emit a [Graphviz](https://graphviz.org/) `dot` graph of the AST for a function or whole unit so it can be rendered as an image. This is a tooling feature, not a language semantic, but it is part of the expected developer experience for NEX.
+A natural extension is **`--dump-ast-dot`** (or similar): emit a [Graphviz](https://graphviz.org/) `dot` graph of the AST for a function or whole unit so it can be rendered as an image. This is a tooling feature, not a language semantic, but it is part of the expected developer experience for NEX.
 
 ---
 

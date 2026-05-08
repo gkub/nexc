@@ -31,6 +31,30 @@ NEX is currently in the **language-definition and compiler-planning stage**. The
 6. Add MLIR/LLVM lowering after the frontend is solid
 7. Build NEX-specific analyses and optimizations incrementally
 
+## Quick Start
+
+Use the root developer script for day-to-day work:
+
+```sh
+./nexc.sh check
+```
+
+That configures CMake, builds the compiler, and runs the CTest suite.
+
+Useful inspection commands:
+
+```sh
+./nexc.sh tokens examples/minimal.nexs
+./nexc.sh ast examples/add.nexs
+./nexc.sh ast-dot examples/add.nexs > ast.dot
+```
+
+Render the Graphviz output if `dot` is installed:
+
+```sh
+dot -Tsvg ast.dot -o ast.svg
+```
+
 ## Planned Compiler Pipeline
 
 Source code  
@@ -61,7 +85,7 @@ nex.md      Living project overview and AI/context document
 
 - [docs/language/core_v0.md](./docs/language/core_v0.md) - normative **Core v0** language (first compiler milestone)
 - [docs/design/frontend_contract.md](./docs/design/frontend_contract.md) - lexer/parser/AST contract for the first frontend implementation
-- [docs/design/frontend_walkthrough.md](./docs/design/frontend_walkthrough.md) - educational walkthrough of the current frontend code
+- [COMPILER_LEARNING_GUIDE.md](./COMPILER_LEARNING_GUIDE.md) - educational guide to the compiler as it grows
 - [docs/user/frontend.md](./docs/user/frontend.md) - practical guide for `--dump-tokens` and `--dump-ast`
 - [nex.md](./nex.md) - living project overview and language-planning context
 - [docs/design/optimization_goals.md](./docs/design/optimization_goals.md) - optimization and static-analysis goals

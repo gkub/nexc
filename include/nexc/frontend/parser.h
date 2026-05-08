@@ -54,6 +54,8 @@ private:
 
     // In Core v0, statements beginning with an identifier have one-token
     // ambiguity: `x = ...` is assignment, while `f(...)` is a call statement.
+    // Other expression starts are parsed here too so invalid expression
+    // statements such as `1 + 2;` get one focused diagnostic.
     std::unique_ptr<Stmt> parseAssignmentOrCallStmt();
 
     // Expressions use precedence climbing. `minPrecedence` means "only parse

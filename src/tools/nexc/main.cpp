@@ -16,10 +16,11 @@ namespace {
 enum class Mode {
     DumpTokens,
     DumpAst,
+    DumpAstDot,
 };
 
 void printUsage(std::ostream& out) {
-    out << "usage: nexc (--dump-tokens | --dump-ast) <file.nexs>\n";
+    out << "usage: nexc (--dump-tokens | --dump-ast | --dump-ast-dot) <file.nexs>\n";
 }
 
 std::string readFile(const std::string& path) {
@@ -46,6 +47,8 @@ int main(int argc, char** argv) {
         mode = Mode::DumpTokens;
     } else if (modeArg == "--dump-ast") {
         mode = Mode::DumpAst;
+    } else if (modeArg == "--dump-ast-dot") {
+        mode = Mode::DumpAstDot;
     } else {
         printUsage(std::cerr);
         return 2;
@@ -70,7 +73,11 @@ int main(int argc, char** argv) {
         } else {
             nexc::Parser parser(source, tokens, diagnostics);
             nexc::TranslationUnit unit = parser.parseTranslationUnit();
-            nexc::dumpAst(std::cout, unit);
+            if (mode == Mode::DumpAst) {
+                nexc::dumpAst(std::cout, unit);
+            } else {
+                nexc::dumpAstDot(std::cout, unit);
+            }
         }
 
         nexc::printDiagnostics(std::cerr, source, diagnostics);

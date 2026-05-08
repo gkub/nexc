@@ -177,7 +177,7 @@ std::unique_ptr<BlockStmt> Parser::parseBlockStmt() {
     while (!isAtEnd() && !check(TokenKind::RightBrace)) {
         if (std::unique_ptr<Stmt> stmt = parseStmt()) {
             block->statements.push_back(std::move(stmt));
-        } else {
+        } else if (!check(TokenKind::RightBrace)) {
             advance();
         }
     }
@@ -208,7 +208,10 @@ std::unique_ptr<Stmt> Parser::parseStmt() {
                            "inner `const` declarations are not part of Core v0");
         return nullptr;
     }
-    if (check(TokenKind::Identifier)) {
+    if (check(TokenKind::Identifier) || check(TokenKind::IntegerLiteral) ||
+        check(TokenKind::KwTrue) || check(TokenKind::KwFalse) ||
+        check(TokenKind::LeftParen) || check(TokenKind::Minus) ||
+        check(TokenKind::Bang)) {
         return parseAssignmentOrCallStmt();
     }
 

@@ -1,0 +1,24 @@
+TranslationUnit
+  ConstDecl N: i32
+    IntegerLiteral 4
+  FunctionDecl add
+    Parameters
+      Parameter a: i32
+      Parameter b: i32
+    ReturnType i32
+    BlockStmt
+      ReturnStmt
+        BinaryExpr Plus
+          NameExpr a
+          NameExpr b
+  FunctionDecl main
+    Parameters
+    ReturnType i32
+    BlockStmt
+      ReturnStmt
+        CallExpr
+          Callee
+            NameExpr add
+          Arguments
+            NameExpr N
+            IntegerLiteral 38

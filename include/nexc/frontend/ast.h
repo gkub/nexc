@@ -225,5 +225,6 @@ struct TranslationUnit {
 
 std::string_view builtinTypeName(BuiltinTypeKind kind);
 void dumpAst(std::ostream& out, const TranslationUnit& unit);
+void dumpAstDot(std::ostream& out, const TranslationUnit& unit);
 
 } // namespace nexc

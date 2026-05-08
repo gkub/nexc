@@ -6,9 +6,25 @@ practical companion to the normative language spec in
 `docs/design/frontend_contract.md`.
 
 For a code-level explanation of the implementation, see
-`docs/design/frontend_walkthrough.md`.
+`COMPILER_LEARNING_GUIDE.md`.
 
 ## Build
+
+For normal development, use the root helper script:
+
+```sh
+./nexc.sh check
+```
+
+That command configures CMake, builds the compiler, and runs all tests.
+
+To only build:
+
+```sh
+./nexc.sh build
+```
+
+The raw CMake commands are:
 
 ```sh
 cmake -S . -B build
@@ -26,7 +42,7 @@ build/nexc
 The lexer turns source text into a flat stream of tokens:
 
 ```sh
-build/nexc --dump-tokens examples/minimal.nexs
+./nexc.sh tokens examples/minimal.nexs
 ```
 
 Example output:
@@ -53,7 +69,7 @@ positions this way so diagnostics can point back to the exact source text.
 The parser turns the token stream into a syntax tree:
 
 ```sh
-build/nexc --dump-ast examples/add.nexs
+./nexc.sh ast examples/add.nexs
 ```
 
 Example shape:
@@ -78,6 +94,24 @@ The AST is still syntax, not full meaning. For example, the parser can build a
 tree for `return true;` inside an `i32` function. A later semantic analysis pass
 will reject that type mismatch.
 
+## Dump AST as Graphviz
+
+The parser can also emit a Graphviz DOT graph:
+
+```sh
+./nexc.sh ast-dot examples/add.nexs > ast.dot
+```
+
+If Graphviz is installed, render it as SVG:
+
+```sh
+dot -Tsvg ast.dot -o ast.svg
+```
+
+The DOT output is useful when the textual tree is hard to visually scan. The
+textual `--dump-ast` output remains the canonical compact debug view and golden
+test format.
+
 ## What Exists Now
 
 The current frontend supports the Core v0 parser surface:
@@ -90,6 +124,7 @@ The current frontend supports the Core v0 parser surface:
 - function calls
 - unary operators `-` and `!`
 - binary arithmetic, comparison, equality, `&&`, and `||`
+- textual and Graphviz AST dumps
 
 The parser intentionally does not yet perform semantic checks such as undefined
 names, immutable assignment errors, return type mismatches, or discarded
