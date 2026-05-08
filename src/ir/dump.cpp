@@ -99,6 +99,8 @@ private:
         // Operation payloads are union-like: each Kind selects which fields are
         // meaningful. The switch keeps that mapping explicit for readers.
         switch (operation.kind) {
+        case Operation::Kind::Invalid:
+            throw std::logic_error("typed IR dump encountered an invalid operation");
         case Operation::Kind::IntegerLiteral:
             dumpResultPrefix(operation);
             out_ << "IntegerLiteral " << operation.text << '\n';

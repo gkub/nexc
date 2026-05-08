@@ -54,6 +54,8 @@ struct Block;
 // optionally `elseBlock`.
 struct Operation {
     enum class Kind {
+        Invalid,
+
         // Value-producing literals.
         IntegerLiteral,
         BoolLiteral,
@@ -80,16 +82,16 @@ struct Operation {
         While,
     };
 
-    Kind kind;
+    Kind kind = Kind::Invalid;
 
     // The source span that produced this operation. Keeping spans in IR lets
     // later backend/lowering diagnostics still point back to user code.
-    SourceSpan span;
+    SourceSpan span{};
 
     // Present only for operations that produce a value. Void calls, local
     // declarations, stores, and structured control-flow operations do not have a
     // result value.
-    std::optional<ValueRef> result;
+    std::optional<ValueRef> result = std::nullopt;
 
     // Shared payload slots used by different operation kinds:
     //
@@ -98,7 +100,7 @@ struct Operation {
     // - isBuiltin: whether a call target should print as @builtin.name
     // - isMutable: whether a declared local came from `let mut`
     // - op: token-classified unary or binary operator
-    std::string text;
+    std::string text{};
     bool boolValue = false;
     bool isBuiltin = false;
     bool isMutable = false;
@@ -107,17 +109,17 @@ struct Operation {
     // Reference payloads for local access, expression operands, conditions, and
     // call arguments. Optional values are used where an operation kind may or may
     // not need that slot.
-    LocalRef local;
-    std::optional<ValueRef> value;
-    std::optional<ValueRef> left;
-    std::optional<ValueRef> right;
-    std::optional<ValueRef> condition;
-    std::vector<ValueRef> arguments;
+    LocalRef local{};
+    std::optional<ValueRef> value = std::nullopt;
+    std::optional<ValueRef> left = std::nullopt;
+    std::optional<ValueRef> right = std::nullopt;
+    std::optional<ValueRef> condition = std::nullopt;
+    std::vector<ValueRef> arguments{};
 
-    std::unique_ptr<Block> conditionBlock;
-    std::unique_ptr<Block> thenBlock;
-    std::unique_ptr<Block> elseBlock;
-    std::unique_ptr<Block> bodyBlock;
+    std::unique_ptr<Block> conditionBlock{};
+    std::unique_ptr<Block> thenBlock{};
+    std::unique_ptr<Block> elseBlock{};
+    std::unique_ptr<Block> bodyBlock{};
 };
 
 // A Terminator records the final meaning of a block when the block yields
@@ -140,8 +142,8 @@ struct Terminator {
     };
 
     Kind kind = Kind::None;
-    SourceSpan span;
-    std::optional<ValueRef> value;
+    SourceSpan span{};
+    std::optional<ValueRef> value = std::nullopt;
 };
 
 // A Block is an ordered list of operations plus an optional terminator.
@@ -149,9 +151,9 @@ struct Terminator {
 // The order matters: value IDs are assigned in emission order, and later
 // lowering can walk operations from top to bottom.
 struct Block {
-    SourceSpan span;
-    std::vector<Operation> operations;
-    Terminator terminator;
+    SourceSpan span{};
+    std::vector<Operation> operations{};
+    Terminator terminator{};
 };
 
 // Local describes one storage slot inside a function.
@@ -165,21 +167,21 @@ struct Local {
         Local,
     };
 
-    LocalRef ref;
-    std::string name;
-    Type type;
+    LocalRef ref{};
+    std::string name{};
+    Type type{};
     bool isMutable = false;
     Kind kind = Kind::Local;
-    SourceSpan span;
+    SourceSpan span{};
 };
 
 // A Parameter connects the source-level function parameter to the local slot
 // used by the body.
 struct Parameter {
-    std::string name;
-    Type type;
-    LocalRef local;
-    SourceSpan span;
+    std::string name{};
+    Type type{};
+    LocalRef local{};
+    SourceSpan span{};
 };
 
 // Const represents a module-level `const`.
@@ -189,10 +191,10 @@ struct Parameter {
 // is local to this initializer block, just as a function has its own value ID
 // namespace.
 struct Const {
-    std::string name;
-    Type type;
-    SourceSpan span;
-    Block initializer;
+    std::string name{};
+    Type type{};
+    SourceSpan span{};
+    Block initializer{};
     std::size_t nextValueId = 0;
 };
 
@@ -201,12 +203,12 @@ struct Const {
 // It stores parameters, all local slots discovered while building the body, the
 // structured body block, and the next temporary value ID for that function.
 struct Function {
-    std::string name;
-    std::vector<Parameter> parameters;
-    Type returnType;
-    SourceSpan span;
-    std::vector<Local> locals;
-    Block body;
+    std::string name{};
+    std::vector<Parameter> parameters{};
+    Type returnType{};
+    SourceSpan span{};
+    std::vector<Local> locals{};
+    Block body{};
     std::size_t nextValueId = 0;
 };
 
@@ -215,8 +217,8 @@ struct Function {
 // This mirrors Core v0's top level: module constants plus functions. Future
 // import/module work can make this root represent a larger compilation unit.
 struct Module {
-    std::vector<Const> constants;
-    std::vector<Function> functions;
+    std::vector<Const> constants{};
+    std::vector<Function> functions{};
 };
 
 // Formatting helpers shared by the IR dumper and tests.

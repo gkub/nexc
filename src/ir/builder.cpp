@@ -22,8 +22,8 @@ struct FunctionSignature {
 // ValueSymbol is the builder's resolved answer for a source name used as a
 // value. It can represent either a function local slot or a module-level const.
 struct ValueSymbol {
-    Type type;
-    LocalRef local;
+    Type type{};
+    LocalRef local{};
     bool isConst = false;
 };
 
