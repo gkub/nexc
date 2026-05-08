@@ -17,6 +17,7 @@ Current frontend capabilities:
 - token dumping: `./nexc.sh tokens <file.nexs>`
 - AST text dumping: `./nexc.sh ast <file.nexs>`
 - AST Graphviz DOT dumping: `./nexc.sh ast-dot <file.nexs>`
+- AST Graphviz DOT + SVG generation: `./nexc.sh ast-graph <file.nexs> [prefix]`
 - semantic checking: `./nexc.sh check-file <file.nexs>`
 
 Not implemented yet:
@@ -46,7 +47,7 @@ Useful one-file commands:
 ./nexc.sh check-file examples/hello.nexs
 ./nexc.sh tokens examples/hello.nexs
 ./nexc.sh ast examples/hello.nexs
-./nexc.sh ast-dot examples/hello.nexs > ast.dot
+./nexc.sh ast-graph examples/hello.nexs
 ```
 
 ## Where To Look

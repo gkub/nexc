@@ -47,14 +47,15 @@ Useful inspection commands:
 ./nexc.sh tokens examples/minimal.nexs
 ./nexc.sh check-file examples/hello.nexs
 ./nexc.sh ast examples/add.nexs
-./nexc.sh ast-dot examples/add.nexs > ast.dot
+./nexc.sh ast-graph examples/add.nexs
 ./nexc.sh check-file examples/add.nexs
 ```
 
-Render the Graphviz output if `dot` is installed:
+That writes `ast.dot` and `ast.svg` if Graphviz `dot` is installed. To choose a
+different output prefix:
 
 ```sh
-dot -Tsvg ast.dot -o ast.svg
+./nexc.sh ast-graph examples/add.nexs build/add_ast
 ```
 
 ## Planned Compiler Pipeline

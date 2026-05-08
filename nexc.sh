@@ -29,6 +29,8 @@ Frontend inspection:
   tokens <file.nexs>     Build if needed, then run --dump-tokens
   ast <file.nexs>        Build if needed, then run --dump-ast
   ast-dot <file.nexs>    Build if needed, then run --dump-ast-dot
+  ast-graph <file.nexs> [prefix]
+                           Write Graphviz DOT and SVG files
   check-file <file.nexs> Build if needed, then run --check
 
 Examples:
@@ -36,7 +38,8 @@ Examples:
   ./nexc.sh ast examples/add.nexs
   ./nexc.sh check-file examples/add.nexs
   ./nexc.sh ast-dot examples/add.nexs > ast.dot
-  dot -Tsvg ast.dot -o ast.svg
+  ./nexc.sh ast-graph examples/add.nexs
+  ./nexc.sh ast-graph examples/add.nexs build/add_ast
 
 Useful environment variables:
   BUILD_DIR=build-release ./nexc.sh check
@@ -101,6 +104,37 @@ compiler() {
     run "$exe" "$@"
 }
 
+ast_graph() {
+    if [[ $# -lt 1 || $# -gt 2 ]]; then
+        echo "usage: ./nexc.sh ast-graph <file.nexs> [output-prefix]" >&2
+        exit 2
+    fi
+
+    local input="$1"
+    local prefix="${2:-ast}"
+    local dot_file="${prefix}.dot"
+    local svg_file="${prefix}.svg"
+    local dot_dir
+    dot_dir="$(dirname -- "$dot_file")"
+
+    if [[ "$dot_dir" != "." && ! -d "$dot_dir" ]]; then
+        echo "error: output directory does not exist: $dot_dir" >&2
+        exit 1
+    fi
+
+    compiler --dump-ast-dot "$input" > "$dot_file"
+
+    if ! command -v dot >/dev/null 2>&1; then
+        echo "wrote $dot_file" >&2
+        echo "error: Graphviz 'dot' command not found; install graphviz to render SVG" >&2
+        exit 1
+    fi
+
+    run dot -Tsvg "$dot_file" -o "$svg_file"
+    echo "wrote $dot_file" >&2
+    echo "wrote $svg_file" >&2
+}
+
 if [[ $# -eq 0 ]]; then
     usage
     exit 2
@@ -152,6 +186,10 @@ case "$1" in
             exit 2
         fi
         compiler --dump-ast-dot "$2"
+        ;;
+    ast-graph)
+        shift
+        ast_graph "$@"
         ;;
     check-file)
         if [[ $# -ne 2 ]]; then

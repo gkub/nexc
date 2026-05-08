@@ -58,14 +58,11 @@ Frontend inspection commands:
 ```sh
 ./nexc.sh tokens examples/minimal.nexs
 ./nexc.sh ast examples/add.nexs
-./nexc.sh ast-dot examples/add.nexs > ast.dot
+./nexc.sh ast-graph examples/add.nexs
 ```
 
-If Graphviz is installed, render DOT output into an image:
-
-```sh
-dot -Tsvg ast.dot -o ast.svg
-```
+That writes `ast.dot` and `ast.svg` using Graphviz. Use
+`./nexc.sh ast-dot <file.nexs>` when you only want raw DOT on stdout.
 
 Useful environment variables:
 

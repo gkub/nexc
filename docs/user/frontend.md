@@ -96,21 +96,23 @@ will reject that type mismatch.
 
 ## Dump AST as Graphviz
 
-The parser can also emit a Graphviz DOT graph:
+The parser can also emit a Graphviz DOT graph and render it to SVG:
 
 ```sh
-./nexc.sh ast-dot examples/add.nexs > ast.dot
+./nexc.sh ast-graph examples/add.nexs
 ```
 
-If Graphviz is installed, render it as SVG:
+That writes:
 
-```sh
-dot -Tsvg ast.dot -o ast.svg
+```text
+ast.dot
+ast.svg
 ```
 
-The DOT output is useful when the textual tree is hard to visually scan. The
-textual `--dump-ast` output remains the canonical compact debug view and golden
-test format.
+Use `./nexc.sh ast-dot examples/add.nexs > ast.dot` if you only want the raw DOT
+text. The DOT/SVG output is useful when the textual tree is hard to visually
+scan. The textual `--dump-ast` output remains the canonical compact debug view
+and golden test format.
 
 ## Check Semantics
 

@@ -361,14 +361,10 @@ Useful debugging commands:
 ```sh
 ./nexc.sh tokens path/to/file.nexs
 ./nexc.sh ast path/to/file.nexs
-./nexc.sh ast-dot path/to/file.nexs > ast.dot
+./nexc.sh ast-graph path/to/file.nexs
 ```
 
-If Graphviz is installed:
-
-```sh
-dot -Tsvg ast.dot -o ast.svg
-```
+`ast-graph` writes `ast.dot` and `ast.svg` if Graphviz is installed.
 
 ## Common Errors
 
