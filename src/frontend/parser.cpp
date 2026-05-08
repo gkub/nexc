@@ -209,8 +209,8 @@ std::unique_ptr<Stmt> Parser::parseStmt() {
         return nullptr;
     }
     if (check(TokenKind::Identifier) || check(TokenKind::IntegerLiteral) ||
-        check(TokenKind::KwTrue) || check(TokenKind::KwFalse) ||
-        check(TokenKind::LeftParen) || check(TokenKind::Minus) ||
+        check(TokenKind::StringLiteral) || check(TokenKind::KwTrue) ||
+        check(TokenKind::KwFalse) || check(TokenKind::LeftParen) || check(TokenKind::Minus) ||
         check(TokenKind::Bang)) {
         return parseAssignmentOrCallStmt();
     }
@@ -388,6 +388,11 @@ std::unique_ptr<Expr> Parser::parsePrimaryExpr() {
         return std::make_unique<IntegerLiteralExpr>(token.span, tokenText(token));
     }
 
+    if (match(TokenKind::StringLiteral)) {
+        const Token token = previous();
+        return std::make_unique<StringLiteralExpr>(token.span, tokenText(token));
+    }
+
     if (match(TokenKind::KwTrue)) {
         return std::make_unique<BoolLiteralExpr>(previous().span, true);
     }
@@ -504,6 +509,9 @@ BuiltinTypeKind Parser::builtinTypeKind(const Token& token) const {
     }
     if (text == "u64") {
         return BuiltinTypeKind::U64;
+    }
+    if (text == "str") {
+        return BuiltinTypeKind::Str;
     }
 
     return BuiltinTypeKind::Invalid;

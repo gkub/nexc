@@ -144,6 +144,8 @@ Token Lexer::lexToken() {
     }
 
     switch (c) {
+    case '"':
+        return lexStringLiteral(start);
     case '+':
         return single(TokenKind::Plus, start);
     case '-':
@@ -255,6 +257,49 @@ Token Lexer::lexIntegerLiteral() {
 
     return Token{
         .kind = TokenKind::IntegerLiteral,
+        .span = SourceSpan{.start = start, .end = current_},
+    };
+}
+
+Token Lexer::lexStringLiteral(std::size_t start) {
+    while (!isAtEnd()) {
+        const char c = advance();
+
+        if (c == '"') {
+            return Token{
+                .kind = TokenKind::StringLiteral,
+                .span = SourceSpan{.start = start, .end = current_},
+            };
+        }
+
+        if (c == '\n' || c == '\r') {
+            diagnostics_.error(SourceSpan{.start = start, .end = current_},
+                               "unterminated string literal");
+            return Token{
+                .kind = TokenKind::StringLiteral,
+                .span = SourceSpan{.start = start, .end = current_},
+            };
+        }
+
+        if (c == '\\') {
+            if (isAtEnd()) {
+                break;
+            }
+
+            const char escaped = advance();
+            if (escaped != '"' && escaped != '\\' && escaped != 'n' &&
+                escaped != 't' && escaped != 'r') {
+                diagnostics_.error(
+                    SourceSpan{.start = current_ - 2, .end = current_},
+                    "unsupported string escape sequence");
+            }
+        }
+    }
+
+    diagnostics_.error(SourceSpan{.start = start, .end = current_},
+                       "unterminated string literal");
+    return Token{
+        .kind = TokenKind::StringLiteral,
         .span = SourceSpan{.start = start, .end = current_},
     };
 }

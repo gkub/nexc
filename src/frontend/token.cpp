@@ -12,6 +12,8 @@ std::string_view tokenKindName(TokenKind kind) {
         return "Identifier";
     case TokenKind::IntegerLiteral:
         return "IntegerLiteral";
+    case TokenKind::StringLiteral:
+        return "StringLiteral";
     case TokenKind::KwBool:
         return "KwBool";
     case TokenKind::KwConst:
@@ -133,7 +135,8 @@ void dumpToken(std::ostream& out, const SourceFile& source, const Token& token) 
         << token.span.end << ')';
 
     if (token.kind == TokenKind::Identifier ||
-        token.kind == TokenKind::IntegerLiteral) {
+        token.kind == TokenKind::IntegerLiteral ||
+        token.kind == TokenKind::StringLiteral) {
         out << " `" << source.slice(token.span) << '`';
     }
 

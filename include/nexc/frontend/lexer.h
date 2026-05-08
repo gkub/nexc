@@ -36,6 +36,7 @@ private:
     Token lexToken();
     Token lexIdentifierOrKeyword();
     Token lexIntegerLiteral();
+    Token lexStringLiteral(std::size_t start);
 
     // Build a token whose spelling is already fully consumed.
     Token single(TokenKind kind, std::size_t start);

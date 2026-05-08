@@ -1,0 +1,3 @@
+tests/semantic_return_type_mismatch.nexs:2:12: error: cannot return value of type `bool` from function returning `i32`
+  |     return true;
+  |            ^~~~

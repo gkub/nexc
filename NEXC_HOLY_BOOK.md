@@ -1,4 +1,4 @@
-# NEX Compiler Learning Guide
+# NEXC Holy Book
 
 This guide explains the compiler as it grows. It is intentionally educational:
 when we add a compiler concept, this file should explain **what it is**, **why it
@@ -9,8 +9,8 @@ This guide is about how the compiler implementation works.
 
 ## Table of Contents
 
-- [1. Current Pipeline](#1-current-pipeline)
 - [Developer Workflow](#developer-workflow)
+- [1. Current Pipeline](#1-current-pipeline)
 - [2. Build Shape](#2-build-shape)
 - [3. Source Files and Spans](#3-source-files-and-spans)
 - [4. Diagnostics and Carets](#4-diagnostics-and-carets)
@@ -18,39 +18,11 @@ This guide is about how the compiler implementation works.
 - [6. Lexer](#6-lexer)
 - [7. AST](#7-ast)
 - [8. Parser](#8-parser)
-- [9. CLI Inspection Modes](#9-cli-inspection-modes)
-- [10. Tests, Golden Files, and CI](#10-tests-golden-files-and-ci)
-- [11. Current Limitations](#11-current-limitations)
-- [12. Recommended Next Steps](#12-recommended-next-steps)
-
-## 1. Current Pipeline
-
-The compiler currently implements a syntax frontend:
-
-```text
-source text -> SourceFile -> Lexer -> tokens -> Parser -> AST
-```
-
-Semantic analysis, MLIR generation, LLVM lowering, and native code generation
-are not implemented yet.
-
-Each stage has a narrow job:
-
-- **SourceFile:** owns the file path and source text.
-- **Lexer:** turns characters into tokens.
-- **Parser:** turns tokens into a tree-shaped AST.
-- **Semantic analysis:** later, decides whether the tree means something valid.
-
-That separation is important. For example, this can parse successfully:
-
-```nex
-fn f() -> i32 {
-    return true;
-}
-```
-
-The parser only knows that `return expression;` is valid syntax. A later semantic
-pass must reject returning `bool` from an `i32` function.
+- [9. Semantic Analysis](#9-semantic-analysis)
+- [10. CLI Inspection Modes](#10-cli-inspection-modes)
+- [11. Tests, Golden Files, and CI](#11-tests-golden-files-and-ci)
+- [12. Current Limitations](#12-current-limitations)
+- [13. Recommended Next Steps](#13-recommended-next-steps)
 
 ## Developer Workflow
 
@@ -102,6 +74,35 @@ BUILD_TYPE=Release ./nexc.sh rebuild
 BUILD_DIR=build-release ./nexc.sh check
 CMAKE_GENERATOR=Ninja ./nexc.sh configure
 ```
+
+## 1. Current Pipeline
+
+The compiler currently implements a checked Core v0 frontend:
+
+```text
+source text -> SourceFile -> Lexer -> tokens -> Parser -> AST -> SemanticAnalyzer
+```
+
+MLIR generation, LLVM lowering, and native code generation are not implemented
+yet.
+
+Each stage has a narrow job:
+
+- **SourceFile:** owns the file path and source text.
+- **Lexer:** turns characters into tokens.
+- **Parser:** turns tokens into a tree-shaped AST.
+- **Semantic analysis:** later, decides whether the tree means something valid.
+
+That separation is important. For example, this can parse successfully:
+
+```nex
+fn f() -> i32 {
+    return true;
+}
+```
+
+The parser only knows that `return expression;` is valid syntax. A later semantic
+pass must reject returning `bool` from an `i32` function.
 
 ## 2. Build Shape
 
@@ -457,7 +458,61 @@ BinaryExpr Plus
   IntegerLiteral 1
 ```
 
-## 9. CLI Inspection Modes
+## 9. Semantic Analysis
+
+Files:
+
+```text
+include/nexc/frontend/semantic.h
+src/frontend/semantic.cpp
+```
+
+Semantic analysis is the first compiler stage that checks **meaning** instead
+of syntax.
+
+The parser can build a tree for this:
+
+```nex
+fn f() -> i32 {
+    return true;
+}
+```
+
+because it has valid syntax: `return expression;` inside a function body.
+Semantic analysis rejects it because the expression has type `bool`, but the
+function promised to return `i32`.
+
+The current analyzer checks:
+
+- duplicate top-level names
+- duplicate parameter/local names in the same scope
+- undefined names
+- calls to undefined functions
+- function call argument counts
+- exact scalar type matching for locals, assignments, arguments, and returns
+- assignment only to `let mut`
+- `if` / `while` conditions using `bool` or integer types
+- `&&`, `||`, and `!` over `bool` or integer operands
+- integer arithmetic/comparison operands
+- discarded call results: only `void` calls may be statements
+- string literals as `str`
+- built-in `print(str) -> void` and `println(str) -> void`
+- `main`, if present, has no parameters and returns `void` or `i32`
+- module-level `const` initializers are compile-time expressions
+- integer literals fit their selected type
+
+The analyzer uses a symbol table. A **symbol** is the compiler's record for a
+declared name: for example, `x` is an `i32` local, or `add` is a function taking
+two `i32` parameters and returning `i32`.
+
+Scopes are tracked as a stack. Entering a block pushes a new scope; leaving the
+block pops it. Lookup starts in the innermost scope and walks outward.
+
+The first analyzer is intentionally strict. It does not yet do integer
+promotions, coercions, inter-file lookup, full constant folding, or formatted
+string interpolation.
+
+## 10. CLI Inspection Modes
 
 File:
 
@@ -465,22 +520,24 @@ File:
 src/tools/nexc/main.cpp
 ```
 
-The CLI currently supports three inspection modes:
+The CLI currently supports four frontend modes:
 
 ```sh
 build/nexc --dump-tokens examples/minimal.nexs
 build/nexc --dump-ast examples/add.nexs
 build/nexc --dump-ast-dot examples/add.nexs
+build/nexc --check examples/add.nexs
 ```
 
-All three modes lex the file first. `--dump-tokens` prints the token stream and
+All four modes lex the file first. `--dump-tokens` prints the token stream and
 stops. `--dump-ast` and `--dump-ast-dot` pass the token stream into the parser
-and print the resulting tree as either plain text or Graphviz DOT.
+and print the resulting tree as either plain text or Graphviz DOT. `--check`
+parses the file and then runs semantic analysis without dumping the tree.
 
 These modes are intentionally early because they let us inspect every compiler
 stage while building it.
 
-## 10. Tests, Golden Files, and CI
+## 11. Tests, Golden Files, and CI
 
 CTest is the local test runner:
 
@@ -490,14 +547,25 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The first tests are smoke tests and parser-negative tests. The scalable pattern
-for output-sensitive frontend tests is **golden files**:
+The current tests cover:
+
+- smoke checks for `--dump-tokens` and `--dump-ast`
+- golden output checks for token, AST, and Graphviz DOT dumps
+- parser-negative fixtures
+- semantic success checks for valid examples
+- semantic-negative fixtures for type errors, undefined names, mutability,
+  invalid `main`, discarded non-`void` calls, print argument types, and integer
+  literal range errors
+- golden diagnostic checks for selected semantic errors
+
+The scalable pattern for output-sensitive frontend tests is **golden files**:
 
 ```text
 tests/golden/dump_tokens/minimal.tokens.txt
 tests/golden/dump_ast/add.ast.txt
 tests/golden/dump_ast/control_flow.ast.txt
 tests/golden/dump_ast_dot/add.dot
+tests/golden/diagnostics/semantic_return_type_mismatch.stderr.txt
 ```
 
 A golden test runs the compiler, captures stdout, and compares it byte-for-byte
@@ -529,35 +597,33 @@ The goal is one local command and one CI command path. As more frontend and
 semantic tests appear, they should become CTest entries so CI picks them up
 automatically.
 
-## 11. Current Limitations
+## 12. Current Limitations
 
 The current frontend does not yet implement:
 
-- symbol tables
-- duplicate-name checks
-- type checking
-- mutability checking
-- function return checking
-- `main` signature validation
-- constant evaluation
+- type coercions or integer promotions
+- full constant-expression evaluation across named `const` values
+- precise signed negative constant values
+- formatting/interpolation for strings
+- runtime implementation for `print` / `println`
+- inter-file/module resolution
 - MLIR generation
 - LLVM lowering
 - native code generation
 
-Those are later stages. The current project state is a syntax frontend, not a
-full compiler.
+Those are later stages. The current project state is a checked Core v0 frontend,
+not a full compiler.
 
-## 12. Recommended Next Steps
+## 13. Recommended Next Steps
 
 The safest next steps are:
 
-1. Add more golden tests around parser edge cases and diagnostics.
-2. Implement semantic analysis for names, scopes, types, mutability, and return
-   rules.
-3. Add constant evaluation for module-level `const`.
-4. Add a small typed intermediate representation or direct MLIR generation once
-   semantic analysis is trustworthy.
+1. Decide the next lowering target: a tiny typed IR, direct textual LLVM IR, or
+   first MLIR output.
+2. Keep semantic tests growing as new frontend behavior appears.
+3. Consider a minimal `print_i32` runtime helper soon so examples can show output
+   instead of only exit codes.
+4. Then lower a tiny valid program such as `fn main() -> i32 { return 42; }`.
 
-MLIR and LLVM should come after semantic analysis. Lowering invalid or untyped
-syntax into IR makes the backend harder to debug because frontend mistakes
-become backend confusion.
+Lowering should stay boring at first. The goal is to prove the frontend can feed
+a backend with checked Core v0 programs before adding richer language features.

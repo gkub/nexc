@@ -90,6 +90,7 @@ Core v0 reserves the following spellings:
 
 - **Integer literals:** decimal sequences of digits, with optional `0x` / `0X` prefix for hexadecimal (exact literal grammar can be tightened in implementation; at minimum: decimal and hex for Core v0).
 - **Boolean literals:** `true` and `false`.
+- **String literals:** double-quoted byte strings such as `"Hello, world!"`. Core v0 supports escapes for `\"`, `\\`, `\n`, `\t`, and `\r`.
 
 The type of an unsuffixed integer literal is resolved by **context** (expected type) or by **default** (e.g. `i32`) when ambiguous; the compiler should define a small set of rules and diagnostics for ambiguity. (Initial implementations may default literals to `i32` and require explicit typing otherwise.)
 
@@ -118,10 +119,15 @@ Core v0 includes fixed-width integers and Boolean:
 | `i8`, `i16`, `i32`, `i64` | Signed two’s-complement integers   |
 | `u8`, `u16`, `u32`, `u64` | Unsigned integers                  |
 | `bool`                    | Boolean                            |
+| `str`                     | String literal data                |
 | `void`                    | “No value” (function returns only) |
 
 
 There is no implicit `void` value; `void` is only a **return type**.
+
+`str` is the type of string literals. Core v0 treats `str` as a lightweight
+frontend type suitable for built-in printing. Its runtime representation is
+defined later when lowering/runtime support exists.
 
 ### 4.2 Boolean and C-like conditions
 
@@ -191,6 +197,18 @@ const NAME: Type = constant_expression;
 
 `NAME` is visible in the rest of the module according to normal scope rules. The right-hand side must be a **constant expression** (literals, other `const` names, and operators obeying §5).
 
+### 6.3 Built-in printing
+
+Core v0 provides two built-in functions:
+
+```text
+print(str) -> void
+println(str) -> void
+```
+
+These are semantic built-ins recognized by the compiler frontend. Their runtime
+implementation is defined when native code generation and runtime support exist.
+
 ---
 
 ## 7. Statements (inside functions)
@@ -214,6 +232,7 @@ Every `let` must have an **initializer** in Core v0.
 Expressions include:
 
 - literals, identifiers
+- string literals
 - function calls: `f(a, b, ...)`
 - unary `-` and `!`
 - binary arithmetic and comparisons

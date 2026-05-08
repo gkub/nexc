@@ -101,9 +101,8 @@ x;     // syntax error in v0
 ```
 
 Whether a call statement is allowed to discard a value is a semantic rule. For
-example, `print_i32(1);` is valid if `print_i32` returns `void`, while
-`add(1, 2);` should be rejected or warned on if `add` returns `i32`, depending
-on the semantic policy chosen later.
+example, `println("hello");` is valid because `println` returns `void`, while
+`add(1, 2);` is rejected because `add` returns `i32`.
 
 ### 2.5 Type Names
 
@@ -111,8 +110,8 @@ The lexer reserves exactly the Core v0 keyword spellings from the language
 specification. In particular:
 
 - `bool` and `void` are keyword tokens.
-- integer type names such as `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, and
-`u64` lex as identifiers.
+- integer type names such as `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`,
+`u64`, and `str` lex as identifiers.
 
 The parser recognizes those identifier spellings as built-in scalar types only
 while parsing type syntax. This keeps the lexer independent of later user-defined
@@ -122,10 +121,10 @@ type names.
 
 Core v0 syntax is ASCII-only. The lexer should:
 
-- allow non-ASCII bytes inside comments
-- reject non-ASCII outside comments with an unsupported-character diagnostic
+- allow non-ASCII bytes inside comments and string literals
+- reject non-ASCII outside comments/string literals with an unsupported-character diagnostic
 
-String literals and Unicode identifiers are not part of Core v0.
+Unicode identifiers are not part of Core v0.
 
 ## 3. Source Locations and Diagnostics
 
@@ -444,4 +443,30 @@ The first lexer tests should cover:
 6. Pratt or precedence-climbing expression parser.
 7. `--dump-ast`.
 8. Focused frontend tests from this contract and Core v0 examples.
+
+## 9. First Semantic Analysis Contract
+
+The first semantic analyzer should run after parsing and before any future IR
+lowering. Its job is to decide whether a syntactically valid AST is meaningful.
+
+Initial checks:
+
+- duplicate top-level names (`fn` and `const` share one module namespace)
+- duplicate parameter names in a function
+- undefined names
+- calls to undefined functions
+- function call argument count
+- exact scalar type matching for locals, assignments, arguments, and returns
+- assignment only to `let mut` locals
+- `if` / `while` conditions accept `bool` or integer types
+- `&&`, `||`, and `!` accept `bool` or integer operands and produce `bool`
+- arithmetic and comparison operators operate on integer operands
+- non-`void` call results may not be discarded as statements
+- `main`, if present, has no parameters and returns `void` or `i32`
+- module-level `const` initializers are compile-time expressions
+- integer literals fit the type context selected for them
+
+This pass should still be simple. It does not need coercions, promotions,
+data-flow-based definite assignment, overflow evaluation for arbitrary constant
+expressions, or inter-file/module resolution yet.
 

@@ -6,7 +6,7 @@ practical companion to the normative language spec in
 `docs/design/frontend_contract.md`.
 
 For a code-level explanation of the implementation, see
-`COMPILER_LEARNING_GUIDE.md`.
+`NEXC_HOLY_BOOK.md`.
 
 ## Build
 
@@ -112,6 +112,26 @@ The DOT output is useful when the textual tree is hard to visually scan. The
 textual `--dump-ast` output remains the canonical compact debug view and golden
 test format.
 
+## Check Semantics
+
+The semantic analyzer checks whether parsed syntax means a valid Core v0
+program:
+
+```sh
+./nexc.sh check-file examples/add.nexs
+```
+
+For invalid programs, diagnostics point at the source:
+
+```text
+tests/semantic_return_type_mismatch.nexs:2:12: error: cannot return value of type `bool` from function returning `i32`
+  |     return true;
+  |            ^~~~
+```
+
+This pass checks names, function calls, scalar types, mutability, returns,
+`main` shape, module-level `const` initializers, and integer literal ranges.
+
 ## What Exists Now
 
 The current frontend supports the Core v0 parser surface:
@@ -125,10 +145,11 @@ The current frontend supports the Core v0 parser surface:
 - unary operators `-` and `!`
 - binary arithmetic, comparison, equality, `&&`, and `||`
 - textual and Graphviz AST dumps
+- semantic checking with `--check`
 
-The parser intentionally does not yet perform semantic checks such as undefined
-names, immutable assignment errors, return type mismatches, or discarded
-non-`void` call results.
+Semantic analysis intentionally remains small. It does not yet implement
+coercions/promotions, definite assignment analysis, arbitrary constant-expression
+overflow evaluation, or inter-file/module resolution.
 
 ## Mental Model
 
@@ -146,3 +167,12 @@ Each stage should answer only one kind of question:
 
 Keeping these boundaries clear makes the compiler easier to explain, test, and
 extend.
+
+## Language Tutorial
+
+This page explains how to use the current frontend tools. It is not meant to be
+the long-term user reference for writing NEX programs.
+
+For that, use [`docs/user/core_v0_tutorial.md`](./core_v0_tutorial.md). It is
+focused on writing NEX code: functions, variables, types, conditions, loops,
+calls, constants, and common diagnostics.

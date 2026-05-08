@@ -11,6 +11,7 @@ add_library(nexc_frontend
     src/frontend/diagnostic.cpp
     src/frontend/lexer.cpp
     src/frontend/parser.cpp
+    src/frontend/semantic.cpp
     src/frontend/source.cpp
     src/frontend/token.cpp
 )
@@ -39,9 +40,24 @@ function(add_nexc_golden_test name mode input expected)
         COMMAND ${CMAKE_COMMAND}
             -DNEXC_EXECUTABLE=$<TARGET_FILE:nexc>
             -DMODE=${mode}
-            -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/${input}
+            -DINPUT=${input}
             -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/${expected}
             -DEXPECTED_EXIT_CODE=0
+            -DWORKING_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunGolden.cmake
+    )
+endfunction()
+
+function(add_nexc_golden_diagnostic_test name mode input expected_stderr)
+    add_test(
+        NAME ${name}
+        COMMAND ${CMAKE_COMMAND}
+            -DNEXC_EXECUTABLE=$<TARGET_FILE:nexc>
+            -DMODE=${mode}
+            -DINPUT=${input}
+            -DEXPECTED_STDERR=${CMAKE_CURRENT_SOURCE_DIR}/${expected_stderr}
+            -DEXPECTED_EXIT_CODE=1
+            -DWORKING_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunGolden.cmake
     )
 endfunction()
@@ -85,6 +101,26 @@ add_nexc_golden_test(
 )
 
 add_test(
+    NAME semantic_check_add
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/add.nexs
+)
+
+add_test(
+    NAME semantic_check_control_flow
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/control_flow.nexs
+)
+
+add_test(
+    NAME semantic_check_hello
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/hello.nexs
+)
+
+add_test(
+    NAME semantic_check_if_else_returns
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_if_else_returns.nexs
+)
+
+add_test(
     NAME invalid_trailing_comma
     COMMAND nexc --dump-ast ${CMAKE_CURRENT_SOURCE_DIR}/tests/invalid_trailing_comma.nexs
 )
@@ -101,3 +137,91 @@ add_test(
     COMMAND nexc --dump-ast ${CMAKE_CURRENT_SOURCE_DIR}/tests/invalid_expression_statement.nexs
 )
 set_tests_properties(invalid_expression_statement PROPERTIES WILL_FAIL TRUE)
+
+add_test(
+    NAME semantic_return_type_mismatch
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_return_type_mismatch.nexs
+)
+set_tests_properties(semantic_return_type_mismatch PROPERTIES WILL_FAIL TRUE)
+
+add_nexc_golden_diagnostic_test(
+    semantic_return_type_mismatch_golden
+    --check
+    tests/semantic_return_type_mismatch.nexs
+    tests/golden/diagnostics/semantic_return_type_mismatch.stderr.txt
+)
+
+add_test(
+    NAME semantic_undefined_name
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_undefined_name.nexs
+)
+set_tests_properties(semantic_undefined_name PROPERTIES WILL_FAIL TRUE)
+
+add_test(
+    NAME semantic_immutable_assignment
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_immutable_assignment.nexs
+)
+set_tests_properties(semantic_immutable_assignment PROPERTIES WILL_FAIL TRUE)
+
+add_test(
+    NAME semantic_discard_non_void_call
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_discard_non_void_call.nexs
+)
+set_tests_properties(semantic_discard_non_void_call PROPERTIES WILL_FAIL TRUE)
+
+add_test(
+    NAME semantic_bad_main
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_bad_main.nexs
+)
+set_tests_properties(semantic_bad_main PROPERTIES WILL_FAIL TRUE)
+
+add_test(
+    NAME semantic_literal_out_of_range
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_literal_out_of_range.nexs
+)
+set_tests_properties(semantic_literal_out_of_range PROPERTIES WILL_FAIL TRUE)
+
+add_test(
+    NAME semantic_missing_return_path
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_missing_return_path.nexs
+)
+set_tests_properties(semantic_missing_return_path PROPERTIES WILL_FAIL TRUE)
+
+add_nexc_golden_diagnostic_test(
+    semantic_missing_return_path_golden
+    --check
+    tests/semantic_missing_return_path.nexs
+    tests/golden/diagnostics/semantic_missing_return_path.stderr.txt
+)
+
+add_test(
+    NAME semantic_const_overflow
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_const_overflow.nexs
+)
+set_tests_properties(semantic_const_overflow PROPERTIES WILL_FAIL TRUE)
+
+add_nexc_golden_diagnostic_test(
+    semantic_const_overflow_golden
+    --check
+    tests/semantic_const_overflow.nexs
+    tests/golden/diagnostics/semantic_const_overflow.stderr.txt
+)
+
+add_test(
+    NAME semantic_const_division_by_zero
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_const_division_by_zero.nexs
+)
+set_tests_properties(semantic_const_division_by_zero PROPERTIES WILL_FAIL TRUE)
+
+add_nexc_golden_diagnostic_test(
+    semantic_const_division_by_zero_golden
+    --check
+    tests/semantic_const_division_by_zero.nexs
+    tests/golden/diagnostics/semantic_const_division_by_zero.stderr.txt
+)
+
+add_test(
+    NAME semantic_print_wrong_type
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_print_wrong_type.nexs
+)
+set_tests_properties(semantic_print_wrong_type PROPERTIES WILL_FAIL TRUE)

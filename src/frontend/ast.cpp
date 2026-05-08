@@ -148,6 +148,11 @@ private:
             return;
         }
 
+        if (const auto* string = dynamic_cast<const StringLiteralExpr*>(&expr)) {
+            line("StringLiteral " + string->raw);
+            return;
+        }
+
         if (const auto* name = dynamic_cast<const NameExpr*>(&expr)) {
             line("NameExpr " + name->name);
             return;
@@ -348,6 +353,10 @@ private:
                         (boolean->value ? "true" : "false"));
         }
 
+        if (const auto* string = dynamic_cast<const StringLiteralExpr*>(&expr)) {
+            return node("StringLiteral\n" + string->raw);
+        }
+
         if (const auto* name = dynamic_cast<const NameExpr*>(&expr)) {
             return node("NameExpr\n" + name->name);
         }
@@ -411,6 +420,8 @@ std::string_view builtinTypeName(BuiltinTypeKind kind) {
         return "u64";
     case BuiltinTypeKind::Bool:
         return "bool";
+    case BuiltinTypeKind::Str:
+        return "str";
     case BuiltinTypeKind::Void:
         return "void";
     case BuiltinTypeKind::Invalid:

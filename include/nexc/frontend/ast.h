@@ -24,6 +24,7 @@ enum class BuiltinTypeKind {
     U32,
     U64,
     Bool,
+    Str,
     Void,
     Invalid,
 };
@@ -63,6 +64,13 @@ struct BoolLiteralExpr final : Expr {
     BoolLiteralExpr(SourceSpan span, bool value) : Expr(span), value(value) {}
 
     bool value = false;
+};
+
+struct StringLiteralExpr final : Expr {
+    StringLiteralExpr(SourceSpan span, std::string raw)
+        : Expr(span), raw(std::move(raw)) {}
+
+    std::string raw;
 };
 
 struct NameExpr final : Expr {
@@ -219,6 +227,11 @@ struct ConstDecl final : Item {
     std::unique_ptr<Expr> init;
 };
 
+// TranslationUnit is the AST root for one source file.
+//
+// The name is standard compiler terminology: it means "the unit of source code
+// this compiler invocation translates." For NEX Core v0, that is simply one
+// `.nexs` file containing top-level declarations such as `fn` and `const`.
 struct TranslationUnit {
     std::vector<std::unique_ptr<Item>> items;
 };

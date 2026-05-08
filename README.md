@@ -45,8 +45,10 @@ Useful inspection commands:
 
 ```sh
 ./nexc.sh tokens examples/minimal.nexs
+./nexc.sh check-file examples/hello.nexs
 ./nexc.sh ast examples/add.nexs
 ./nexc.sh ast-dot examples/add.nexs > ast.dot
+./nexc.sh check-file examples/add.nexs
 ```
 
 Render the Graphviz output if `dot` is installed:
@@ -83,10 +85,12 @@ nex.md      Living project overview and AI/context document
 
 ## Key Documents
 
+- [LLM_REFERENCE.md](./LLM_REFERENCE.md) - compact index for future chats/LLMs
 - [docs/language/core_v0.md](./docs/language/core_v0.md) - normative **Core v0** language (first compiler milestone)
+- [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md) - beginner guide for writing current NEX programs
 - [docs/design/frontend_contract.md](./docs/design/frontend_contract.md) - lexer/parser/AST contract for the first frontend implementation
-- [COMPILER_LEARNING_GUIDE.md](./COMPILER_LEARNING_GUIDE.md) - educational guide to the compiler as it grows
-- [docs/user/frontend.md](./docs/user/frontend.md) - practical guide for `--dump-tokens` and `--dump-ast`
+- [NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md) - educational guide to the compiler as it grows
+- [docs/user/frontend.md](./docs/user/frontend.md) - practical guide for frontend inspection and semantic checking
 - [nex.md](./nex.md) - living project overview and language-planning context
 - [docs/design/optimization_goals.md](./docs/design/optimization_goals.md) - optimization and static-analysis goals
 

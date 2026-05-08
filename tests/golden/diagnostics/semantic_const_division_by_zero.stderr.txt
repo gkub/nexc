@@ -1,0 +1,3 @@
+tests/semantic_const_division_by_zero.nexs:1:23: error: division by zero in constant expression
+  | const BAD: i32 = 10 / 0;
+  |                       ^

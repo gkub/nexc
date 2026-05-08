@@ -29,10 +29,12 @@ Frontend inspection:
   tokens <file.nexs>     Build if needed, then run --dump-tokens
   ast <file.nexs>        Build if needed, then run --dump-ast
   ast-dot <file.nexs>    Build if needed, then run --dump-ast-dot
+  check-file <file.nexs> Build if needed, then run --check
 
 Examples:
   ./nexc.sh check
   ./nexc.sh ast examples/add.nexs
+  ./nexc.sh check-file examples/add.nexs
   ./nexc.sh ast-dot examples/add.nexs > ast.dot
   dot -Tsvg ast.dot -o ast.svg
 
@@ -150,6 +152,13 @@ case "$1" in
             exit 2
         fi
         compiler --dump-ast-dot "$2"
+        ;;
+    check-file)
+        if [[ $# -ne 2 ]]; then
+            echo "usage: ./nexc.sh check-file <file.nexs>" >&2
+            exit 2
+        fi
+        compiler --check "$2"
         ;;
     *)
         echo "error: unknown command '$1'" >&2

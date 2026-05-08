@@ -2,6 +2,7 @@
 #include "nexc/frontend/diagnostic.h"
 #include "nexc/frontend/lexer.h"
 #include "nexc/frontend/parser.h"
+#include "nexc/frontend/semantic.h"
 #include "nexc/frontend/source.h"
 #include "nexc/frontend/token.h"
 
@@ -17,10 +18,11 @@ enum class Mode {
     DumpTokens,
     DumpAst,
     DumpAstDot,
+    Check,
 };
 
 void printUsage(std::ostream& out) {
-    out << "usage: nexc (--dump-tokens | --dump-ast | --dump-ast-dot) <file.nexs>\n";
+    out << "usage: nexc (--dump-tokens | --dump-ast | --dump-ast-dot | --check) <file.nexs>\n";
 }
 
 std::string readFile(const std::string& path) {
@@ -49,6 +51,8 @@ int main(int argc, char** argv) {
         mode = Mode::DumpAst;
     } else if (modeArg == "--dump-ast-dot") {
         mode = Mode::DumpAstDot;
+    } else if (modeArg == "--check") {
+        mode = Mode::Check;
     } else {
         printUsage(std::cerr);
         return 2;
@@ -75,8 +79,16 @@ int main(int argc, char** argv) {
             nexc::TranslationUnit unit = parser.parseTranslationUnit();
             if (mode == Mode::DumpAst) {
                 nexc::dumpAst(std::cout, unit);
-            } else {
+            } else if (mode == Mode::DumpAstDot) {
                 nexc::dumpAstDot(std::cout, unit);
+            } else {
+                // Semantic analysis assumes the parser produced a trustworthy
+                // syntax tree. If syntax already failed, avoid piling meaning
+                // errors on top of the more fundamental parse errors.
+                if (!diagnostics.hasErrors()) {
+                    nexc::SemanticAnalyzer analyzer(source, diagnostics);
+                    analyzer.analyze(unit);
+                }
             }
         }
 

@@ -14,6 +14,7 @@ enum class TokenKind {
     EndOfFile,
     Identifier,
     IntegerLiteral,
+    StringLiteral,
 
     KwBool,
     KwConst,
