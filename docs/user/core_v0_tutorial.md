@@ -1,13 +1,13 @@
-# NEX Core v0 Tutorial
+# nex Core v0 Tutorial
 
-This is the beginner-facing guide for writing the NEX that exists today.
+This is the beginner-facing guide for writing the nex that exists today.
 
 Core v0 is small on purpose. You can write scalar functions, constants,
 variables, arithmetic, `if` / `else`, `while` loops, string literals, and
 `print` / `println` calls. You cannot allocate memory, use arrays, import files,
 spawn tasks, or compile to a native executable yet.
 
-The current compiler frontend can **check** NEX programs:
+The current compiler frontend can **check** nex programs:
 
 ```sh
 ./nexc.sh check-file examples/add.nexs
@@ -18,7 +18,7 @@ the current semantic checks.
 
 ## Hello, World
 
-NEX has built-in `print` and `println` calls in the frontend:
+nex has built-in `print` and `println` calls in the frontend:
 
 ```c
 fn main() -> void {
@@ -344,7 +344,7 @@ fn main() -> void {
 }
 ```
 
-This is intentionally simple. NEX does not have Python-style f-strings yet,
+This is intentionally simple. nex does not have Python-style f-strings yet,
 because interpolation and formatting can hide allocation, conversion, and
 runtime work. A future formatting design should make those costs explicit.
 

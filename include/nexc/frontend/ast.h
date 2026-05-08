@@ -230,7 +230,7 @@ struct ConstDecl final : Item {
 // TranslationUnit is the AST root for one source file.
 //
 // The name is standard compiler terminology: it means "the unit of source code
-// this compiler invocation translates." For NEX Core v0, that is simply one
+// this compiler invocation translates." For nex Core v0, that is simply one
 // `.nexs` file containing top-level declarations such as `fn` and `const`.
 struct TranslationUnit {
     std::vector<std::unique_ptr<Item>> items;

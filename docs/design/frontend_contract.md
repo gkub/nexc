@@ -1,7 +1,7 @@
-# NEX Frontend Contract
+# nex Frontend Contract
 
 This document defines the first implementation contract for the hand-written
-NEX frontend. It is intentionally smaller and more mechanical than the language
+nex frontend. It is intentionally smaller and more mechanical than the language
 vision in `nex.md`: the goal is to make the lexer, parser, AST, diagnostics,
 and first validation tests straightforward to build and review.
 

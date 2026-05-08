@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Developer convenience wrapper for the NEX compiler project.
+# Developer convenience wrapper for the nex compiler project.
 #
 # CMake and CTest remain the real build/test tools. This script just packages
 # the common commands behind names that are easy to remember while still

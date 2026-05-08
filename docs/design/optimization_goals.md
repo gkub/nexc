@@ -1,22 +1,22 @@
-# NEX Optimization Goals
+# nex Optimization Goals
 
 ## Purpose
 
-This document defines the optimization and static-analysis goals for the NEX compiler.
+This document defines the optimization and static-analysis goals for the nex compiler.
 
-NEX should not attempt to reimplement every generic compiler optimization from scratch. The compiler should use MLIR and LLVM for mature general-purpose optimization where possible, while implementing NEX-specific analyses and transformations where the language provides additional semantic information.
+nex should not attempt to reimplement every generic compiler optimization from scratch. The compiler should use MLIR and LLVM for mature general-purpose optimization where possible, while implementing nex-specific analyses and transformations where the language provides additional semantic information.
 
 Guiding principle:
 
-> Let LLVM optimize generic machine code. Let NEX optimize and diagnose what only NEX semantics can know.
+> Let LLVM optimize generic machine code. Let nex optimize and diagnose what only nex semantics can know.
 
 ---
 
 # Optimization Philosophy
 
-NEX is built around explicit runtime costs.
+nex is built around explicit runtime costs.
 
-Optimization in NEX should preserve that philosophy:
+Optimization in nex should preserve that philosophy:
 
 - expensive operations should remain visible
 - allocation and copying should not be silently introduced
@@ -32,11 +32,11 @@ The compiler should optimize aggressively only when doing so does not contradict
 
 # Optimization Categories
 
-NEX optimization work falls into several categories:
+nex optimization work falls into several categories:
 
 1. general frontend simplification
 2. LLVM/MLIR-based optimization
-3. NEX-specific semantic analysis
+3. nex-specific semantic analysis
 4. memory/resource analysis
 5. math/linear algebra optimization
 6. concurrency/realtime analysis
@@ -61,7 +61,7 @@ Before serious optimization, the compiler needs:
 - mutability checking
 - return checking
 
-**Integer semantics** for constant folding and literal handling follow the Core language definition: fixed-width two’s-complement types, **defined wrapping** at runtime for both signed and unsigned operations, and **compile-time diagnostics** for overflow in constant expressions. See [`docs/language/core_v0.md`](../language/core_v0.md) §5.
+**Integer semantics** for constant folding and literal handling follow the Core language definition: fixed-width two’s-complement types, **defined wrapping** at runtime for both signed and unsigned operations, and **compile-time diagnostics** for overflow in constant expressions. See [docs/language/core_v0.md](../language/core_v0.md) §5.
 
 Early optimization should not obscure correctness.
 
@@ -87,7 +87,7 @@ can be treated as:
 let x: i32 = 14;
 ```
 
-This requires type-aware literal handling; overflow rules are defined in [`docs/language/core_v0.md`](../language/core_v0.md) §5 (no undefined overflow; wrapping arithmetic; compile-time overflow diagnostics for constants).
+This requires type-aware literal handling; overflow rules are defined in [docs/language/core_v0.md](../language/core_v0.md) §5 (no undefined overflow; wrapping arithmetic; compile-time overflow diagnostics for constants).
 
 ## Constant Propagation
 
@@ -161,9 +161,9 @@ The early compiler should prioritize clean lowering over clever code generation.
 
 ---
 
-# Stage 3 — NEX-Specific Semantic Analyses
+# Stage 3 — nex-Specific Semantic Analyses
 
-NEX should implement analyses that depend on language semantics.
+nex should implement analyses that depend on language semantics.
 
 ## Effect Tracking
 
@@ -212,7 +212,7 @@ error: allocation is not allowed inside realtime function 'control_loop'
 
 ## Explicit Copy Diagnostics
 
-NEX should make copies visible.
+nex should make copies visible.
 
 If a source construct would introduce a copy or temporary, the compiler should either require an explicit operation or produce a diagnostic.
 
@@ -239,7 +239,7 @@ Diagnostics may report:
 
 # Stage 4 — Memory and Resource Optimization
 
-NEX should support explicit memory/resource reasoning.
+nex should support explicit memory/resource reasoning.
 
 ## Region-Based Memory Analysis
 
@@ -312,7 +312,7 @@ Tasks:
 
 # Stage 5 — Math and Linear Algebra Optimization
 
-NEX should support mathematical clarity without hidden computational cost.
+nex should support mathematical clarity without hidden computational cost.
 
 ## Shape-Aware Type Checking
 
@@ -421,7 +421,7 @@ Later goal:
 
 # Stage 6 — Concurrency and Channel Optimization
 
-NEX concurrency is explicit, so the compiler can reason about it.
+nex concurrency is explicit, so the compiler can reason about it.
 
 ## Channel Specialization
 
@@ -469,7 +469,7 @@ task worker:
 
 # Stage 7 — Embedded and RISC-V Optimization
 
-NEX should support target profiles.
+nex should support target profiles.
 
 A target profile may define:
 
@@ -490,7 +490,7 @@ RISC-V is the preferred first serious non-host ISA target.
 The compiler should primarily lower through:
 
 ```txt
-NEX
+nex
 → MLIR
 → LLVM dialect
 → LLVM IR
@@ -523,9 +523,9 @@ Classic Xtensa ESP32 support is not the initial target.
 
 ---
 
-# Flagship NEX-Specific Optimization Problems
+# Flagship nex-Specific Optimization Problems
 
-The most important NEX-specific optimization and analysis goals are:
+The most important nex-specific optimization and analysis goals are:
 
 1. effect-aware semantic analysis
 2. realtime-region verification
@@ -538,13 +538,13 @@ The most important NEX-specific optimization and analysis goals are:
 9. task/channel/resource diagnostics
 10. RISC-V target-profile support
 
-These are more central to NEX than simply running generic optimization passes.
+These are more central to nex than simply running generic optimization passes.
 
 ---
 
 # Non-Goals
 
-NEX should not initially attempt to implement:
+nex should not initially attempt to implement:
 
 - a custom register allocator
 - a custom instruction selector
@@ -563,7 +563,7 @@ NEX should not initially attempt to implement:
 Stage 0: frontend correctness
 Stage 1: basic frontend optimizations
 Stage 2: LLVM/MLIR baseline optimization
-Stage 3: NEX-specific semantic analyses
+Stage 3: nex-specific semantic analyses
 Stage 4: memory/resource optimization
 Stage 5: math and linear algebra optimization
 Stage 6: concurrency/channel optimization
@@ -574,6 +574,6 @@ Stage 7: embedded/RISC-V target-profile optimization
 
 # Design Rule
 
-Optimization should make NEX programs faster, clearer, or more diagnosable without violating the language's central promise:
+Optimization should make nex programs faster, clearer, or more diagnosable without violating the language's central promise:
 
 > Nothing expensive is implicit.

@@ -1,8 +1,8 @@
-# NEX Core Language — Version 0
+# nex Core Language — Version 0
 
-This document is the **normative specification** for the first implementable subset of NEX: what the reference compiler (`nexc`) should accept, reject, and mean for programs that use only Core v0 features.
+This document is the **normative specification** for the first implementable subset of nex: what the reference compiler (`nexc`) should accept, reject, and mean for programs that use only Core v0 features.
 
-Later phases (arrays, concurrency, realtime regions, rich math types, and so on) extend this core. They are described at a high level in `[nex.md](../../nex.md)`; when they land, they get their own spec sections or versioned addenda.
+Later phases (arrays, concurrency, realtime regions, rich math types, and so on) extend this core. They are described at a high level in [nex.md](../../nex.md); when they land, they get their own spec sections or versioned addenda.
 
 ---
 
@@ -142,7 +142,7 @@ This is **not** the same as JavaScript’s notion of “truthy” objects or arr
 
 ### 4.3 `const` vs `let` (not JavaScript `const`)
 
-In JavaScript, `const` means “this binding cannot be reassigned,” but **object contents** may still mutate. NEX avoids that confusion:
+In JavaScript, `const` means “this binding cannot be reassigned,” but **object contents** may still mutate. nex avoids that confusion:
 
 - `**let`** introduces a **runtime** binding inside a function: a name for a value in a stack frame (conceptually). It is **immutable** unless `mut` is used.
 - `**let mut`** introduces a **mutable** runtime binding: reassignment with `=` is allowed.
@@ -275,7 +275,7 @@ The reference compiler should expose:
 - **`--dump-tokens`**: token stream with kinds and spans (for lexer debugging).
 - **`--dump-ast`**: human-readable tree of the parsed program (for parser debugging).
 
-A natural extension is **`--dump-ast-dot`** (or similar): emit a [Graphviz](https://graphviz.org/) `dot` graph of the AST for a function or whole unit so it can be rendered as an image. This is a tooling feature, not a language semantic, but it is part of the expected developer experience for NEX.
+A natural extension is **`--dump-ast-dot`** (or similar): emit a [Graphviz](https://graphviz.org/) `dot` graph of the AST for a function or whole unit so it can be rendered as an image. This is a tooling feature, not a language semantic, but it is part of the expected developer experience for nex.
 
 ---
 
@@ -324,7 +324,7 @@ let x: i32 = 1; // error: let only inside functions
 
 ## 13. Relation to later phases
 
-Features sketched in `[nex.md](../../nex.md)` (arrays, `spawn`, channels, `realtime fn`, matrix types, resource tracking) **extend** Core v0. Until they are specified in this `docs/language/` tree, they are **not** part of the normative Core v0 grammar.
+Features sketched in [nex.md](../../nex.md) (arrays, `spawn`, channels, `realtime fn`, matrix types, resource tracking) **extend** Core v0. Until they are specified in this `docs/language/` tree, they are **not** part of the normative Core v0 grammar.
 
 ---
 

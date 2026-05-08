@@ -1,8 +1,8 @@
-# NEX — Language & Compiler Project Overview
+# nex — Language & Compiler Project Overview
 
 ## High-Level Vision
 
-NEX is a lightweight systems programming language focused on:
+nex is a lightweight systems programming language focused on:
 
 - explicit concurrency
 - predictable execution
@@ -39,7 +39,7 @@ The project is intended both as:
 
 ## Language Name
 
-NEX
+nex
 
 ## Compiler Name
 
@@ -49,7 +49,7 @@ nexc
 
 ## Philosophy
 
-NEX is designed around:
+nex is designed around:
 
 - predictable behavior
 - explicit execution semantics
@@ -168,7 +168,7 @@ nexc/
 
 # Documentation Strategy
 
-NEX is docs-first.
+nex is docs-first.
 
 Features should be defined in writing before implementation. A feature should generally enter the compiler only after the project has defined:
 
@@ -183,7 +183,7 @@ Features should be defined in writing before implementation. A feature should ge
 
 The language definition should not accidentally emerge from whatever the compiler happens to implement first.
 
-The first **normative** slice of the grammar and semantics is **[`docs/language/core_v0.md`](./docs/language/core_v0.md)** (scalar types, functions, control flow, `let` / `mut` / `const`, entry point, and tooling hooks). Phases below remain the roadmap; Core v0 is what the initial lexer, parser, and semantic pass implement.
+The first **normative** slice of the grammar and semantics is **[docs/language/core_v0.md](./docs/language/core_v0.md)** (scalar types, functions, control flow, `let` / `mut` / `const`, entry point, and tooling hooks). Phases below remain the roadmap; Core v0 is what the initial lexer, parser, and semantic pass implement.
 
 ---
 
@@ -240,7 +240,7 @@ Goal:
 
 ## 2. No Hidden Work
 
-NEX avoids:
+nex avoids:
 
 - hidden allocations
 - hidden copies
@@ -264,7 +264,7 @@ All expensive work should be visible at source level or reportable by compiler d
 
 ## 3. Predictable / Realtime-Safe Execution
 
-NEX intends to support compiler-verified constrained execution regions.
+nex intends to support compiler-verified constrained execution regions.
 
 Example:
 
@@ -291,7 +291,7 @@ Compiler should track effects through semantic analysis.
 
 ## 4. Mathematical Clarity Without Hidden Computational Cost
 
-NEX should support expressive numerical code while preserving low-level performance visibility.
+nex should support expressive numerical code while preserving low-level performance visibility.
 
 Target areas:
 
@@ -319,13 +319,13 @@ When operations may allocate or create temporaries, the compiler should either m
 matmul_into(out, a, b);
 ```
 
-NEX math should feel like writing optimized C manually, but with the compiler checking dimensions, preventing avoidable mistakes, and eventually lowering fixed-size operations efficiently.
+nex math should feel like writing optimized C manually, but with the compiler checking dimensions, preventing avoidable mistakes, and eventually lowering fixed-size operations efficiently.
 
 ---
 
 ## 5. Resource Usage Should Be Observable When Requested
 
-NEX should support optional resource observability.
+nex should support optional resource observability.
 
 Resource observability means the compiler and runtime can cooperate to report information such as:
 
@@ -357,7 +357,7 @@ Normal builds should have minimal overhead. Debug/profile builds may enable inst
 
 ## Phase 1 — Minimal Scalar Language
 
-Concrete syntax, types, overflow rules, and entry-point requirements for this phase are specified in [`docs/language/core_v0.md`](./docs/language/core_v0.md).
+Concrete syntax, types, overflow rules, and entry-point requirements for this phase are specified in [docs/language/core_v0.md](./docs/language/core_v0.md).
 
 Features:
 
@@ -381,7 +381,7 @@ fn square(x: i32) -> i32 {
 
 ## Phase 2 — Control Flow
 
-Specified in Core v0 ([`docs/language/core_v0.md`](./docs/language/core_v0.md)).
+Specified in Core v0 ([docs/language/core_v0.md](./docs/language/core_v0.md)).
 
 Features:
 
@@ -402,7 +402,7 @@ if (x > 0) {
 
 ## Phase 3 — Mutable Variables
 
-Specified in Core v0 ([`docs/language/core_v0.md`](./docs/language/core_v0.md)).
+Specified in Core v0 ([docs/language/core_v0.md](./docs/language/core_v0.md)).
 
 Features:
 
@@ -566,7 +566,7 @@ AST
     ↓
 Semantic Analysis
     ↓
-NEX-specific analyses and optimizations
+nex-specific analyses and optimizations
     ↓
 MLIR Generation
     ↓
@@ -667,7 +667,7 @@ Planned responsibilities:
 
 # Optimization Strategy
 
-NEX should use existing LLVM/MLIR optimization machinery for generic compiler optimizations and implement NEX-specific analyses where the language has extra semantic information.
+nex should use existing LLVM/MLIR optimization machinery for generic compiler optimizations and implement nex-specific analyses where the language has extra semantic information.
 
 General compiler optimizations:
 
@@ -678,7 +678,7 @@ General compiler optimizations:
 - SSA promotion through LLVM
 - loop-invariant code motion where appropriate
 
-NEX-specific optimization and analysis goals:
+nex-specific optimization and analysis goals:
 
 - effect-aware optimization
 - realtime-region verification
@@ -721,13 +721,13 @@ Goal:
 
 - understand lowering pipelines first
 - use existing MLIR structures where possible
-- add custom NEX dialect only if the language needs it
+- add custom nex dialect only if the language needs it
 
 ---
 
 # Future MLIR Direction
 
-Potential custom NEX dialect later.
+Potential custom nex dialect later.
 
 Possible operations:
 
@@ -803,7 +803,7 @@ Potential future:
 
 # Target Model
 
-NEX programs are compiled for a target profile.
+nex programs are compiled for a target profile.
 
 A target profile may define:
 
@@ -829,13 +829,13 @@ riscv32-embedded
 
 RISC-V is the preferred first serious non-host ISA target.
 
-C emission is not the primary strategy. NEX should primarily lower through MLIR/LLVM to native code.
+C emission is not the primary strategy. nex should primarily lower through MLIR/LLVM to native code.
 
 ---
 
 # ESP32 / Embedded Direction
 
-NEX should be designed with embedded profiles in mind.
+nex should be designed with embedded profiles in mind.
 
 ESP32-class support is most realistic on RISC-V variants such as ESP32-C3/C6-style hardware rather than classic Xtensa-first support.
 
@@ -867,16 +867,16 @@ Reasons:
 
 # Bootstrapping / Self-Hosting Goal
 
-A long-term goal of NEX is partial or full self-hosting.
+A long-term goal of nex is partial or full self-hosting.
 
 Initial stages:
 
 ```txt
 Stage 0: nexc written in C++
-Stage 1: small NEX programs compile and run
-Stage 2: runtime helpers or examples written in NEX
-Stage 3: developer tools written in NEX
-Stage 4: parts of the compiler frontend written in NEX
+Stage 1: small nex programs compile and run
+Stage 2: runtime helpers or examples written in nex
+Stage 3: developer tools written in nex
+Stage 4: parts of the compiler frontend written in nex
 Stage 5: nexc can compile substantial parts of itself
 Stage 6: full self-hosting
 ```
@@ -916,7 +916,7 @@ NOT:
 
 # Important Non-Goals
 
-NEX is NOT intended to initially support:
+nex is NOT intended to initially support:
 
 - classes
 - inheritance

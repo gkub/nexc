@@ -1,6 +1,6 @@
 # Frontend User Guide
 
-This guide explains how to use and read the first NEX frontend tools. It is the
+This guide explains how to use and read the first nex frontend tools. It is the
 practical companion to the normative language spec in
 `docs/language/core_v0.md` and the implementation contract in
 `docs/design/frontend_contract.md`.
@@ -173,8 +173,8 @@ extend.
 ## Language Tutorial
 
 This page explains how to use the current frontend tools. It is not meant to be
-the long-term user reference for writing NEX programs.
+the long-term user reference for writing nex programs.
 
-For that, use [`docs/user/core_v0_tutorial.md`](./core_v0_tutorial.md). It is
-focused on writing NEX code: functions, variables, types, conditions, loops,
+For that, use [docs/user/core_v0_tutorial.md](./core_v0_tutorial.md). It is
+focused on writing nex code: functions, variables, types, conditions, loops,
 calls, constants, and common diagnostics.

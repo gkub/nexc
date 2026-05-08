@@ -4,7 +4,7 @@ This guide explains the compiler as it grows. It is intentionally educational:
 when we add a compiler concept, this file should explain **what it is**, **why it
 exists**, and **where it lives in the codebase**.
 
-The language rules live in [`docs/language/core_v0.md`](docs/language/core_v0.md).
+The language rules live in [docs/language/core_v0.md](docs/language/core_v0.md).
 This guide is about how the compiler implementation works.
 
 ## Table of Contents
@@ -103,7 +103,7 @@ pass must reject returning `bool` from an `i32` function.
 
 ## 2. Build Shape
 
-The root [`CMakeLists.txt`](CMakeLists.txt) defines two main targets:
+The root [CMakeLists.txt](CMakeLists.txt) defines two main targets:
 
 - `nexc_frontend`: reusable compiler frontend library
 - `nexc`: command-line executable

@@ -5,7 +5,7 @@ It is an index, not a full spec.
 
 ## Current Project State
 
-`nexc` is a C++ compiler project for the NEX language. The current implementation
+`nexc` is a C++ compiler project for the nex language. The current implementation
 is a **checked Core v0 frontend**:
 
 ```text
@@ -54,21 +54,21 @@ Useful one-file commands:
 
 | Topic | File |
 | ----- | ---- |
-| Project overview / long-term vision | [`nex.md`](./nex.md) |
-| Public README / quick start | [`README.md`](./README.md) |
-| How to build/test/run frontend tools | [`nexc.sh`](./nexc.sh), [`docs/user/frontend.md`](./docs/user/frontend.md) |
-| How to write current NEX code | [`docs/user/core_v0_tutorial.md`](./docs/user/core_v0_tutorial.md) |
-| Normative Core v0 language rules | [`docs/language/core_v0.md`](./docs/language/core_v0.md) |
-| Educational compiler guide | [`NEXC_HOLY_BOOK.md`](./NEXC_HOLY_BOOK.md) |
-| Frontend implementation contract | [`docs/design/frontend_contract.md`](./docs/design/frontend_contract.md) |
-| Optimization / analysis direction | [`docs/design/optimization_goals.md`](./docs/design/optimization_goals.md) |
-| Lexer/parser/AST/semantic headers | [`include/nexc/frontend/`](./include/nexc/frontend/) |
-| Frontend implementation | [`src/frontend/`](./src/frontend/) |
-| CLI driver | [`src/tools/nexc/main.cpp`](./src/tools/nexc/main.cpp) |
-| Example NEX programs | [`examples/`](./examples/) |
-| Invalid/semantic test fixtures | [`tests/`](./tests/) |
-| Golden expected output | [`tests/golden/`](./tests/golden/) |
-| CI workflow | [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) |
+| Project overview / long-term vision | [nex.md](./nex.md) |
+| Public README / quick start | [README.md](./README.md) |
+| How to build/test/run frontend tools | [nexc.sh](./nexc.sh), [docs/user/frontend.md](./docs/user/frontend.md) |
+| How to write current nex code | [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md) |
+| Normative Core v0 language rules | [docs/language/core_v0.md](./docs/language/core_v0.md) |
+| Educational compiler guide | [NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md) |
+| Frontend implementation contract | [docs/design/frontend_contract.md](./docs/design/frontend_contract.md) |
+| Optimization / analysis direction | [docs/design/optimization_goals.md](./docs/design/optimization_goals.md) |
+| Lexer/parser/AST/semantic headers | [include/nexc/frontend/](./include/nexc/frontend/) |
+| Frontend implementation | [src/frontend/](./src/frontend/) |
+| CLI driver | [src/tools/nexc/main.cpp](./src/tools/nexc/main.cpp) |
+| Example nex programs | [examples/](./examples/) |
+| Invalid/semantic test fixtures | [tests/](./tests/) |
+| Golden expected output | [tests/golden/](./tests/golden/) |
+| CI workflow | [.github/workflows/ci.yml](./.github/workflows/ci.yml) |
 
 ## Current Language Surface
 
@@ -87,13 +87,13 @@ Core v0 currently supports:
 - function calls
 - built-in `print(str) -> void` and `println(str) -> void`
 
-See [`docs/user/core_v0_tutorial.md`](./docs/user/core_v0_tutorial.md) for the
-friendly version, and [`docs/language/core_v0.md`](./docs/language/core_v0.md)
+See [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md) for the
+friendly version, and [docs/language/core_v0.md](./docs/language/core_v0.md)
 for the more precise version.
 
 ## Current Tests
 
-Tests are CTest entries defined in [`CMakeLists.txt`](./CMakeLists.txt).
+Tests are CTest entries defined in [CMakeLists.txt](./CMakeLists.txt).
 
 Current categories:
 
@@ -113,15 +113,15 @@ Run them with:
 
 The next major discussion is backend/IR strategy. Options to consider:
 
-1. A tiny NEX typed IR before MLIR/LLVM.
+1. A tiny nex typed IR before MLIR/LLVM.
 2. Direct textual LLVM IR for a very small subset.
 3. First MLIR generation for Core v0 scalar programs.
 
 Before or during that, keep docs updated:
 
-- Update [`NEXC_HOLY_BOOK.md`](./NEXC_HOLY_BOOK.md) when adding compiler concepts.
-- Update [`docs/user/core_v0_tutorial.md`](./docs/user/core_v0_tutorial.md) when user-visible NEX syntax changes.
-- Update [`docs/language/core_v0.md`](./docs/language/core_v0.md) when normative language behavior changes.
+- Update [NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md) when adding compiler concepts.
+- Update [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md) when user-visible nex syntax changes.
+- Update [docs/language/core_v0.md](./docs/language/core_v0.md) when normative language behavior changes.
 - Update tests/goldens with the implementation change that intentionally alters behavior.
 
 ## Style Guidance For Future Agents

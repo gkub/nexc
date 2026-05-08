@@ -11,7 +11,7 @@ namespace nexc {
 // A half-open byte range into a SourceFile: [start, end).
 //
 // Compilers usually attach spans to both tokens and AST nodes so every error can
-// point back to the source text that caused it. NEX stores byte offsets first
+// point back to the source text that caused it. nex stores byte offsets first
 // and derives line/column only when rendering diagnostics.
 struct SourceSpan {
     std::size_t start = 0;
