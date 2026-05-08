@@ -18,7 +18,6 @@ public:
     void analyze(const TranslationUnit& unit);
 
 private:
-    const SourceFile& source_;
     DiagnosticBag& diagnostics_;
 };
 

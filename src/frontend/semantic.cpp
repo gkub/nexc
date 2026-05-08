@@ -158,8 +158,7 @@ unsigned long long maxIntegerValue(Type type) {
 
 class AnalyzerImpl {
 public:
-    AnalyzerImpl(const SourceFile& source, DiagnosticBag& diagnostics)
-        : source_(source), diagnostics_(diagnostics) {}
+    explicit AnalyzerImpl(DiagnosticBag& diagnostics) : diagnostics_(diagnostics) {}
 
     void analyze(const TranslationUnit& unit) {
         installBuiltins();
@@ -747,7 +746,6 @@ private:
         }
     }
 
-    const SourceFile& source_;
     DiagnosticBag& diagnostics_;
     std::unordered_map<std::string, SourceSpan> topLevelNames_;
     std::unordered_map<std::string, FunctionSymbol> functions_;
@@ -759,12 +757,12 @@ private:
 
 } // namespace
 
-SemanticAnalyzer::SemanticAnalyzer(const SourceFile& source,
+SemanticAnalyzer::SemanticAnalyzer(const SourceFile&,
                                    DiagnosticBag& diagnostics)
-    : source_(source), diagnostics_(diagnostics) {}
+    : diagnostics_(diagnostics) {}
 
 void SemanticAnalyzer::analyze(const TranslationUnit& unit) {
-    AnalyzerImpl(source_, diagnostics_).analyze(unit);
+    AnalyzerImpl(diagnostics_).analyze(unit);
 }
 
 } // namespace nexc
