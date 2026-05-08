@@ -30,6 +30,7 @@ Frontend inspection:
   ast <file.nexs>        Build if needed, then run --dump-ast
   ast-dot <file.nexs>    Build if needed, then run --dump-ast-dot
   ir <file.nexs>         Build if needed, then run --dump-ir
+  mlir <file.nexs>       Build if needed, then run --dump-mlir
   ast-graph <file.nexs> [prefix]
                            Write Graphviz DOT and SVG files
   check-file <file.nexs> Build if needed, then run --check
@@ -38,6 +39,7 @@ Examples:
   ./nexc.sh check
   ./nexc.sh ast examples/add.nexs
   ./nexc.sh ir examples/add.nexs
+  ./nexc.sh mlir examples/return_42.nexs
   ./nexc.sh check-file examples/add.nexs
   ./nexc.sh ast-dot examples/add.nexs > ast.dot
   ./nexc.sh ast-graph examples/add.nexs
@@ -195,6 +197,13 @@ case "$1" in
             exit 2
         fi
         compiler --dump-ir "$2"
+        ;;
+    mlir)
+        if [[ $# -ne 2 ]]; then
+            echo "usage: ./nexc.sh mlir <file.nexs>" >&2
+            exit 2
+        fi
+        compiler --dump-mlir "$2"
         ;;
     ast-graph)
         shift

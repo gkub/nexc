@@ -8,6 +8,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(NEXC_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 
+find_package(MLIR CONFIG
+    HINTS
+        ENV MLIR_DIR
+        /usr/lib/llvm-18/lib/cmake/mlir
+)
+
+if(MLIR_FOUND)
+    message(STATUS "Found MLIR ${MLIR_VERSION}: ${MLIR_DIR}")
+endif()
+
 function(nexc_target_warnings target)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         target_compile_options(${target}
@@ -60,8 +70,30 @@ target_include_directories(nexc_ir
 target_link_libraries(nexc_ir PUBLIC nexc_frontend)
 nexc_target_warnings(nexc_ir)
 
+add_library(nexc_mlir
+    src/mlir/textual.cpp
+)
+
+target_include_directories(nexc_mlir
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(nexc_mlir PUBLIC nexc_ir)
+if(MLIR_FOUND)
+    target_compile_definitions(nexc_mlir PRIVATE NEXC_HAS_REAL_MLIR=1)
+    target_include_directories(nexc_mlir SYSTEM PRIVATE ${MLIR_INCLUDE_DIRS})
+    target_link_libraries(nexc_mlir
+        PRIVATE
+            MLIRIR
+            MLIRFuncDialect
+            MLIRArithDialect
+    )
+endif()
+nexc_target_warnings(nexc_mlir)
+
 add_executable(nexc src/tools/nexc/main.cpp)
-target_link_libraries(nexc PRIVATE nexc_ir)
+target_link_libraries(nexc PRIVATE nexc_mlir)
 nexc_target_warnings(nexc)
 
 enable_testing()
@@ -158,6 +190,27 @@ add_nexc_golden_test(
     --dump-ir
     tests/semantic_if_else_returns.nexs
     tests/golden/dump_ir/if_else_returns.ir.txt
+)
+
+add_nexc_golden_test(
+    dump_mlir_return_42_golden
+    --dump-mlir
+    examples/return_42.nexs
+    tests/golden/dump_mlir/return_42.mlir
+)
+
+add_nexc_golden_test(
+    dump_mlir_scalar_expr_golden
+    --dump-mlir
+    examples/scalar_expr.nexs
+    tests/golden/dump_mlir/scalar_expr.mlir
+)
+
+add_nexc_golden_test(
+    dump_mlir_function_call_golden
+    --dump-mlir
+    examples/function_call.nexs
+    tests/golden/dump_mlir/function_call.mlir
 )
 
 add_test(

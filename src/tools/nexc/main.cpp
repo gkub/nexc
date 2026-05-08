@@ -7,6 +7,7 @@
 #include "nexc/frontend/token.h"
 #include "nexc/ir/builder.h"
 #include "nexc/ir/dump.h"
+#include "nexc/mlir/textual.h"
 
 #include <fstream>
 #include <iostream>
@@ -21,11 +22,12 @@ enum class Mode {
     DumpAst,
     DumpAstDot,
     DumpIr,
+    DumpMlir,
     Check,
 };
 
 void printUsage(std::ostream& out) {
-    out << "usage: nexc (--dump-tokens | --dump-ast | --dump-ast-dot | --dump-ir | --check) <file.nexs>\n";
+    out << "usage: nexc (--dump-tokens | --dump-ast | --dump-ast-dot | --dump-ir | --dump-mlir | --check) <file.nexs>\n";
 }
 
 std::string readFile(const std::string& path) {
@@ -56,6 +58,8 @@ int main(int argc, char** argv) {
         mode = Mode::DumpAstDot;
     } else if (modeArg == "--dump-ir") {
         mode = Mode::DumpIr;
+    } else if (modeArg == "--dump-mlir") {
+        mode = Mode::DumpMlir;
     } else if (modeArg == "--check") {
         mode = Mode::Check;
     } else {
@@ -94,9 +98,14 @@ int main(int argc, char** argv) {
                     nexc::SemanticAnalyzer analyzer(source, diagnostics);
                     analyzer.analyze(unit);
                 }
-                if (mode == Mode::DumpIr && !diagnostics.hasErrors()) {
+                if ((mode == Mode::DumpIr || mode == Mode::DumpMlir) &&
+                    !diagnostics.hasErrors()) {
                     const nexc::ir::Module module = nexc::ir::buildTypedIr(unit);
-                    nexc::ir::dumpModule(std::cout, module);
+                    if (mode == Mode::DumpIr) {
+                        nexc::ir::dumpModule(std::cout, module);
+                    } else {
+                        nexc::mlir::dumpTextualMlir(std::cout, module);
+                    }
                 }
             }
         }

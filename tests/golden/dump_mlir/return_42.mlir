@@ -1,0 +1,6 @@
+module {
+  func.func @main() -> i32 {
+    %c42_i32 = arith.constant 42 : i32
+    return %c42_i32 : i32
+  }
+}

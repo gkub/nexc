@@ -6,7 +6,9 @@ Core slogan:
 
 > Nothing expensive is implicit.
 
-nex is currently in the **language-definition and compiler-planning stage**. The project is intentionally docs-first: syntax, semantics, examples, and design constraints should be defined before implementation.
+nex is currently in an early compiler implementation stage. The project remains
+docs-first: syntax, semantics, examples, and design constraints should be defined
+before or alongside implementation.
 
 ## Project Goals
 
@@ -23,13 +25,56 @@ nex is currently in the **language-definition and compiler-planning stage**. The
 
 ## Current Focus
 
-1. Define the nex language model
-2. Document core syntax and semantics
-3. Design the compiler architecture
-4. Implement the frontend incrementally
-5. Add semantic analysis and effect tracking
-6. Add MLIR/LLVM lowering after the frontend is solid
-7. Build nex-specific analyses and optimizations incrementally
+1. Keep Core v0 syntax and semantics well documented
+2. Maintain a checked frontend: lexer, parser, AST, semantic analysis
+3. Grow the nex-owned typed IR with golden tests
+4. Lower small typed IR slices into MLIR
+5. Add LLVM/native lowering after MLIR lowering is clearer
+6. Build nex-specific analyses and optimizations incrementally
+
+## Current Status
+
+The compiler currently supports:
+
+- token dumps
+- AST text and Graphviz DOT dumps
+- semantic checking for Core v0 examples
+- typed IR dumps
+- MLIR lowering for simple `i32` returns, scalar arithmetic, function parameters,
+and direct function calls
+
+It does **not** yet generate LLVM IR, native objects, or executable programs.
+
+## Development Setup
+
+On Ubuntu 24.04, install the basic build tools plus LLVM/MLIR 18:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y cmake ninja-build build-essential clang graphviz
+sudo apt-get install -y libmlir-18-dev mlir-18-tools
+```
+
+The MLIR packages install headers, CMake config files, libraries, and tools under
+`/usr/lib/llvm-18`. Adding the LLVM tools directory to the shell `PATH` makes
+commands such as `mlir-opt` and `mlir-translate` available directly:
+
+```sh
+echo 'export PATH=/usr/lib/llvm-18/bin:$PATH' >> ~/.zshrc
+source ~/.zshrc
+mlir-opt --version
+```
+
+Official setup references:
+
+- [MLIR Getting Started](https://mlir.llvm.org/getting_started/)
+- [LLVM Getting Started](https://llvm.org/docs/GettingStarted.html)
+- [Building LLVM with CMake](https://llvm.org/docs/CMake.html)
+
+For non-Ubuntu systems, use the official LLVM/MLIR installation or source-build
+instructions. The important requirement for this project is that CMake can find
+the MLIR package, usually via `MLIR_DIR`, and that MLIR tools such as `mlir-opt`
+are available for validation.
 
 ## Quick Start
 
@@ -48,8 +93,8 @@ Useful inspection commands:
 ./nexc.sh check-file examples/hello.nexs
 ./nexc.sh ast examples/add.nexs
 ./nexc.sh ir examples/add.nexs
+./nexc.sh mlir examples/function_call.nexs
 ./nexc.sh ast-graph examples/add.nexs
-./nexc.sh check-file examples/add.nexs
 ```
 
 That writes `ast.dot` and `ast.svg` if Graphviz `dot` is installed. To choose a
@@ -131,7 +176,8 @@ Long term, nex may become partially or fully self-hosting once the language is m
 
 ## Status
 
-Early-stage. No stable compiler implementation yet.
+Early-stage. The frontend, typed IR, and first scalar MLIR lowering slices are
+implemented, but the compiler does not yet produce native executables.
 
 ## License
 

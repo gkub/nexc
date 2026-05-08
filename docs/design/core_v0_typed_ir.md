@@ -16,7 +16,7 @@ The next backend-facing step should introduce a tiny nex-owned typed IR between
 semantic analysis and any MLIR/LLVM lowering:
 
 ```text
-checked AST -> typed IR -> MLIR/LLVM/native lowering
+checked AST -> typed IR -> MLIR -> LLVM/native lowering
 ```
 
 The goal is not to compete with MLIR or LLVM. The goal is to make the boundary
@@ -247,8 +247,68 @@ After typed IR dumps are stable, there are three reasonable lowering paths:
 2. Lower a tiny scalar subset directly to textual LLVM IR as a learning step.
 3. Lower to a lower-level nex IR first, then choose MLIR/LLVM.
 
-The preferred path is likely MLIR for the serious compiler direction, but the
-typed IR keeps that choice reversible while the frontend is still small.
+The chosen first slice is MLIR-first. The implementation builds a tiny MLIR
+module with the MLIR C++ API and prints stable MLIR text for inspection and
+golden tests.
+
+Initial command:
+
+```sh
+./nexc.sh mlir examples/return_42.nexs
+```
+
+Initial output:
+
+```mlir
+module {
+  func.func @main() -> i32 {
+    %c42_i32 = arith.constant 42 : i32
+    return %c42_i32 : i32
+  }
+}
+```
+
+The typed IR keeps the lowering choice reversible while the frontend is still
+small.
+
+The current scalar slice has grown beyond the first literal return. It can also
+lower straight-line `i32` arithmetic and direct calls between nex functions:
+
+```sh
+./nexc.sh mlir examples/function_call.nexs
+```
+
+That example demonstrates two important MLIR ideas. Function parameters become
+entry-block arguments such as `%arg0`; no memory load is needed to read them yet.
+Expression results become SSA values produced by MLIR operations such as
+`arith.addi` and `func.call`.
+
+## SSA Policy
+
+LLVM IR is SSA, and MLIR values are also SSA-like: a value such as `%0` is
+defined once and then used by later operations. That does not mean the nex
+compiler needs a custom SSA/CFG IR immediately.
+
+Current policy:
+
+- Keep nex typed IR semantic and structured.
+- Let MLIR/LLVM own generic SSA machinery and generic optimization first.
+- Lower immutable expression results naturally as MLIR SSA values.
+- Treat current function parameters as MLIR block arguments when lowering
+  `LoadLocal` operations.
+- Lower mutable locals through explicit storage or structured operations until a
+  later pass can promote/simplify them.
+- Revisit a nex-owned SSA/CFG layer only when a concrete nex-specific analysis
+  needs it.
+
+Potential future reasons for nex-owned SSA/CFG:
+
+- effect-aware optimization
+- explicit copy/allocation diagnostics
+- region/resource analysis
+- shape-aware math fusion
+- bounds-check elimination using nex array semantics
+- realtime/concurrency analyses that need control-flow facts before MLIR
 
 ## Open Questions
 
@@ -271,6 +331,8 @@ Grow the read-only IR dump path:
 parse -> semantic analyze -> build typed IR -> dump typed IR
 ```
 
-Do not emit MLIR, LLVM IR, or native code until the typed IR continues to
-represent Core v0 scalar examples clearly and has golden tests for the relevant
-shape.
+Do not emit LLVM IR or native code until the typed IR and MLIR lowering continue
+to represent Core v0 scalar examples clearly and have golden tests for the
+relevant shape. The immediate next backend work is to lower mutable locals,
+booleans/comparisons, and structured control flow into appropriate MLIR dialects
+before attempting LLVM/native output.

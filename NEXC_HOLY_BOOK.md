@@ -20,10 +20,11 @@ This guide is about how the compiler implementation works.
 - [8. Parser](#8-parser)
 - [9. Semantic Analysis](#9-semantic-analysis)
 - [10. Typed IR](#10-typed-ir)
-- [11. CLI Inspection Modes](#11-cli-inspection-modes)
-- [12. Tests, Golden Files, and CI](#12-tests-golden-files-and-ci)
-- [13. Current Limitations](#13-current-limitations)
-- [14. Recommended Next Steps](#14-recommended-next-steps)
+- [11. MLIR Lowering](#11-mlir-lowering)
+- [12. CLI Inspection Modes](#12-cli-inspection-modes)
+- [13. Tests, Golden Files, and CI](#13-tests-golden-files-and-ci)
+- [14. Current Limitations](#14-current-limitations)
+- [15. Recommended Next Steps](#15-recommended-next-steps)
 
 ## Developer Workflow
 
@@ -60,6 +61,7 @@ Frontend inspection commands:
 ./nexc.sh tokens examples/minimal.nexs
 ./nexc.sh ast examples/add.nexs
 ./nexc.sh ir examples/add.nexs
+./nexc.sh mlir examples/return_42.nexs
 ./nexc.sh ast-graph examples/add.nexs
 ```
 
@@ -76,8 +78,8 @@ CMAKE_GENERATOR=Ninja ./nexc.sh configure
 
 ## 1. Current Pipeline
 
-The compiler currently implements a checked Core v0 frontend and a first typed
-IR dump:
+The compiler currently implements a checked Core v0 frontend, a first typed IR
+dump, and a tiny MLIR lowering slice:
 
 ```text
 source text
@@ -88,10 +90,10 @@ source text
   -> AST
   -> SemanticAnalyzer
   -> typed IR
+  -> MLIR
 ```
 
-MLIR generation, LLVM lowering, and native code generation are not implemented
-yet.
+LLVM lowering and native code generation are not implemented yet.
 
 Each stage has a narrow job:
 
@@ -101,6 +103,8 @@ Each stage has a narrow job:
 - **Semantic analysis:** decides whether the tree means something valid.
 - **Typed IR builder:** turns the checked AST into a backend-facing, typed,
 resolved representation.
+- **MLIR emitter:** lowers the first tiny typed IR slice into a real MLIR module
+and prints stable MLIR text.
 
 That separation is important. For example, this can parse successfully:
 
@@ -115,10 +119,11 @@ pass must reject returning `bool` from an `i32` function.
 
 ## 2. Build Shape
 
-The root [CMakeLists.txt](CMakeLists.txt) defines three main targets:
+The root [CMakeLists.txt](CMakeLists.txt) defines four main targets:
 
 - `nexc_frontend`: reusable compiler frontend library
 - `nexc_ir`: typed IR model, builder, and dumper
+- `nexc_mlir`: first MLIR lowering layer
 - `nexc`: command-line executable
 
 The frontend library lives under:
@@ -133,6 +138,13 @@ The typed IR library lives under:
 ```text
 include/nexc/ir/
 src/ir/
+```
+
+The MLIR lowering layer lives under:
+
+```text
+include/nexc/mlir/
+src/mlir/
 ```
 
 The CLI lives at:
@@ -778,7 +790,7 @@ change as the implementation.
 The typed IR is not yet:
 
 - SSA
-- MLIR
+- complete MLIR lowering beyond the first tiny slice
 - LLVM IR
 - executable code
 - a runtime ABI
@@ -787,7 +799,245 @@ The typed IR is not yet:
 It is the small explicit bridge between "the frontend understands this program"
 and "a future backend can lower this program."
 
-## 11. CLI Inspection Modes
+### 10.10 Relationship To Lowering
+
+Typed IR is the boundary between nex frontend meaning and backend mechanics. It
+is not meant to become a full optimizer immediately. The current lowering path is:
+
+```text
+checked AST -> typed IR -> MLIR
+```
+
+That keeps the frontend independent from MLIR details while still letting the
+backend consume a resolved, typed representation.
+
+## 11. MLIR Lowering
+
+MLIR means Multi-Level Intermediate Representation. It is part of the LLVM
+project, but it sits above LLVM IR. LLVM IR is close to machine-level code; MLIR
+is a framework for building and transforming higher-level compiler IRs before
+eventually lowering toward LLVM or another target.
+
+MLIR is organized around **dialects**. A dialect is a family of operations and
+types for one abstraction level. The current nex slice uses:
+
+- `builtin`: module containers and core MLIR infrastructure
+- `func`: function definitions, entry-block arguments, calls, and returns
+- `arith`: integer constants and arithmetic operations
+
+This small nex program:
+
+```nex
+fn main() -> i32 {
+    return 42;
+}
+```
+
+lowers to:
+
+```mlir
+module {
+  func.func @main() -> i32 {
+    %c42_i32 = arith.constant 42 : i32
+    return %c42_i32 : i32
+  }
+}
+```
+
+The lowering now also handles straight-line `i32` arithmetic and direct calls
+between nex functions:
+
+```nex
+fn add(a: i32, b: i32) -> i32 {
+    return a + b;
+}
+
+fn main() -> i32 {
+    return add(40, 2);
+}
+```
+
+That produces:
+
+```mlir
+module {
+  func.func @add(%arg0: i32, %arg1: i32) -> i32 {
+    %0 = arith.addi %arg0, %arg1 : i32
+    return %0 : i32
+  }
+  func.func @main() -> i32 {
+    %c40_i32 = arith.constant 40 : i32
+    %c2_i32 = arith.constant 2 : i32
+    %0 = call @add(%c40_i32, %c2_i32) : (i32, i32) -> i32
+    return %0 : i32
+  }
+}
+```
+
+### 11.1 Why MLIR Exists Here
+
+nex eventually wants native code, RISC-V support, shape-aware math lowering,
+effect/resource analysis, and LLVM integration. MLIR is useful because it can
+represent programs at several abstraction levels:
+
+```text
+nex typed IR
+  -> MLIR func/arith/scf
+  -> lower-level MLIR dialects
+  -> LLVM dialect
+  -> LLVM IR
+  -> native code
+```
+
+The current compiler does not do all of that yet. It only proves the first
+boundary: typed IR can build a real MLIR module.
+
+### 11.2 SSA In MLIR
+
+SSA means static single assignment: each value name is defined once. MLIR values
+are SSA-like. In the output:
+
+```mlir
+%c42_i32 = arith.constant 42 : i32
+return %c42_i32 : i32
+```
+
+`%c42_i32` is produced once and then used by the return operation.
+
+In the function-call example, `%arg0` and `%arg1` are also SSA values. They are
+defined by the function entry block rather than by an operation printed inside
+the body. This is why lowering a nex parameter read does not emit a memory load
+yet: the current typed IR says `LoadLocal $0`, but the MLIR lowering maps that
+parameter local directly to `%arg0`.
+
+This does not require nex to build a custom SSA/CFG IR immediately. The current
+policy is:
+
+- keep typed IR nex-shaped, semantic, and structured
+- lower simple expression results naturally to MLIR SSA values
+- let MLIR/LLVM handle generic canonicalization, CSE, control-flow lowering, and
+later SSA promotion where appropriate
+- add a nex-owned SSA/CFG layer only when a concrete nex-specific optimization or
+analysis needs it
+
+Good future reasons for nex-owned SSA/CFG may include effect-aware optimization,
+explicit copy/allocation diagnostics, region/resource analysis, shape-aware math
+fusion, bounds-check elimination, and realtime/concurrency analysis. Until one
+of those becomes concrete, using MLIR first avoids reinventing a large compiler
+middle end prematurely.
+
+### 11.3 Implementation Location
+
+The MLIR lowering layer lives under:
+
+```text
+include/nexc/mlir/
+src/mlir/
+```
+
+`src/mlir/textual.cpp` currently builds an MLIR module using the MLIR C++ API,
+verifies it, and prints it as text. Internally, it walks typed IR operations and
+maintains a map from nex typed IR value IDs to MLIR SSA values. That map is the
+core bridge between the two representations:
+
+```text
+nex typed IR value `%2`
+  -> concrete MLIR Value produced by arith.addi, func.call, or a block argument
+```
+
+The public wrapper remains small:
+
+```cpp
+void dumpTextualMlir(std::ostream& out, const ir::Module& module);
+```
+
+The name still says `Textual` because the user-visible mode dumps MLIR text. The
+important implementation detail is that the text is produced by a real MLIR
+module, not by hand-concatenating strings.
+
+### 11.4 Installation And Tooling
+
+On Ubuntu 24.04, install LLVM/MLIR 18 development packages:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y cmake ninja-build build-essential clang graphviz
+sudo apt-get install -y libmlir-18-dev mlir-18-tools
+```
+
+The MLIR package installs headers, CMake config files, libraries, and tools under
+`/usr/lib/llvm-18`.
+
+Useful verification commands:
+
+```sh
+ls /usr/lib/llvm-18/include/mlir
+ls /usr/lib/llvm-18/lib/cmake/mlir
+/usr/lib/llvm-18/bin/mlir-opt --version
+```
+
+Adding LLVM tools to the shell `PATH` is convenient:
+
+```sh
+echo 'export PATH=/usr/lib/llvm-18/bin:$PATH' >> ~/.zshrc
+source ~/.zshrc
+mlir-opt --version
+mlir-translate --version
+```
+
+Official setup references:
+
+- [MLIR Getting Started](https://mlir.llvm.org/getting_started/)
+- [LLVM Getting Started](https://llvm.org/docs/GettingStarted.html)
+- [Building LLVM with CMake](https://llvm.org/docs/CMake.html)
+
+On platforms without matching distro packages, building LLVM from source with
+`-DLLVM_ENABLE_PROJECTS=mlir` is the standard route documented by upstream LLVM.
+
+### 11.5 Current Command
+
+Current command:
+
+```sh
+./nexc.sh mlir examples/function_call.nexs
+```
+
+Current output:
+
+```mlir
+module {
+  func.func @add(%arg0: i32, %arg1: i32) -> i32 {
+    %0 = arith.addi %arg0, %arg1 : i32
+    return %0 : i32
+  }
+  func.func @main() -> i32 {
+    %c40_i32 = arith.constant 40 : i32
+    %c2_i32 = arith.constant 2 : i32
+    %0 = call @add(%c40_i32, %c2_i32) : (i32, i32) -> i32
+    return %0 : i32
+  }
+}
+```
+
+This proves the next lowering boundary:
+
+```text
+checked AST -> typed IR -> MLIR
+```
+
+The generated MLIR can be checked by MLIR tooling:
+
+```sh
+./nexc.sh mlir examples/function_call.nexs | mlir-opt --verify-diagnostics
+```
+
+The current MLIR lowering is still intentionally incomplete. It supports
+straight-line `i32` literals, `+`, `-`, `*`, function parameters, direct function
+calls, and function returns. It does not yet lower module constants, mutable
+locals, strings, booleans, comparisons, built-in `print` / `println`, `if`,
+`while`, or runtime/native execution.
+
+## 12. CLI Inspection Modes
 
 File:
 
@@ -795,27 +1045,29 @@ File:
 src/tools/nexc/main.cpp
 ```
 
-The CLI currently supports five inspection/checking modes:
+The CLI currently supports six inspection/checking modes:
 
 ```sh
 build/nexc --dump-tokens examples/minimal.nexs
 build/nexc --dump-ast examples/add.nexs
 build/nexc --dump-ast-dot examples/add.nexs
 build/nexc --dump-ir examples/add.nexs
+build/nexc --dump-mlir examples/function_call.nexs
 build/nexc --check examples/add.nexs
 ```
 
 All modes lex the file first. `--dump-tokens` prints the token stream and stops.
 `--dump-ast` and `--dump-ast-dot` pass the token stream into the parser and print
 the resulting tree as either plain text or Graphviz DOT. `--check` parses the
-file and then runs semantic analysis without dumping the tree. `--dump-ir` runs
-the same parse and semantic checks, then builds and prints typed IR only if there
-were no diagnostics.
+file and then runs semantic analysis without dumping the tree. `--dump-ir` and
+`--dump-mlir` run the same parse and semantic checks, then build typed IR only if
+there were no diagnostics. `--dump-ir` prints the nex-owned typed IR;
+`--dump-mlir` lowers that IR into the current MLIR slice.
 
 These modes are intentionally early because they let us inspect every compiler
 stage while building it.
 
-## 12. Tests, Golden Files, and CI
+## 13. Tests, Golden Files, and CI
 
 CTest is the local test runner:
 
@@ -828,7 +1080,8 @@ ctest --test-dir build --output-on-failure
 The current tests cover:
 
 - smoke checks for `--dump-tokens` and `--dump-ast`
-- golden output checks for token, AST, Graphviz DOT, and typed IR dumps
+- golden output checks for token, AST, Graphviz DOT, typed IR, and MLIR
+dumps
 - parser-negative fixtures
 - semantic success checks for valid examples
 - semantic-negative fixtures for type errors, undefined names, mutability,
@@ -844,6 +1097,9 @@ tests/golden/dump_ast/add.ast.txt
 tests/golden/dump_ast/control_flow.ast.txt
 tests/golden/dump_ast_dot/add.dot
 tests/golden/dump_ir/add.ir.txt
+tests/golden/dump_mlir/return_42.mlir
+tests/golden/dump_mlir/scalar_expr.mlir
+tests/golden/dump_mlir/function_call.mlir
 tests/golden/diagnostics/semantic_return_type_mismatch.stderr.txt
 ```
 
@@ -876,7 +1132,7 @@ The goal is one local command and one CI command path. As more frontend and
 semantic tests appear, they should become CTest entries so CI picks them up
 automatically.
 
-## 13. Current Limitations
+## 14. Current Limitations
 
 The current compiler does not yet implement:
 
@@ -886,24 +1142,22 @@ The current compiler does not yet implement:
 - formatting/interpolation for strings
 - runtime implementation for `print` / `println`
 - inter-file/module resolution
-- MLIR generation
 - LLVM lowering
 - native code generation
 
 Those are later stages. The current project state is a checked Core v0 frontend
-plus typed IR dumps, not a full compiler.
+plus typed IR dumps and a tiny MLIR slice, not a full compiler.
 
-## 14. Recommended Next Steps
+## 15. Recommended Next Steps
 
 The safest next steps are:
 
 1. Keep typed IR golden tests growing as new Core v0 forms are added.
-2. Decide whether the next lowering experiment targets MLIR `func`/`arith`/`scf`
-  or a tiny textual LLVM IR subset.
-3. Keep semantic tests growing as new frontend behavior appears.
-4. Consider a minimal `print_i32` runtime helper once backend lowering can represent
-  simple calls.
-5. Then lower a tiny valid program such as `fn main() -> i32 { return 42; }`.
+2. Grow MLIR lowering from `return 42` toward simple scalar expressions and calls.
+3. Keep MLIR output covered by golden tests and `mlir-opt` validation.
+4. Keep semantic tests growing as new frontend behavior appears.
+5. Consider a minimal `print_i32` runtime helper once backend lowering can
+  represent simple calls.
 
 Lowering should stay boring at first. The goal is to prove the frontend can feed
 a backend with checked Core v0 programs before adding richer language features.

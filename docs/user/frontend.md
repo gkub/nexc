@@ -161,6 +161,36 @@ Module
 The typed IR is not executable yet. It is the first explicit bridge from checked
 Core v0 programs toward future MLIR/LLVM lowering.
 
+## Dump MLIR
+
+The first lowering slice builds a tiny MLIR module from typed IR and prints it:
+
+```sh
+./nexc.sh mlir examples/function_call.nexs
+```
+
+Current output:
+
+```mlir
+module {
+  func.func @add(%arg0: i32, %arg1: i32) -> i32 {
+    %0 = arith.addi %arg0, %arg1 : i32
+    return %0 : i32
+  }
+  func.func @main() -> i32 {
+    %c40_i32 = arith.constant 40 : i32
+    %c2_i32 = arith.constant 2 : i32
+    %0 = call @add(%c40_i32, %c2_i32) : (i32, i32) -> i32
+    return %0 : i32
+  }
+}
+```
+
+This is intentionally narrow but no longer just `return 42`. It proves the
+lowering boundary using the real MLIR C++ API for straight-line `i32`
+expressions, function parameters, and direct calls before the project attempts
+mutable locals, booleans, control flow, runtime calls, or LLVM/native output.
+
 ## What Exists Now
 
 The current frontend supports the Core v0 parser surface:
@@ -176,6 +206,8 @@ The current frontend supports the Core v0 parser surface:
 - textual and Graphviz AST dumps
 - semantic checking with `--check`
 - typed IR dumping with `--dump-ir`
+- MLIR dumping with `--dump-mlir` for simple `i32` returns, arithmetic, and
+  direct function calls
 
 Semantic analysis intentionally remains small. It does not yet implement
 coercions/promotions, definite assignment analysis, arbitrary constant-expression
@@ -186,7 +218,7 @@ overflow evaluation, or inter-file/module resolution.
 The frontend is split into stages:
 
 ```text
-source text -> lexer -> tokens -> parser -> AST -> semantic analysis -> typed IR
+source text -> lexer -> tokens -> parser -> AST -> semantic analysis -> typed IR -> MLIR
 ```
 
 Each stage should answer only one kind of question:
