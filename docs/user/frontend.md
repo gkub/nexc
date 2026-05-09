@@ -193,11 +193,11 @@ module {
 }
 ```
 
-This is intentionally still a learning slice, but it now covers the nontrivial
-pipeline walkthrough: scalar expressions, function parameters, direct calls,
-integer comparisons, mutable local storage, assignment, returning and
-fallthrough `if`/`else`, `while`, and `/` / `%` before the project attempts
-runtime calls or native executable output.
+This is intentionally still educational, but it now covers the Core v0 backend
+surface: fixed-width integers, booleans, module constants, string literals,
+direct calls, built-in printing calls, mutable local storage, assignment,
+returning and fallthrough `if`/`else`, `while`, `/`, `%`, unsigned-specific
+integer operations, and eager `&&` / `||`.
 
 When `mlir-opt` is available, CTest also validates selected `--dump-mlir`
 outputs with MLIR's verifier. Golden tests catch text drift; verifier tests catch
@@ -241,12 +241,13 @@ Once `build/nexc` exists, you can use it directly without `nexc.sh`:
 build/nexc examples/return_42.nexs -o build/return_42
 ```
 
-That path currently works for scalar Core v0 programs that do not need runtime
-services. Internally the compiler emits LLVM IR to a temporary file and asks
-`clang` to produce the host executable:
+That path works for Core v0 programs, including runtime-backed stdout printing
+and the first `readln()` stdin slice.
+Internally the compiler emits LLVM IR to a temporary file and asks `clang` to
+produce the host executable while also linking the tiny bootstrap runtime:
 
 ```text
-nex source -> typed IR -> MLIR -> LLVM IR -> clang -> executable
+nex source -> typed IR -> MLIR -> LLVM IR + runtime -> clang -> executable
 ```
 
 The pipeline walkthrough is also supported:
@@ -255,16 +256,19 @@ The pipeline walkthrough is also supported:
 build/nexc examples/pipeline_walkthrough.nexs -o build/pipeline_walkthrough
 ```
 
-`print` / `println` still type-check only; they need a runtime ABI before
-compiled executables can perform observable output. That means this command is
-expected to fail for now:
+`print` / `println` now produce observable stdout:
 
 ```sh
 build/nexc examples/hello.nexs -o build/hello
+./build/hello
 ```
 
-The compiler should report that strings/printing are a backend limitation, not an
-internal compiler failure.
+The stdin echo example is also supported:
+
+```sh
+build/nexc examples/stdin_echo.nexs -o build/stdin_echo
+printf 'typed input\n' | build/stdin_echo
+```
 
 ## What Exists Now
 
@@ -281,18 +285,19 @@ The current frontend supports the Core v0 parser surface:
 - textual and Graphviz AST dumps
 - semantic checking with `--check`
 - typed IR dumping with `--dump-ir`
-- MLIR dumping with `--dump-mlir` for the pipeline walkthrough slice: scalar
-  arithmetic, integer comparisons, direct function calls, mutable local storage,
-  assignment, returning and fallthrough `if`/`else`, `while`, and `/` / `%`
-- LLVM IR dumping with `--dump-llvm` for the same scalar walkthrough slice
+- MLIR dumping with `--dump-mlir` for Core v0 backend features including strings,
+  runtime printing, module constants, integer widths, and unsigned operations
+- LLVM IR dumping with `--dump-llvm` for the same Core v0 backend surface
 - native executable compilation with `build/nexc <file.nexs> -o <output>` for
-  scalar programs that do not need runtime services
+  Core v0 programs
+- experimental `readln() -> str` stdin input for direct use with printing
 - conditional `mlir-opt` validation for generated MLIR in the test suite
 - conditional `llvm-as` validation for generated LLVM IR in the test suite
 
 Semantic analysis intentionally remains small. It does not yet implement
-coercions/promotions, definite assignment analysis, arbitrary constant-expression
-overflow evaluation, or inter-file/module resolution.
+coercions/promotions, definite assignment analysis, short-circuit logical
+operators, arbitrary constant-expression overflow evaluation, or inter-file/module
+resolution.
 
 ## Mental Model
 

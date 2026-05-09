@@ -1,0 +1,14 @@
+const LIMIT: u32 = 10;
+
+fn main() -> i32 {
+    let half: u32 = 20 / 2;
+    let remainder: u32 = 21 % 11;
+    let tiny: i8 = 7;
+    let wide: i64 = 9;
+
+    if (half == LIMIT && remainder == LIMIT && tiny < 8 && wide == 9) {
+        return 33;
+    } else {
+        return 1;
+    }
+}

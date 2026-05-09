@@ -4,6 +4,7 @@
 #ifdef NEXC_HAS_REAL_MLIR
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
@@ -11,15 +12,18 @@
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Verifier.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/APInt.h"
 #include "llvm/Support/raw_os_ostream.h"
 #endif
 
+#include <algorithm>
 #include <cstdint>
 #include <ostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 
 namespace nexc::mlir {
 
@@ -32,7 +36,7 @@ namespace {
 // token/AST/IR dumps can show what the user wrote. MLIR construction needs the
 // actual integer value instead. Base 0 accepts both decimal and prefixed hex,
 // matching the Core v0 lexer contract.
-std::int64_t parseIntegerLiteral(std::string_view text) {
+[[maybe_unused]] std::int64_t parseIntegerLiteral(std::string_view text) {
     std::size_t parsed = 0;
     const std::int64_t value = std::stoll(std::string(text), &parsed, 0);
     if (parsed != text.size()) {
@@ -54,7 +58,110 @@ ir::ValueRef requiredValue(const std::optional<ir::ValueRef>& value,
     return *value;
 }
 
+// Decode the raw source spelling of a Core v0 string literal into bytes.
+//
+// The lexer/parser preserve string literals with their surrounding quotes and
+// backslash escapes so dumps can show exactly what the user typed. Runtime
+// lowering needs the actual byte sequence, so this helper performs the small
+// Core v0 escape decoding step: \" \\ \n \t and \r.
+std::string decodeStringLiteral(std::string_view raw) {
+    if (raw.size() < 2 || raw.front() != '"' || raw.back() != '"') {
+        throw std::logic_error("string literal lowering expected quoted source text");
+    }
+
+    std::string decoded;
+    for (std::size_t i = 1; i + 1 < raw.size(); ++i) {
+        const char c = raw[i];
+        if (c != '\\') {
+            decoded.push_back(c);
+            continue;
+        }
+
+        if (i + 2 >= raw.size()) {
+            throw std::logic_error("string literal ended during escape decoding");
+        }
+        const char escaped = raw[++i];
+        switch (escaped) {
+        case '"':
+            decoded.push_back('"');
+            break;
+        case '\\':
+            decoded.push_back('\\');
+            break;
+        case 'n':
+            decoded.push_back('\n');
+            break;
+        case 't':
+            decoded.push_back('\t');
+            break;
+        case 'r':
+            decoded.push_back('\r');
+            break;
+        default:
+            throw std::logic_error("unsupported string escape reached lowering");
+        }
+    }
+    return decoded;
+}
+
 #ifdef NEXC_HAS_REAL_MLIR
+::llvm::APInt parseIntegerLiteralApInt(std::string_view text, unsigned width) {
+    std::size_t parsed = 0;
+    const unsigned long long value = std::stoull(std::string(text), &parsed, 0);
+    if (parsed != text.size()) {
+        throw std::logic_error("integer literal was not fully parsed during MLIR lowering");
+    }
+    return ::llvm::APInt(width, value);
+}
+
+struct StringValue {
+    ::mlir::Value data;
+    ::mlir::Value length;
+};
+
+unsigned integerBitWidth(ir::Type type) {
+    switch (type.kind) {
+    case BuiltinTypeKind::I8:
+    case BuiltinTypeKind::U8:
+        return 8;
+    case BuiltinTypeKind::I16:
+    case BuiltinTypeKind::U16:
+        return 16;
+    case BuiltinTypeKind::I32:
+    case BuiltinTypeKind::U32:
+        return 32;
+    case BuiltinTypeKind::I64:
+    case BuiltinTypeKind::U64:
+        return 64;
+    case BuiltinTypeKind::Bool:
+    case BuiltinTypeKind::Str:
+    case BuiltinTypeKind::Void:
+    case BuiltinTypeKind::Invalid:
+        return 0;
+    }
+    return 0;
+}
+
+bool isUnsignedInteger(ir::Type type) {
+    switch (type.kind) {
+    case BuiltinTypeKind::U8:
+    case BuiltinTypeKind::U16:
+    case BuiltinTypeKind::U32:
+    case BuiltinTypeKind::U64:
+        return true;
+    case BuiltinTypeKind::I8:
+    case BuiltinTypeKind::I16:
+    case BuiltinTypeKind::I32:
+    case BuiltinTypeKind::I64:
+    case BuiltinTypeKind::Bool:
+    case BuiltinTypeKind::Str:
+    case BuiltinTypeKind::Void:
+    case BuiltinTypeKind::Invalid:
+        return false;
+    }
+    return false;
+}
+
 // Translate the tiny subset of nex IR types currently supported by MLIR lowering
 // into concrete MLIR types.
 //
@@ -64,12 +171,19 @@ ir::ValueRef requiredValue(const std::optional<ir::ValueRef>& value,
     switch (type.kind) {
     case BuiltinTypeKind::Bool:
         return builder.getI1Type();
+    case BuiltinTypeKind::I8:
+    case BuiltinTypeKind::I16:
     case BuiltinTypeKind::I32:
-        return builder.getI32Type();
+    case BuiltinTypeKind::I64:
+    case BuiltinTypeKind::U8:
+    case BuiltinTypeKind::U16:
+    case BuiltinTypeKind::U32:
+    case BuiltinTypeKind::U64:
+        return builder.getIntegerType(integerBitWidth(type));
     case BuiltinTypeKind::Void:
         return {};
     default:
-        throw std::logic_error("MLIR lowering only supports bool, i32, and void in this slice");
+        throw std::logic_error("MLIR lowering does not use this type as a single MLIR value");
     }
 }
 
@@ -78,20 +192,24 @@ ir::ValueRef requiredValue(const std::optional<ir::ValueRef>& value,
 // This first lowering slice only supports i32 comparisons, so relational
 // operators use signed predicates (`slt`, `sle`, ...). Once unsigned integers are
 // lowered, this helper will need the operand type as input too.
-::mlir::arith::CmpIPredicate comparisonPredicate(TokenKind op) {
+::mlir::arith::CmpIPredicate comparisonPredicate(TokenKind op, bool unsignedOperands) {
     switch (op) {
     case TokenKind::EqualEqual:
         return ::mlir::arith::CmpIPredicate::eq;
     case TokenKind::BangEqual:
         return ::mlir::arith::CmpIPredicate::ne;
     case TokenKind::Less:
-        return ::mlir::arith::CmpIPredicate::slt;
+        return unsignedOperands ? ::mlir::arith::CmpIPredicate::ult
+                                : ::mlir::arith::CmpIPredicate::slt;
     case TokenKind::LessEqual:
-        return ::mlir::arith::CmpIPredicate::sle;
+        return unsignedOperands ? ::mlir::arith::CmpIPredicate::ule
+                                : ::mlir::arith::CmpIPredicate::sle;
     case TokenKind::Greater:
-        return ::mlir::arith::CmpIPredicate::sgt;
+        return unsignedOperands ? ::mlir::arith::CmpIPredicate::ugt
+                                : ::mlir::arith::CmpIPredicate::sgt;
     case TokenKind::GreaterEqual:
-        return ::mlir::arith::CmpIPredicate::sge;
+        return unsignedOperands ? ::mlir::arith::CmpIPredicate::uge
+                                : ::mlir::arith::CmpIPredicate::sge;
     default:
         throw std::logic_error("token is not an integer comparison operator");
     }
@@ -105,9 +223,12 @@ public:
     // The OpBuilder is shared across the whole module so each FunctionLowerer
     // receives it by reference. The IR Function is also borrowed; lowering reads
     // it but does not mutate it.
-    FunctionLowerer(::mlir::OpBuilder& builder, const ir::Function& function)
+    FunctionLowerer(::mlir::OpBuilder& builder,
+                    const ir::Function& function,
+                    const std::unordered_map<std::string, const ir::Const*>& constants)
         : builder_(builder),
           function_(function),
+          constants_(constants),
           loc_(builder.getUnknownLoc()) {}
 
     // Create the MLIR `func.func`, create its entry block, seed parameter locals,
@@ -122,7 +243,9 @@ public:
         }
 
         llvm::SmallVector<::mlir::Type> resultTypes;
-        if (!function_.returnType.isVoid()) {
+        if (usesNativeMainResult()) {
+            resultTypes.push_back(builder_.getI32Type());
+        } else if (!function_.returnType.isVoid()) {
             resultTypes.push_back(mlirType(builder_, function_.returnType));
         }
 
@@ -146,7 +269,7 @@ public:
 
         const bool returned = lowerBlock(function_.body);
         if (!returned && function_.returnType.isVoid()) {
-            builder_.create<::mlir::func::ReturnOp>(loc_);
+            lowerVoidReturn();
         }
     }
 
@@ -181,12 +304,14 @@ private:
             lowerBoolLiteral(operation);
             return false;
         case ir::Operation::Kind::StringLiteral:
-            throw std::logic_error("backend limitation: string literals are not lowered yet; runtime string support is required before compiling programs that use strings or print/println");
+            lowerStringLiteral(operation);
+            return false;
         case ir::Operation::Kind::LoadLocal:
             lowerLoadLocal(operation);
             return false;
         case ir::Operation::Kind::LoadConst:
-            throw std::logic_error("backend limitation: module constants are not lowered to MLIR yet");
+            lowerLoadConst(operation);
+            return false;
         case ir::Operation::Kind::DeclareLocal:
             lowerDeclareLocal(operation);
             return false;
@@ -212,18 +337,25 @@ private:
         }
     }
 
-    // Lower an i32 integer literal to `arith.constant`.
+    // Lower an integer literal to `arith.constant`.
     //
-    // The result ValueRef is recorded in values_ so later operations can look up
-    // the concrete MLIR SSA value produced by this constant.
+    // MLIR integer types are fixed-width just like Nex integers, so the literal
+    // is emitted at the exact bit width selected by semantic analysis. Unsigned
+    // and signed integers both use signless MLIR integer types here; signedness
+    // matters later when choosing comparison/division/remainder operations.
     void lowerIntegerLiteral(const ir::Operation& operation) {
         const ir::ValueRef result = requiredValue(operation.result, "integer literal");
-        if (result.type.kind != BuiltinTypeKind::I32) {
-            throw std::logic_error("MLIR integer literal lowering only supports i32");
+        const unsigned width = integerBitWidth(result.type);
+        if (width == 0) {
+            throw std::logic_error("MLIR integer literal lowering expected an integer type");
         }
 
-        auto constant = builder_.create<::mlir::arith::ConstantIntOp>(
-            loc_, parseIntegerLiteral(operation.text), 32);
+        const ::mlir::Type mlirIntegerType = mlirType(builder_, result.type);
+        const ::mlir::IntegerAttr value =
+            builder_.getIntegerAttr(mlirIntegerType,
+                                    parseIntegerLiteralApInt(operation.text, width));
+        auto constant =
+            builder_.create<::mlir::arith::ConstantOp>(loc_, mlirIntegerType, value);
         bindValue(result, constant.getResult());
     }
 
@@ -236,6 +368,190 @@ private:
         auto constant = builder_.create<::mlir::arith::ConstantIntOp>(
             loc_, operation.boolValue ? 1 : 0, 1);
         bindValue(result, constant.getResult());
+    }
+
+    // Lower a string literal to the runtime representation used by Core v0.
+    //
+    // A Nex `str` is not a C string. We lower it as two values:
+    //
+    // - a pointer to immutable global bytes
+    // - an i64 byte length
+    //
+    // Keeping the length explicit means the runtime does not need a trailing NUL
+    // and can eventually support arbitrary byte strings.
+    void lowerStringLiteral(const ir::Operation& operation) {
+        const ir::ValueRef result = requiredValue(operation.result, "string literal");
+        const std::string bytes = decodeStringLiteral(operation.text);
+        const std::string symbol =
+            "__nex_str_" + function_.name + "_" + std::to_string(result.id);
+
+        const ::mlir::Type i8 = builder_.getI8Type();
+        const ::mlir::Type arrayType =
+            ::mlir::LLVM::LLVMArrayType::get(i8, static_cast<unsigned>(bytes.size()));
+
+        // LLVM globals live at module scope, while this method is usually called
+        // while the builder is inserting inside a function. The insertion guard
+        // lets us temporarily jump to the module, emit the global, and then
+        // return to the function body exactly where we were.
+        ::mlir::ModuleOp module = functionModule();
+        {
+            ::mlir::OpBuilder::InsertionGuard guard(builder_);
+            builder_.setInsertionPointToStart(module.getBody());
+            if (!module.lookupSymbol<::mlir::LLVM::GlobalOp>(symbol)) {
+                builder_.create<::mlir::LLVM::GlobalOp>(
+                    loc_, arrayType, true, ::mlir::LLVM::Linkage::Private,
+                    symbol, builder_.getStringAttr(bytes), 0, 0);
+            }
+        }
+
+        auto address = builder_.create<::mlir::LLVM::AddressOfOp>(
+            loc_, ::mlir::LLVM::LLVMPointerType::get(builder_.getContext()),
+            symbol);
+        auto length = builder_.create<::mlir::arith::ConstantIntOp>(
+            loc_, static_cast<std::int64_t>(bytes.size()), 64);
+        bindString(result, StringValue{.data = address.getResult(),
+                                       .length = length.getResult()});
+    }
+
+    // Lower a module-level constant use by replaying its checked initializer.
+    //
+    // Core v0 constants are compile-time values, not mutable storage. For the
+    // first backend implementation we inline the initializer at each use site:
+    // `const X: i32 = 40 + 2; return X;` lowers exactly like `return 40 + 2;`.
+    // That keeps constants simple while preserving the source language rule that
+    // a const has no address and cannot be assigned to.
+    void lowerLoadConst(const ir::Operation& operation) {
+        const ir::ValueRef result = requiredValue(operation.result, "const load");
+        const auto found = constants_.find(operation.text);
+        if (found == constants_.end()) {
+            throw std::logic_error("MLIR lowering loaded an unknown module constant");
+        }
+        const ::mlir::Value value = lowerConstInitializer(*found->second);
+        bindValue(result, value);
+    }
+
+    // Lower a const initializer in its own temporary value namespace.
+    //
+    // Const initializer IR uses value IDs starting at %0, just like every
+    // function. We therefore keep a local map for the initializer rather than
+    // writing into values_, whose IDs belong to the enclosing function.
+    ::mlir::Value lowerConstInitializer(const ir::Const& constant) {
+        std::unordered_map<std::size_t, ::mlir::Value> constValues;
+        auto lookupConstValue = [&](ir::ValueRef ref) -> ::mlir::Value {
+            const auto found = constValues.find(ref.id);
+            if (found == constValues.end()) {
+                throw std::logic_error("const initializer used a value before definition");
+            }
+            return found->second;
+        };
+
+        for (const ir::Operation& op : constant.initializer.operations) {
+            switch (op.kind) {
+            case ir::Operation::Kind::IntegerLiteral: {
+                const ir::ValueRef literal = requiredValue(op.result, "const integer");
+                const unsigned width = integerBitWidth(literal.type);
+                const ::mlir::Type type = mlirType(builder_, literal.type);
+                auto value = builder_.create<::mlir::arith::ConstantOp>(
+                    loc_, type,
+                    builder_.getIntegerAttr(type,
+                                            parseIntegerLiteralApInt(op.text, width)));
+                constValues.emplace(literal.id, value.getResult());
+                break;
+            }
+            case ir::Operation::Kind::BoolLiteral: {
+                const ir::ValueRef literal = requiredValue(op.result, "const bool");
+                auto value = builder_.create<::mlir::arith::ConstantIntOp>(
+                    loc_, op.boolValue ? 1 : 0, 1);
+                constValues.emplace(literal.id, value.getResult());
+                break;
+            }
+            case ir::Operation::Kind::Unary: {
+                const ir::ValueRef result = requiredValue(op.result, "const unary");
+                const ir::ValueRef operandRef = requiredValue(op.value, "const unary operand");
+                const ::mlir::Value operand = lookupConstValue(operandRef);
+                if (op.op == TokenKind::Minus) {
+                    auto zero = builder_.create<::mlir::arith::ConstantIntOp>(
+                        loc_, 0, integerBitWidth(operandRef.type));
+                    auto value = builder_.create<::mlir::arith::SubIOp>(
+                        loc_, zero.getResult(), operand);
+                    constValues.emplace(result.id, value.getResult());
+                } else if (op.op == TokenKind::Bang) {
+                    const unsigned width = operandRef.type.kind == BuiltinTypeKind::Bool
+                                               ? 1
+                                               : integerBitWidth(operandRef.type);
+                    auto zero = builder_.create<::mlir::arith::ConstantIntOp>(loc_, 0, width);
+                    auto value = builder_.create<::mlir::arith::CmpIOp>(
+                        loc_, ::mlir::arith::CmpIPredicate::eq, operand, zero.getResult());
+                    constValues.emplace(result.id, value.getResult());
+                } else {
+                    throw std::logic_error("unsupported unary operator in const lowering");
+                }
+                break;
+            }
+            case ir::Operation::Kind::Binary: {
+                const ir::ValueRef result = requiredValue(op.result, "const binary");
+                const ir::ValueRef leftRef = requiredValue(op.left, "const binary left");
+                const ::mlir::Value left = lookupConstValue(leftRef);
+                const ::mlir::Value right =
+                    lookupConstValue(requiredValue(op.right, "const binary right"));
+                ::mlir::Value value;
+                switch (op.op) {
+                case TokenKind::Plus:
+                    value = builder_.create<::mlir::arith::AddIOp>(loc_, left, right);
+                    break;
+                case TokenKind::Minus:
+                    value = builder_.create<::mlir::arith::SubIOp>(loc_, left, right);
+                    break;
+                case TokenKind::Star:
+                    value = builder_.create<::mlir::arith::MulIOp>(loc_, left, right);
+                    break;
+                case TokenKind::Slash:
+                    value = isUnsignedInteger(leftRef.type)
+                                ? builder_.create<::mlir::arith::DivUIOp>(loc_, left, right)
+                                      .getResult()
+                                : builder_.create<::mlir::arith::DivSIOp>(loc_, left, right)
+                                      .getResult();
+                    break;
+                case TokenKind::Percent:
+                    value = isUnsignedInteger(leftRef.type)
+                                ? builder_.create<::mlir::arith::RemUIOp>(loc_, left, right)
+                                      .getResult()
+                                : builder_.create<::mlir::arith::RemSIOp>(loc_, left, right)
+                                      .getResult();
+                    break;
+                case TokenKind::EqualEqual:
+                case TokenKind::BangEqual:
+                case TokenKind::Less:
+                case TokenKind::LessEqual:
+                case TokenKind::Greater:
+                case TokenKind::GreaterEqual:
+                    value = builder_.create<::mlir::arith::CmpIOp>(
+                        loc_, comparisonPredicate(op.op, isUnsignedInteger(leftRef.type)),
+                        left, right);
+                    break;
+                default:
+                    throw std::logic_error("unsupported binary operator in const lowering");
+                }
+                constValues.emplace(result.id, value);
+                break;
+            }
+            case ir::Operation::Kind::LoadConst: {
+                const ir::ValueRef result = requiredValue(op.result, "nested const load");
+                const auto nested = constants_.find(op.text);
+                if (nested == constants_.end()) {
+                    throw std::logic_error("const initializer loaded an unknown const");
+                }
+                constValues.emplace(result.id, lowerConstInitializer(*nested->second));
+                break;
+            }
+            default:
+                throw std::logic_error("unsupported operation in module constant lowering");
+            }
+        }
+
+        const ir::ValueRef init =
+            requiredValue(constant.initializer.terminator.value, "const initializer");
+        return lookupConstValue(init);
     }
 
     // Lower a local read.
@@ -319,10 +635,10 @@ private:
         unsigned width = 0;
         if (operandRef.type.kind == BuiltinTypeKind::Bool) {
             width = 1;
-        } else if (operandRef.type.kind == BuiltinTypeKind::I32) {
-            width = 32;
+        } else if (operandRef.type.isInteger()) {
+            width = integerBitWidth(operandRef.type);
         } else {
-            throw std::logic_error("MLIR lowering only supports ! for bool and i32 for now");
+            throw std::logic_error("MLIR lowering only supports ! for bool and integers");
         }
         auto falseValue = builder_.create<::mlir::arith::ConstantIntOp>(loc_, 0, width);
         auto lowered = builder_.create<::mlir::arith::CmpIOp>(
@@ -353,16 +669,28 @@ private:
             lowered = builder_.create<::mlir::arith::MulIOp>(loc_, left, right);
             break;
         case TokenKind::Slash:
-            // Core v0 only lowers signed i32 today, so `/` maps to signed MLIR
-            // integer division. When unsigned integer lowering lands, this
-            // switch will need to choose `DivUIOp` for `u*` operand types.
-            lowered = builder_.create<::mlir::arith::DivSIOp>(loc_, left, right);
+            if (isUnsignedInteger(requiredValue(operation.left, "binary left operand").type)) {
+                lowered = builder_.create<::mlir::arith::DivUIOp>(loc_, left, right);
+            } else {
+                lowered = builder_.create<::mlir::arith::DivSIOp>(loc_, left, right);
+            }
             break;
         case TokenKind::Percent:
-            // `%` follows the same signed-i32 rule as `/` for this slice. The
-            // semantic layer has already made sure both operands have the same
-            // integer type.
-            lowered = builder_.create<::mlir::arith::RemSIOp>(loc_, left, right);
+            if (isUnsignedInteger(requiredValue(operation.left, "binary left operand").type)) {
+                lowered = builder_.create<::mlir::arith::RemUIOp>(loc_, left, right);
+            } else {
+                lowered = builder_.create<::mlir::arith::RemSIOp>(loc_, left, right);
+            }
+            break;
+        case TokenKind::AmpAmp:
+            // Core v0 currently lowers logical operators as eager boolean
+            // operations. The language reference documents this explicitly so
+            // nobody expects C-style short-circuiting until the IR grows
+            // condition blocks for the right-hand side.
+            lowered = builder_.create<::mlir::arith::AndIOp>(loc_, left, right);
+            break;
+        case TokenKind::PipePipe:
+            lowered = builder_.create<::mlir::arith::OrIOp>(loc_, left, right);
             break;
         case TokenKind::EqualEqual:
         case TokenKind::BangEqual:
@@ -371,7 +699,11 @@ private:
         case TokenKind::Greater:
         case TokenKind::GreaterEqual:
             lowered = builder_.create<::mlir::arith::CmpIOp>(
-                loc_, comparisonPredicate(operation.op), left, right);
+                loc_,
+                comparisonPredicate(
+                    operation.op,
+                    isUnsignedInteger(requiredValue(operation.left, "binary left operand").type)),
+                left, right);
             break;
         default:
             throw std::logic_error("MLIR lowering only supports arithmetic and comparison operators for now");
@@ -387,9 +719,8 @@ private:
     // this current lowering only handles value-returning user calls.
     void lowerCall(const ir::Operation& operation) {
         if (operation.isBuiltin) {
-            throw std::logic_error("backend limitation: built-in call '" +
-                                   operation.text +
-                                   "' is not lowered yet; runtime support is required before compiling print/println programs");
+            lowerBuiltinCall(operation);
+            return;
         }
 
         llvm::SmallVector<::mlir::Value> arguments;
@@ -407,6 +738,55 @@ private:
         if (operation.result) {
             bindValue(*operation.result, call.getResult(0));
         }
+    }
+
+    // Lower Core v0 printing built-ins to bootstrap runtime calls.
+    //
+    // The source language owns `print` and `println`; the runtime names are just
+    // the binary ABI we call after lowering. Both built-ins accept a single `str`,
+    // which lowerStringLiteral() represented as pointer + length.
+    void lowerBuiltinCall(const ir::Operation& operation) {
+        if (operation.text == "readln") {
+            lowerReadlnBuiltin(operation);
+            return;
+        }
+
+        if (operation.arguments.size() != 1) {
+            throw std::logic_error("print/println lowering expected one argument");
+        }
+
+        const StringValue string = lookupString(operation.arguments[0]);
+        const std::string runtimeName =
+            operation.text == "println" ? "nex_runtime_println_str"
+                                        : "nex_runtime_print_str";
+        ensureRuntimePrintDeclaration(runtimeName);
+        builder_.create<::mlir::func::CallOp>(
+            loc_, runtimeName, ::mlir::TypeRange{},
+            ::mlir::ValueRange{string.data, string.length});
+    }
+
+    // Lower `readln() -> str` to the tiny stdin runtime bridge.
+    //
+    // The runtime currently stores the last-read line in a process-global scratch
+    // buffer. The compiler asks for the data pointer and length as two calls, then
+    // binds the single typed IR `str` result to that pointer/length pair. This is
+    // intentionally a first input slice, not the final owned-string design.
+    void lowerReadlnBuiltin(const ir::Operation& operation) {
+        if (!operation.result || !operation.arguments.empty()) {
+            throw std::logic_error("readln lowering expected no arguments and one str result");
+        }
+
+        ensureRuntimeReadlnDeclarations();
+        auto data = builder_.create<::mlir::func::CallOp>(
+            loc_, "nex_runtime_readln_data",
+            ::mlir::TypeRange{::mlir::LLVM::LLVMPointerType::get(builder_.getContext())},
+            ::mlir::ValueRange{});
+        auto length = builder_.create<::mlir::func::CallOp>(
+            loc_, "nex_runtime_readln_len",
+            ::mlir::TypeRange{builder_.getI64Type()},
+            ::mlir::ValueRange{});
+        bindString(*operation.result, StringValue{.data = data.getResult(0),
+                                                  .length = length.getResult(0)});
     }
 
     // Lower a structured if statement to `scf.if`.
@@ -460,7 +840,7 @@ private:
         if (thenTerminator.kind == ir::Terminator::Kind::ReturnValue) {
             builder_.create<::mlir::func::ReturnOp>(loc_, ifOp.getResult(0));
         } else {
-            builder_.create<::mlir::func::ReturnOp>(loc_);
+            lowerVoidReturn();
         }
         return true;
     }
@@ -603,7 +983,7 @@ private:
     bool lowerTerminator(const ir::Terminator& terminator) {
         switch (terminator.kind) {
         case ir::Terminator::Kind::Return:
-            builder_.create<::mlir::func::ReturnOp>(loc_);
+            lowerVoidReturn();
             return true;
         case ir::Terminator::Kind::ReturnValue: {
             const ::mlir::Value value =
@@ -632,6 +1012,25 @@ private:
         }
     }
 
+    // Emit the backend form of a source-level `return;`.
+    //
+    // Nex allows `fn main() -> void`, but the platform executable entry point is
+    // the C/LLVM symbol `main`, whose useful convention is returning an integer
+    // process status. For native output, a void Nex main therefore returns 0 to
+    // the OS. Other void functions still lower to a plain no-value return.
+    void lowerVoidReturn() {
+        if (usesNativeMainResult()) {
+            auto success = builder_.create<::mlir::arith::ConstantIntOp>(loc_, 0, 32);
+            builder_.create<::mlir::func::ReturnOp>(loc_, success.getResult());
+            return;
+        }
+        builder_.create<::mlir::func::ReturnOp>(loc_);
+    }
+
+    bool usesNativeMainResult() const {
+        return function_.name == "main" && function_.returnType.isVoid();
+    }
+
     // Look up the MLIR value corresponding to a previously-lowered IR temporary.
     //
     // A miss means operations were lowered out of order or an operation forgot to
@@ -644,10 +1043,78 @@ private:
         return found->second;
     }
 
+    void bindString(ir::ValueRef ref, StringValue value) {
+        const auto [_, inserted] = strings_.emplace(ref.id, value);
+        if (!inserted) {
+            throw std::logic_error("typed IR string value was defined more than once during MLIR lowering");
+        }
+    }
+
+    StringValue lookupString(ir::ValueRef ref) const {
+        const auto found = strings_.find(ref.id);
+        if (found == strings_.end()) {
+            throw std::logic_error("MLIR lowering used a string value before it was defined");
+        }
+        return found->second;
+    }
+
+    ::mlir::ModuleOp functionModule() const {
+        ::mlir::Operation* operation = builder_.getBlock()->getParentOp();
+        while (operation && !::llvm::isa<::mlir::ModuleOp>(operation)) {
+            operation = operation->getParentOp();
+        }
+        if (!operation) {
+            throw std::logic_error("MLIR lowering could not find parent module");
+        }
+        return ::llvm::cast<::mlir::ModuleOp>(operation);
+    }
+
+    void ensureRuntimePrintDeclaration(std::string_view name) {
+        ::mlir::ModuleOp module = functionModule();
+        if (module.lookupSymbol<::mlir::func::FuncOp>(name)) {
+            return;
+        }
+
+        ::mlir::OpBuilder::InsertionGuard guard(builder_);
+        builder_.setInsertionPointToStart(module.getBody());
+        const ::mlir::FunctionType runtimeType = builder_.getFunctionType(
+            {::mlir::LLVM::LLVMPointerType::get(builder_.getContext()),
+             builder_.getI64Type()},
+            {});
+        ::mlir::func::FuncOp declaration =
+            builder_.create<::mlir::func::FuncOp>(loc_, name, runtimeType);
+        declaration.setPrivate();
+    }
+
+    void ensureRuntimeReadlnDeclarations() {
+        ensureRuntimeFunctionDeclaration(
+            "nex_runtime_readln_data", {},
+            {::mlir::LLVM::LLVMPointerType::get(builder_.getContext())});
+        ensureRuntimeFunctionDeclaration("nex_runtime_readln_len", {},
+                                         {builder_.getI64Type()});
+    }
+
+    void ensureRuntimeFunctionDeclaration(std::string_view name,
+                                          ::mlir::TypeRange parameterTypes,
+                                          ::mlir::TypeRange resultTypes) {
+        ::mlir::ModuleOp module = functionModule();
+        if (module.lookupSymbol<::mlir::func::FuncOp>(name)) {
+            return;
+        }
+
+        ::mlir::OpBuilder::InsertionGuard guard(builder_);
+        builder_.setInsertionPointToStart(module.getBody());
+        ::mlir::func::FuncOp declaration = builder_.create<::mlir::func::FuncOp>(
+            loc_, name, builder_.getFunctionType(parameterTypes, resultTypes));
+        declaration.setPrivate();
+    }
+
     ::mlir::OpBuilder& builder_;
     const ir::Function& function_;
+    const std::unordered_map<std::string, const ir::Const*>& constants_;
     ::mlir::Location loc_;
     std::unordered_map<std::size_t, ::mlir::Value> values_;
+    std::unordered_map<std::size_t, StringValue> strings_;
     // directLocals_ maps immutable parameter locals to existing MLIR block
     // arguments. No memory is needed for them in the current Core v0 slice.
     std::unordered_map<std::size_t, ::mlir::Value> directLocals_;
@@ -1297,6 +1764,7 @@ void loadCoreMlirDialects(::mlir::MLIRContext& context) {
     context.getOrLoadDialect<::mlir::arith::ArithDialect>();
     context.getOrLoadDialect<::mlir::scf::SCFDialect>();
     context.getOrLoadDialect<::mlir::memref::MemRefDialect>();
+    context.getOrLoadDialect<::mlir::LLVM::LLVMDialect>();
 }
 
 // Build the high-level MLIR module shared by `--dump-mlir` and LLVM lowering.
@@ -1314,9 +1782,14 @@ buildMlirModule(::mlir::MLIRContext& context, const ir::Module& module) {
     ::mlir::OwningOpRef<::mlir::ModuleOp> mlirModule =
         ::mlir::ModuleOp::create(loc);
 
+    std::unordered_map<std::string, const ir::Const*> constants;
+    for (const ir::Const& constant : module.constants) {
+        constants.emplace(constant.name, &constant);
+    }
+
     builder.setInsertionPointToStart(mlirModule->getBody());
     for (const ir::Function& function : module.functions) {
-        FunctionLowerer(builder, function).lower();
+        FunctionLowerer(builder, function, constants).lower();
         builder.setInsertionPointToEnd(mlirModule->getBody());
     }
 
@@ -1335,10 +1808,6 @@ buildMlirModule(::mlir::MLIRContext& context, const ir::Module& module) {
 // fallback text format that deliberately mirrors the real MLIR printer closely
 // enough for learning and golden tests.
 void dumpTextualMlir(std::ostream& out, const ir::Module& module) {
-    if (!module.constants.empty()) {
-        throw std::logic_error("textual MLIR lowering does not support constants yet");
-    }
-
 #ifdef NEXC_HAS_REAL_MLIR
     ::mlir::MLIRContext context;
     ::mlir::OwningOpRef<::mlir::ModuleOp> mlirModule =

@@ -5,7 +5,7 @@ This is the beginner-facing guide for writing the nex that exists today.
 Core v0 is small on purpose. You can write scalar functions, constants,
 variables, arithmetic, `if` / `else`, `while` loops, string literals, and
 `print` / `println` calls. You cannot allocate memory, use arrays, import files,
-spawn tasks, or compile to a native executable yet.
+spawn tasks, or do general file/pipe I/O yet.
 
 The current compiler frontend can **check** nex programs:
 
@@ -33,9 +33,14 @@ Check it:
 ./nexc.sh check-file examples/hello.nexs
 ```
 
-For now, this does not build or run a native binary. It checks that the compiler
-frontend understands the program and that the call is semantically valid. The
-actual output behavior comes when the compiler has lowering and a runtime.
+Compile and run it directly with `build/nexc`:
+
+```sh
+build/nexc examples/hello.nexs -o build/hello
+./build/hello
+```
+
+The executable prints `Hello, world!`.
 
 ## File Shape
 
@@ -128,8 +133,9 @@ false
 "Hello, world!"
 ```
 
-Core v0 string literals are lightweight: they are checked and carried through
-the frontend, but they do not yet have a full runtime representation.
+Core v0 string literals lower to immutable bytes plus an explicit byte length.
+That lets `print` and `println` write the exact bytes without relying on a
+C-style trailing `\0` terminator.
 
 ## Constants
 
@@ -239,6 +245,9 @@ Logical operators:
 !   &&   ||
 ```
 
+Current Core v0 `&&` and `||` are eager: both operands are evaluated before the
+boolean result is computed. Do not rely on short-circuit behavior yet.
+
 Conditions accept `bool` or integer values. For integers, zero is false and
 nonzero is true, like C:
 
@@ -332,9 +341,11 @@ Core v0 has two built-in functions:
 ```c
 print("text");
 println("text");
+println(readln());
 ```
 
-Both take one `str` argument and return `void`.
+`print` and `println` take one `str` argument and return `void`. `readln()` reads
+one stdin line and returns a temporary `str` without the line ending.
 
 ```c
 fn main() -> void {
@@ -347,6 +358,27 @@ fn main() -> void {
 This is intentionally simple. nex does not have Python-style f-strings yet,
 because interpolation and formatting can hide allocation, conversion, and
 runtime work. A future formatting design should make those costs explicit.
+
+## Reading One Line
+
+The first input slice is deliberately small:
+
+```c
+fn main() -> void {
+    println(readln());
+    return;
+}
+```
+
+Compile and run it:
+
+```sh
+build/nexc examples/stdin_echo.nexs -o build/stdin_echo
+printf 'hello\n' | build/stdin_echo
+```
+
+For now, use the returned string directly. Storing input strings in variables is
+waiting on a fuller string ownership and buffer model.
 
 ## Checking Your Code
 
@@ -362,6 +394,8 @@ Useful debugging commands:
 ./nexc.sh tokens path/to/file.nexs
 ./nexc.sh ast path/to/file.nexs
 ./nexc.sh ast-graph path/to/file.nexs
+./nexc.sh mlir path/to/file.nexs
+./nexc.sh llvm path/to/file.nexs
 ```
 
 `ast-graph` writes `ast.dot` and `ast.svg` if Graphviz is installed.
@@ -401,7 +435,7 @@ Core v0 does not yet include:
 - arrays or indexing
 - user-defined types
 - imports/modules
-- native code generation
+- file reading/writing and pipe abstractions
 - allocation, buffers, channels, tasks, or realtime regions
 
 Those belong to later language/compiler phases.

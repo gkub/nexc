@@ -75,10 +75,6 @@ void lowerToLlvmDialect(::mlir::ModuleOp module) {
 #endif
 
 void dumpTextualLlvmIr(std::ostream& out, const ir::Module& module) {
-    if (!module.constants.empty()) {
-        throw std::logic_error("LLVM lowering does not support module constants yet");
-    }
-
 #ifdef NEXC_HAS_REAL_MLIR
     ::mlir::MLIRContext mlirContext;
     loadLlvmLoweringDialects(mlirContext);

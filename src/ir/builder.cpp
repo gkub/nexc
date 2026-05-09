@@ -87,6 +87,11 @@ private:
             .returnType = voidType,
             .isBuiltin = true,
         };
+        functions_["readln"] = FunctionSignature{
+            .parameterTypes = {},
+            .returnType = str,
+            .isBuiltin = true,
+        };
     }
 
     // Collect just enough top-level information for IR construction. Semantic

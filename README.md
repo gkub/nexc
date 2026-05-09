@@ -40,19 +40,26 @@ The compiler currently supports:
 - AST text and Graphviz DOT dumps
 - semantic checking for Core v0 examples
 - typed IR dumps
-- MLIR lowering for the nontrivial pipeline walkthrough: scalar arithmetic,
-integer comparisons, direct function calls, mutable local storage, assignment,
-fallthrough and returning `if`/`else`, `while`, and `/` / `%`
-- LLVM IR dumping for the same scalar walkthrough slice, with `llvm-as`
-validation when LLVM tools are available
-- native executable generation for scalar Core v0 programs that do not need
-runtime services, using `clang` as the host linker/codegen driver
+- MLIR lowering for Core v0 scalars/control flow: fixed-width integers,
+booleans, module constants, mutable local storage, assignment, function calls,
+`if`/`else`, `while`, `/`, `%`, unsigned comparisons/division/remainder, and
+eager `&&` / `||`
+- string literal lowering to global bytes plus length
+- LLVM IR dumping with `llvm-as` validation when LLVM tools are available
+- native executable generation using `clang` as the host linker/codegen driver
+- runtime-backed `print(str)` and `println(str)` for observable stdout
+- an experimental `readln() -> str` stdin slice for direct input/output examples
 
-It does **not** yet support runtime-backed features such as real `print` /
-`println` execution.
+For example, this now builds and prints real output:
 
-For example, `examples/hello.nexs` type-checks but does not compile to a native
-executable yet because strings and `println` need runtime lowering.
+```sh
+build/nexc examples/hello.nexs -o build/hello
+./build/hello
+```
+
+The runtime is now built as `build/runtime/libnexrt.a` and discovered relative to
+the `nexc` executable. Set `NEXC_RUNTIME_LIBRARY` only if you are testing an
+unusual runtime location.
 
 ## Development Setup
 
@@ -149,7 +156,7 @@ docs/       Language specification and design notes
 examples/   Example nex programs
 src/        Compiler implementation
 include/    Public/internal C++ headers
-runtime/    Future nex runtime support
+  runtime/    Tiny bootstrap runtime linked into native executables
 tests/      Compiler tests
 nex.md      Living project overview and AI/context document
 ```
@@ -163,6 +170,8 @@ nex.md      Living project overview and AI/context document
 - [docs/design/frontend_contract.md](./docs/design/frontend_contract.md) - lexer/parser/AST contract for the first frontend implementation
 - [docs/design/core_v0_typed_ir.md](./docs/design/core_v0_typed_ir.md) - design note for the first backend-facing typed IR
 - [docs/design/llvm_native_first_slice.md](./docs/design/llvm_native_first_slice.md) - first LLVM/native lowering milestone plan
+- [docs/design/io_v1_spitball.md](./docs/design/io_v1_spitball.md) - stdin/files/pipes design notes
+- [docs/design/arrays_vectors_linalg.md](./docs/design/arrays_vectors_linalg.md) - arrays/vectors design notes for future linear algebra
 - [NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md) - educational guide to the compiler as it grows
 - [docs/user/frontend.md](./docs/user/frontend.md) - practical guide for frontend inspection and semantic checking
 - [nex.md](./nex.md) - living project overview and language-planning context

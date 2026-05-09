@@ -288,6 +288,12 @@ private:
             .returnType = voidType,
             .isBuiltin = true,
         };
+        functions_["readln"] = FunctionSymbol{
+            .nameSpan = builtinSpan,
+            .parameterTypes = {},
+            .returnType = str,
+            .isBuiltin = true,
+        };
     }
 
     // Collect top-level function signatures and constants.

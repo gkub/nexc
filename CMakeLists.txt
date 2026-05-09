@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(nexc LANGUAGES CXX)
+project(nexc LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -129,6 +129,7 @@ if(MLIR_FOUND)
             MLIRArithDialect
             MLIRSCFDialect
             MLIRMemRefDialect
+            MLIRLLVMDialect
     )
 endif()
 nexc_target_warnings(nexc_mlir)
@@ -165,8 +166,25 @@ if(MLIR_FOUND)
 endif()
 nexc_target_warnings(nexc_llvm)
 
+add_library(nexc_runtime STATIC
+    runtime/nex_runtime.c
+)
+
+set_target_properties(nexc_runtime
+    PROPERTIES
+        OUTPUT_NAME nexrt
+        ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/runtime
+)
+
+nexc_target_warnings(nexc_runtime)
+
 add_executable(nexc src/tools/nexc/main.cpp)
 target_link_libraries(nexc PRIVATE nexc_llvm)
+add_dependencies(nexc nexc_runtime)
+target_compile_definitions(nexc
+    PRIVATE
+        NEXC_RUNTIME_LIBRARY_RELATIVE_PATH="runtime/$<TARGET_FILE_NAME:nexc_runtime>"
+)
 nexc_target_warnings(nexc)
 
 enable_testing()
@@ -249,6 +267,44 @@ function(add_nexc_executable_test name input expected_exit_code)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunExecutable.cmake
     )
 endfunction()
+
+function(add_nexc_executable_stdout_test name input expected_exit_code expected_stdout)
+    if(NOT NEXC_CLANG_EXECUTABLE)
+        return()
+    endif()
+
+    add_test(
+        NAME ${name}
+        COMMAND ${CMAKE_COMMAND}
+            -DNEXC_EXECUTABLE=$<TARGET_FILE:nexc>
+            -DINPUT=${input}
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${name}
+            -DEXPECTED_RUN_EXIT_CODE=${expected_exit_code}
+            -DEXPECTED_STDOUT=${expected_stdout}
+            -DWORKING_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunExecutable.cmake
+    )
+endfunction()
+
+function(add_nexc_executable_stdin_stdout_test name input stdin expected_exit_code expected_stdout)
+    if(NOT NEXC_CLANG_EXECUTABLE)
+        return()
+    endif()
+
+    add_test(
+        NAME ${name}
+        COMMAND ${CMAKE_COMMAND}
+            -DNEXC_EXECUTABLE=$<TARGET_FILE:nexc>
+            -DINPUT=${input}
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${name}
+            -DSTDIN=${stdin}
+            -DEXPECTED_RUN_EXIT_CODE=${expected_exit_code}
+            -DEXPECTED_STDOUT=${expected_stdout}
+            -DWORKING_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunExecutable.cmake
+    )
+endfunction()
+
 
 function(add_nexc_compile_failure_test name input expected_stderr_contains)
     if(NOT NEXC_CLANG_EXECUTABLE)
@@ -461,6 +517,11 @@ add_nexc_mlir_validation_test(
     examples/pipeline_walkthrough.nexs
 )
 
+add_nexc_mlir_validation_test(
+    validate_mlir_core_v0_backend_coverage
+    examples/core_v0_backend_coverage.nexs
+)
+
 add_nexc_llvm_validation_test(
     validate_llvm_return_42
     examples/return_42.nexs
@@ -486,6 +547,11 @@ add_nexc_llvm_validation_test(
     examples/pipeline_walkthrough.nexs
 )
 
+add_nexc_llvm_validation_test(
+    validate_llvm_core_v0_backend_coverage
+    examples/core_v0_backend_coverage.nexs
+)
+
 add_nexc_executable_test(
     run_executable_return_42
     examples/return_42.nexs
@@ -498,10 +564,25 @@ add_nexc_executable_test(
     30
 )
 
-add_nexc_compile_failure_test(
-    compile_hello_runtime_limitation
+add_nexc_executable_test(
+    run_executable_core_v0_backend_coverage
+    examples/core_v0_backend_coverage.nexs
+    33
+)
+
+add_nexc_executable_stdout_test(
+    run_executable_hello_stdout
     examples/hello.nexs
-    "backend limitation: string literals are not lowered yet"
+    0
+    "Hello, world!\n"
+)
+
+add_nexc_executable_stdin_stdout_test(
+    run_executable_stdin_echo
+    examples/stdin_echo.nexs
+    "typed input\n"
+    0
+    "typed input\n"
 )
 
 add_test(
@@ -532,6 +613,16 @@ add_test(
 add_test(
     NAME semantic_check_pipeline_walkthrough
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/pipeline_walkthrough.nexs
+)
+
+add_test(
+    NAME semantic_check_core_v0_backend_coverage
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/core_v0_backend_coverage.nexs
+)
+
+add_test(
+    NAME semantic_check_stdin_echo
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/stdin_echo.nexs
 )
 
 add_test(

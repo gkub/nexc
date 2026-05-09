@@ -125,9 +125,9 @@ Core v0 includes fixed-width integers and Boolean:
 
 There is no implicit `void` value; `void` is only a **return type**.
 
-`str` is the type of string literals. Core v0 treats `str` as a lightweight
-frontend type suitable for built-in printing. Its runtime representation is
-defined later when lowering/runtime support exists.
+`str` is the type of string literals. In the current native backend, a string
+literal lowers to immutable global bytes plus an explicit byte length. This is
+why `print` and `println` do not depend on C-style trailing `\0` terminators.
 
 ### 4.2 Boolean and C-like conditions
 
@@ -204,10 +204,18 @@ Core v0 provides two built-in functions:
 ```text
 print(str) -> void
 println(str) -> void
+readln() -> str
 ```
 
 These are semantic built-ins recognized by the compiler frontend. Their runtime
-implementation is defined when native code generation and runtime support exist.
+implementation is currently provided by the tiny bootstrap runtime linked by the
+native driver. Source code still treats them as Nex built-ins, not as imported C
+functions.
+
+`readln()` is the first experimental input primitive. It reads one line from
+stdin and returns it without the line ending. Its current runtime storage is
+temporary and should be used directly, for example `println(readln());`, until
+owned strings and slices are specified.
 
 ---
 
@@ -236,7 +244,7 @@ Expressions include:
 - function calls: `f(a, b, ...)`
 - unary `-` and `!`
 - binary arithmetic and comparisons
-- logical `&&` and `||` (**short-circuit**)
+- logical `&&` and `||`
 - parentheses
 
 **Recommended precedence** (high to low), aligned with common C-family languages:
@@ -250,7 +258,11 @@ Expressions include:
 7. logical AND: `&&`
 8. logical OR: `||`
 
-`&&` and `||` short-circuit: the right-hand side is not evaluated if the result is fixed by the left-hand side.
+In the current Core v0 implementation, `&&` and `||` are eager boolean
+operators: both operands are evaluated, then the boolean operation is applied.
+This is deliberately documented because the current typed IR lowers expressions
+linearly. A later language revision may upgrade these to short-circuiting
+operators once the IR represents the right-hand side as a conditional block.
 
 ---
 

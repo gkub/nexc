@@ -690,7 +690,7 @@ The current analyzer checks:
 - integer arithmetic/comparison operands
 - discarded call results: only `void` calls may be statements
 - string literals as `str`
-- built-in `print(str) -> void` and `println(str) -> void`
+- built-in `print(str) -> void`, `println(str) -> void`, and `readln() -> str`
 - `main`, if present, has no parameters and returns `void` or `i32`
 - module-level `const` initializers are compile-time expressions
 - integer literals fit their selected type
@@ -890,7 +890,7 @@ rather than trying to produce user-facing diagnostics.
 
 It first rebuilds the resolved top-level tables it needs:
 
-- built-ins: `print(str) -> void`, `println(str) -> void`
+- built-ins: `print(str) -> void`, `println(str) -> void`, `readln() -> str`
 - module constants and their types
 - functions, parameter types, and return types
 
@@ -944,7 +944,7 @@ They cover:
 
 - constants, function calls, and `main` returning `i32`
 - mutable locals, assignment, and `while`
-- `println(str)` as a resolved built-in call
+- `println(str)` and `readln()` as resolved built-in calls
 - `if` / `else` where both branches return
 
 When IR shape changes intentionally, update the matching golden file in the same
@@ -1480,14 +1480,17 @@ available. The CMake configuration looks for the tool through the MLIR install
 metadata and the normal shell `PATH`; if it cannot find the tool, the validation
 tests are skipped rather than breaking frontend-only development machines.
 
-The current MLIR lowering is still intentionally incomplete, but it now covers
-the nontrivial pipeline walkthrough. It supports scalar literals for `i32` and
-`bool`, `+`, `-`, `*`, `/`, `%`, integer comparisons, unary `!`, function
-parameters, direct function calls, function returns, local declarations, local
-loads/stores, assignment, returning `if`/`else`, fallthrough `if`/`else`, and
-`while`. It does not yet lower module constants, strings, built-in `print` /
-`println`, nested returning control flow, unsigned-specific comparisons, or
-runtime/native execution.
+The current MLIR lowering now covers the Core v0 backend surface: fixed-width
+integer literals, `bool`, string literals, module constants, `+`, `-`, `*`, `/`,
+`%`, integer comparisons, eager `&&` / `||`, unary `!`, function parameters,
+direct function calls, built-in `print` / `println` calls, function returns,
+local declarations, local loads/stores, assignment, returning `if`/`else`,
+fallthrough `if`/`else`, and `while`.
+
+String literals are the first place MLIR lowering has to care about runtime
+layout. The compiler decodes the source spelling, emits immutable LLVM-dialect
+global bytes, and remembers a pointer plus byte length for the typed IR `str`
+value. That pointer/length pair is what the printing runtime receives.
 
 ## 12. LLVM IR Lowering
 
@@ -1534,9 +1537,9 @@ LLVM `alloca`, `load`, and `store` operations. That is why the LLVM output is
 less beginner-friendly than MLIR: the high-level source structure has been
 flattened into lower-level control flow.
 
-This inspection mode is still not native execution. LLVM IR is an input to later
-LLVM tools and code generation. The separate executable driver below is the path
-that turns this IR into a runnable host program.
+This inspection mode is still not native execution by itself. LLVM IR is the
+input to later LLVM tools and code generation. The executable driver below is the
+path that turns this IR into a runnable host program.
 
 ## 13. Native Executable Driver
 
@@ -1555,39 +1558,39 @@ parse/check source
   -> lower to MLIR
   -> lower to LLVM IR
   -> write temporary .ll file
-  -> invoke clang -x ir temp.ll -o output
+  -> find build/runtime/libnexrt.a relative to the nexc executable
+  -> invoke clang -x ir temp.ll -x none libnexrt.a -o output
 ```
 
 Using `clang` here is a deliberate early-driver choice. `clang` already knows how
-to invoke the host linker and find the platform startup/runtime files. That lets
-`nexc` prove end-to-end native execution before we implement our own object-file
-emission and linker driver.
+to invoke the host linker and find the platform startup/runtime files. The Nex
+runtime is no longer passed as a source-tree `.c` file; CMake builds it as
+`build/runtime/libnexrt.a`, and `nexc` finds that archive relative to its own
+executable. For unusual packaging experiments, `NEXC_RUNTIME_LIBRARY` can point
+at a different runtime archive.
 
 The current executable tests cover:
 
 ```sh
 build/nexc examples/return_42.nexs -o <temp>
 build/nexc examples/pipeline_walkthrough.nexs -o <temp>
+build/nexc examples/core_v0_backend_coverage.nexs -o <temp>
+build/nexc examples/hello.nexs -o <temp>
+build/nexc examples/stdin_echo.nexs -o <temp>
 ```
 
 The first executable exits with status `42`. The walkthrough executable exits
 with status `30`, because `sum_even_to(10)` returns `0 + 2 + 4 + 6 + 8 + 10`.
+The backend coverage executable exits with `33` after exercising constants,
+non-`i32` integer widths, unsigned division/remainder/comparison, and eager
+logical operators. The hello executable checks stdout and prints `Hello, world!`.
+The stdin echo executable pipes test input into `readln()` and checks the printed
+line.
 
-This still is not the full runtime story. Programs that need strings,
-`print`/`println`, files, allocation, or richer system interaction still need a
-runtime ABI. But for pure scalar Core v0 programs, the compiler can now build and
-run native host executables.
-
-For example, this currently fails on purpose:
-
-```sh
-build/nexc examples/hello.nexs -o build/hello
-```
-
-`hello.nexs` contains a string literal and `println("Hello, world!")`. The
-frontend accepts that program because `println(str)` is a known built-in, but the
-backend cannot lower strings or built-in printing yet. The compiler should say
-that clearly as a backend limitation until the runtime exists.
+This still is not the full long-term runtime story. Files, pipes, allocation,
+formatting, and richer system interaction are intentionally left for a separate
+I/O design pass. The important post-v0 milestone is that the compiler can now
+produce useful native executables with stdout output and a first stdin foothold.
 
 ## 14. CLI Inspection Modes
 
@@ -1642,8 +1645,9 @@ dumps
 - golden output checks for LLVM IR dumps
 - conditional LLVM IR assembler checks for selected `--dump-llvm` outputs when
 `llvm-as` is available
-- native executable compile/run checks for selected scalar programs when `clang`
-is available
+- native executable compile/run checks for selected programs when `clang` is
+available, including stdout checks for `hello.nexs` and stdin/stdout checks for
+`stdin_echo.nexs`
 - parser-negative fixtures
 - semantic success checks for valid examples
 - semantic-negative fixtures for type errors, undefined names, mutability,
@@ -1724,8 +1728,9 @@ cmake/RunExecutable.cmake
 ```
 
 That helper compiles a nex file with `build/nexc input.nexs -o output`, runs the
-resulting executable, and checks its exit status. It is the first CTest coverage
-for the compiler as a producer of runnable programs rather than only text dumps.
+resulting executable, checks its exit status, and can also check exact stdout. It
+is CTest coverage for the compiler as a producer of runnable programs rather
+than only text dumps.
 
 GitHub Actions runs the same build and CTest loop on pushes and pull requests:
 
@@ -1742,31 +1747,29 @@ automatically.
 The current compiler does not yet implement:
 
 - type coercions or integer promotions
-- full constant-expression evaluation across named `const` values
 - precise signed negative constant values
 - formatting/interpolation for strings
-- runtime implementation for `print` / `println`
-- complete MLIR lowering for strings, built-in printing, module constants,
-  unsigned-specific behavior, nested returning control flow, and runtime calls
+- short-circuit `&&` / `||` (Core v0 currently documents eager boolean logic)
+- general I/O beyond stdout `print` / `println` and the tiny `readln()` slice
+- nested returning control flow beyond the currently tested shapes
 - inter-file/module resolution
 - direct object-file emission without delegating to `clang`
-- native execution for programs that require runtime support
 
-Those are later stages. The current project state is a checked Core v0 frontend
-plus typed IR, MLIR, LLVM IR dumps, and native executable generation for scalar
-programs that do not need runtime services.
+Those are later stages. The current project state is a checked Core v0 compiler
+path with typed IR, MLIR, LLVM IR dumps, and native executable generation,
+including runtime-backed stdout printing and one-line stdin input.
 
 ## 17. Recommended Next Steps
 
 The safest next steps are:
 
-1. Keep typed IR, MLIR, and LLVM IR tests growing as new Core v0 forms are added.
-2. Decide the minimal runtime ABI for observable output before lowering
-  `print` / `println`.
-3. Add unsigned-specific lowering behavior before treating the integer tower as
-  complete.
-4. After LLVM v0 settles, write the formal language reference in a Python/C/C++
-  documentation style.
+1. Continue the proper Nex I/O surface design before adding file/pipe syntax.
+2. Decide whether `&&` / `||` should become short-circuiting in v1 and update the
+   typed IR shape if so.
+3. Keep typed IR, MLIR, LLVM IR, runtime, and executable tests growing as new
+   language forms are added.
+4. Start the next feature slice only after its user-facing reference text is
+   clear.
 
 Lowering should stay boring at first. The goal is to prove the frontend can feed
 a backend with checked Core v0 programs before adding richer language features.

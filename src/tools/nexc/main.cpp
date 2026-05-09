@@ -11,6 +11,7 @@
 #include "nexc/mlir/textual.h"
 
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -126,8 +127,54 @@ std::filesystem::path writeTemporaryLlvmIr(const nexc::ir::Module& module) {
     return writablePath.data();
 }
 
+std::filesystem::path currentExecutablePath() {
+    // Linux exposes the running program through /proc/self/exe. Reading this
+    // symlink gives us the real location of `nexc`, even when the user invokes it
+    // from some unrelated working directory. That is the key to finding bundled
+    // compiler resources without baking source-tree paths into the binary.
+    std::vector<char> buffer(4096, '\0');
+    while (true) {
+        const ssize_t size = ::readlink("/proc/self/exe", buffer.data(), buffer.size());
+        if (size == -1) {
+            throw std::runtime_error(std::string("failed to locate nexc executable: ") +
+                                     std::strerror(errno));
+        }
+
+        if (static_cast<std::size_t>(size) < buffer.size()) {
+            return std::filesystem::path(std::string(buffer.data(), static_cast<std::size_t>(size)));
+        }
+
+        // If the buffer was exactly full, the path may have been truncated. Grow
+        // and retry rather than guessing.
+        buffer.resize(buffer.size() * 2, '\0');
+    }
+}
+
+std::filesystem::path resolveRuntimeLibrary() {
+    // Developers and tests can override the runtime location explicitly. This is
+    // useful for packaging experiments, staged installs, or unusual build
+    // layouts, while the normal build continues to work without configuration.
+    if (const char* overridePath = std::getenv("NEXC_RUNTIME_LIBRARY")) {
+        if (*overridePath != '\0') {
+            return overridePath;
+        }
+    }
+
+#ifdef NEXC_RUNTIME_LIBRARY_RELATIVE_PATH
+    const std::filesystem::path bundled =
+        currentExecutablePath().parent_path() / NEXC_RUNTIME_LIBRARY_RELATIVE_PATH;
+    if (std::filesystem::exists(bundled)) {
+        return bundled;
+    }
+#endif
+
+    throw std::runtime_error(
+        "failed to find nex runtime library; set NEXC_RUNTIME_LIBRARY to libnexrt.a");
+}
+
 int runClang(const std::string& clangName,
              const std::filesystem::path& llvmIrPath,
+             const std::filesystem::path& runtimeLibraryPath,
              const std::string& outputPath) {
     // The compiler driver delegates final code generation and linking to clang.
     // That is normal for an early compiler: clang already knows the platform C
@@ -140,12 +187,16 @@ int runClang(const std::string& clangName,
 
     if (child == 0) {
         std::string llvmIr = llvmIrPath.string();
+        std::string runtimeLibrary = runtimeLibraryPath.string();
         char* const args[] = {
             const_cast<char*>(clangName.c_str()),
             const_cast<char*>("-Wno-override-module"),
             const_cast<char*>("-x"),
             const_cast<char*>("ir"),
             llvmIr.data(),
+            const_cast<char*>("-x"),
+            const_cast<char*>("none"),
+            runtimeLibrary.data(),
             const_cast<char*>("-o"),
             const_cast<char*>(outputPath.c_str()),
             nullptr,
@@ -172,6 +223,12 @@ int runClang(const std::string& clangName,
 void compileExecutable(const nexc::ir::Module& module,
                        const std::string& outputPath) {
     const std::filesystem::path llvmIrPath = writeTemporaryLlvmIr(module);
+    const std::filesystem::path runtimeLibraryPath = resolveRuntimeLibrary();
+    if (!std::filesystem::exists(runtimeLibraryPath)) {
+        throw std::runtime_error("nex runtime library does not exist: " +
+                                 runtimeLibraryPath.string());
+    }
+
     struct TemporaryCleanup {
         std::filesystem::path path;
         ~TemporaryCleanup() {
@@ -183,9 +240,9 @@ void compileExecutable(const nexc::ir::Module& module,
     // Prefer `clang`, but try the version-suffixed binary used by Ubuntu's LLVM
     // packages too. A 127 exit from our child means exec failed, not that clang
     // rejected the input.
-    int exitCode = runClang("clang", llvmIrPath, outputPath);
+    int exitCode = runClang("clang", llvmIrPath, runtimeLibraryPath, outputPath);
     if (exitCode == 127) {
-        exitCode = runClang("clang-18", llvmIrPath, outputPath);
+        exitCode = runClang("clang-18", llvmIrPath, runtimeLibraryPath, outputPath);
     }
     if (exitCode != 0) {
         throw std::runtime_error("clang failed while creating executable");

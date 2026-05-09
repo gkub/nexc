@@ -6,11 +6,11 @@ It is an index, not a full spec.
 ## Current Project State
 
 `nexc` is a C++ compiler project for the nex language. The current implementation
-is a **checked Core v0 frontend with typed IR dumps and first scalar/control-flow
-MLIR lowering**:
+is a **checked Core v0 compiler path** with typed IR, MLIR, LLVM IR, and native
+execution for the documented v0 feature set:
 
 ```text
-source -> lexer -> tokens -> parser -> AST -> semantic analysis -> typed IR -> MLIR
+source -> lexer -> parser -> AST -> semantic analysis -> typed IR -> MLIR -> LLVM IR -> native executable
 ```
 
 For the human-oriented explanation of build vs dump vs compile flow, start with
@@ -28,17 +28,18 @@ Current frontend capabilities:
 - typed IR dumping: `./nexc.sh ir <file.nexs>`
 - first MLIR dumping: `./nexc.sh mlir <file.nexs>`
 - LLVM IR dumping: `./nexc.sh llvm <file.nexs>`
-- direct scalar executable compilation: `build/nexc <file.nexs> -o <output>`
+- direct executable compilation: `build/nexc <file.nexs> -o <output>`
 
-Not implemented yet:
+Still outside Core v0:
 
-- complete MLIR lowering beyond the pipeline walkthrough slice
-- runtime-backed native execution
-- real `print` / `println` output at runtime
 - arrays, imports/modules, user-defined types, allocation, channels, tasks
+- formatting/interpolation and general I/O APIs beyond stdout printing
+- direct object-file emission without delegating final codegen/linking to `clang`
 
-`print(str)` and `println(str)` are currently **semantic built-ins** only. They
-type-check, but they do not run until lowering/runtime support exists.
+`print(str)` and `println(str)` are semantic built-ins that now lower to the tiny
+bootstrap runtime in `runtime/nex_runtime.c`. `readln() -> str` is the first
+experimental stdin built-in; it is intended for direct use such as
+`println(readln());` while string ownership is still provisional.
 
 ## Build And Test
 
@@ -74,6 +75,8 @@ Useful one-file commands:
 | Frontend implementation contract | [docs/design/frontend_contract.md](./docs/design/frontend_contract.md) |
 | Core v0 typed IR design note | [docs/design/core_v0_typed_ir.md](./docs/design/core_v0_typed_ir.md) |
 | First LLVM/native slice | [docs/design/llvm_native_first_slice.md](./docs/design/llvm_native_first_slice.md) |
+| I/O design notes | [docs/design/io_v1_spitball.md](./docs/design/io_v1_spitball.md) |
+| Arrays/vectors/linear algebra notes | [docs/design/arrays_vectors_linalg.md](./docs/design/arrays_vectors_linalg.md) |
 | Optimization / analysis direction | [docs/design/optimization_goals.md](./docs/design/optimization_goals.md) |
 | Lexer/parser/AST/semantic headers | [include/nexc/frontend/](./include/nexc/frontend/) |
 | Frontend implementation | [src/frontend/](./src/frontend/) |
@@ -102,6 +105,10 @@ Core v0 currently supports:
 - `while`
 - function calls
 - built-in `print(str) -> void` and `println(str) -> void`
+- experimental built-in `readln() -> str`
+
+Important semantic note: current Core v0 `&&` and `||` are eager boolean
+operators. They do not short-circuit yet.
 
 See [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md) for the
 friendly version, and [docs/language/core_v0.md](./docs/language/core_v0.md)
@@ -115,9 +122,11 @@ Current categories:
 
 - smoke tests for token/AST dumping
 - golden output tests for tokens, AST, Graphviz DOT, and selected diagnostics
-- golden output tests for typed IR and MLIR dumps
+- golden output tests for typed IR, MLIR, and LLVM dumps
 - conditional `mlir-opt` validation tests for generated MLIR when MLIR tools are
   available
+- conditional `llvm-as` validation and native executable tests when LLVM/clang
+  are available
 - parser-negative fixtures
 - semantic success fixtures
 - semantic-negative fixtures
@@ -130,20 +139,10 @@ Run them with:
 
 ## Near-Term Direction
 
-The next major implementation direction is lowering from the tiny typed IR. See
-[docs/design/core_v0_typed_ir.md](./docs/design/core_v0_typed_ir.md).
-
-Recommended next slice:
-
-1. Design the minimal runtime ABI for observable output, starting with
-   `print` / `println`.
-2. Keep growing MLIR/LLVM for module constants, strings, built-in runtime calls, and
-   unsigned-specific integer behavior.
-3. Keep IR/MLIR/LLVM output covered by golden tests and conditional verifier
-   validation.
-4. Add runtime strategy only after scalar lowering is clear.
-5. After LLVM v0 stabilizes, write a formal language reference in the style of
-   Python/C/C++ docs.
+Near-term direction after Core v0 is design work, not surprise syntax changes:
+spitball proper Nex I/O APIs (files, stdin/stdout/stderr, pipes) before adding
+surface syntax, then grow beyond v0 with arrays, modules, allocation, and richer
+runtime services.
 
 Before or during that, keep docs updated:
 
