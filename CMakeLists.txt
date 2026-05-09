@@ -251,6 +251,10 @@ function(add_nexc_executable_test name input expected_exit_code)
 endfunction()
 
 function(add_nexc_compile_failure_test name input expected_stderr_contains)
+    if(NOT NEXC_CLANG_EXECUTABLE)
+        return()
+    endif()
+
     add_test(
         NAME ${name}
         COMMAND ${CMAKE_COMMAND}
@@ -375,50 +379,52 @@ add_nexc_golden_test(
     dump_mlir_mutable_locals_golden
     --dump-mlir
     examples/mutable_locals.nexs
-    tests/golden/dump_mlir/mutable_locals.mlir
+    $<IF:$<BOOL:${MLIR_FOUND}>,tests/golden/dump_mlir/mutable_locals.mlir,tests/golden/dump_mlir_fallback/mutable_locals.mlir>
 )
 
 add_nexc_golden_test(
     dump_mlir_pipeline_walkthrough_golden
     --dump-mlir
     examples/pipeline_walkthrough.nexs
-    tests/golden/dump_mlir/pipeline_walkthrough.mlir
+    $<IF:$<BOOL:${MLIR_FOUND}>,tests/golden/dump_mlir/pipeline_walkthrough.mlir,tests/golden/dump_mlir_fallback/pipeline_walkthrough.mlir>
 )
 
-add_nexc_golden_test(
-    dump_llvm_return_42_golden
-    --dump-llvm
-    examples/return_42.nexs
-    tests/golden/dump_llvm/return_42.ll
-)
+if(MLIR_FOUND)
+    add_nexc_golden_test(
+        dump_llvm_return_42_golden
+        --dump-llvm
+        examples/return_42.nexs
+        tests/golden/dump_llvm/return_42.ll
+    )
 
-add_nexc_golden_test(
-    dump_llvm_scalar_expr_golden
-    --dump-llvm
-    examples/scalar_expr.nexs
-    tests/golden/dump_llvm/scalar_expr.ll
-)
+    add_nexc_golden_test(
+        dump_llvm_scalar_expr_golden
+        --dump-llvm
+        examples/scalar_expr.nexs
+        tests/golden/dump_llvm/scalar_expr.ll
+    )
 
-add_nexc_golden_test(
-    dump_llvm_function_call_golden
-    --dump-llvm
-    examples/function_call.nexs
-    tests/golden/dump_llvm/function_call.ll
-)
+    add_nexc_golden_test(
+        dump_llvm_function_call_golden
+        --dump-llvm
+        examples/function_call.nexs
+        tests/golden/dump_llvm/function_call.ll
+    )
 
-add_nexc_golden_test(
-    dump_llvm_mutable_locals_golden
-    --dump-llvm
-    examples/mutable_locals.nexs
-    tests/golden/dump_llvm/mutable_locals.ll
-)
+    add_nexc_golden_test(
+        dump_llvm_mutable_locals_golden
+        --dump-llvm
+        examples/mutable_locals.nexs
+        tests/golden/dump_llvm/mutable_locals.ll
+    )
 
-add_nexc_golden_test(
-    dump_llvm_pipeline_walkthrough_golden
-    --dump-llvm
-    examples/pipeline_walkthrough.nexs
-    tests/golden/dump_llvm/pipeline_walkthrough.ll
-)
+    add_nexc_golden_test(
+        dump_llvm_pipeline_walkthrough_golden
+        --dump-llvm
+        examples/pipeline_walkthrough.nexs
+        tests/golden/dump_llvm/pipeline_walkthrough.ll
+    )
+endif()
 
 add_nexc_mlir_validation_test(
     validate_mlir_return_42
