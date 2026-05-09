@@ -1592,6 +1592,42 @@ formatting, and richer system interaction are intentionally left for a separate
 I/O design pass. The important post-v0 milestone is that the compiler can now
 produce useful native executables with stdout output and a first stdin foothold.
 
+The current bridge now includes explicit parse helpers and status checks:
+
+- `parse_i32(str) -> i32`
+- `parse_u64(str) -> u64`
+- `parse_bool(str) -> bool`
+- `input_ok() -> bool`
+
+This keeps fallible text input visible in user code while Result types are still
+pending.
+
+### 13.1 Bootstrap Runtime vs Nex-Owned Runtime
+
+The current runtime archive (`libnexrt.a`) is a bootstrap boundary, not an
+ideological endpoint.
+
+Today:
+
+- Nex source uses language-level built-ins (`print`, `println`, `readln`,
+  `parse_i32`, `parse_u64`, `parse_bool`, `input_ok`).
+- Lowering maps those built-ins to stable runtime symbols.
+- The native driver links that runtime archive through `clang`.
+- Runtime internals are Linux-first syscall wrappers (`read`/`write`) rather than
+  stdio helpers, so language behavior is not anchored to `fgets`/`fwrite`.
+
+Target direction:
+
+- keep the built-in semantics owned by Nex docs/spec, not by C APIs
+- move from tiny bridge helpers toward a real Nex runtime layer with explicit
+  I/O/resource contracts
+- preserve portability by implementing runtime backends per platform while
+  keeping one language-level I/O model
+
+This is the key mental model: we are not "outsourcing I/O to C"; we are using a
+small host bridge while defining the Nex-owned behavior that future runtimes must
+implement.
+
 ## 14. CLI Inspection Modes
 
 File:

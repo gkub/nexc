@@ -13,6 +13,9 @@ execution for the documented v0 feature set:
 source -> lexer -> parser -> AST -> semantic analysis -> typed IR -> MLIR -> LLVM IR -> native executable
 ```
 
+Primary interface: `build/nexc`.
+`nexc.sh` is a convenience wrapper for repetitive local workflows.
+
 For the human-oriented explanation of build vs dump vs compile flow, start with
 [NEXC_HOLY_BOOK.md §1 Current Pipeline](./NEXC_HOLY_BOOK.md#1-current-pipeline).
 The main walkthrough input is
@@ -37,13 +40,37 @@ Still outside Core v0:
 - direct object-file emission without delegating final codegen/linking to `clang`
 
 `print(str)` and `println(str)` are semantic built-ins that now lower to the tiny
-bootstrap runtime in `runtime/nex_runtime.c`. `readln() -> str` is the first
-experimental stdin built-in; it is intended for direct use such as
-`println(readln());` while string ownership is still provisional.
+bootstrap runtime in `runtime/nex_runtime.c`. Runtime internals are Linux-first
+syscalls (`read`/`write`), not stdio wrappers.
+
+Input/parsing built-ins currently available:
+
+- `readln() -> str`
+- `parse_i32(str) -> i32`
+- `parse_u64(str) -> u64`
+- `parse_bool(str) -> bool`
+- `input_ok() -> bool`
+
+These are the current bridge toward richer, handle-style I/O and future
+Result-based ergonomics.
+
+Important direction: Nex should own its long-term I/O model and runtime surface.
+Current runtime helpers are bootstrap bridges, not the final language/runtime
+contract.
 
 ## Build And Test
 
-Use the root helper script:
+Direct compiler flow:
+
+```sh
+cmake -S . -B build
+cmake --build build
+build/nexc --check examples/hello.nexs
+build/nexc examples/hello.nexs -o build/hello
+./build/hello
+```
+
+Helper-script flow:
 
 ```sh
 ./nexc.sh check
@@ -68,6 +95,18 @@ Useful one-file commands:
 | ----- | ---- |
 | Project overview / long-term vision | [nex.md](./nex.md) |
 | Public README / quick start | [README.md](./README.md) |
+| Long-lived reference docs spine | [docs/reference/README.md](./docs/reference/README.md) |
+| Formal compiler CLI reference | [docs/reference/toolchain/compiler_cli.md](./docs/reference/toolchain/compiler_cli.md) |
+| Build and test reference | [docs/reference/toolchain/build_and_test.md](./docs/reference/toolchain/build_and_test.md) |
+| Inspection modes reference | [docs/reference/toolchain/inspection_modes.md](./docs/reference/toolchain/inspection_modes.md) |
+| Diagnostics reference | [docs/reference/toolchain/diagnostics.md](./docs/reference/toolchain/diagnostics.md) |
+| Artifact reference | [docs/reference/toolchain/artifacts.md](./docs/reference/toolchain/artifacts.md) |
+| Built-ins and I/O reference | [docs/reference/language/builtins_and_io.md](./docs/reference/language/builtins_and_io.md) |
+| Expressions reference | [docs/reference/language/expressions.md](./docs/reference/language/expressions.md) |
+| Types reference | [docs/reference/language/types.md](./docs/reference/language/types.md) |
+| Statements reference | [docs/reference/language/statements.md](./docs/reference/language/statements.md) |
+| Declarations/modules reference | [docs/reference/language/declarations_and_modules.md](./docs/reference/language/declarations_and_modules.md) |
+| Functions/calls reference | [docs/reference/language/functions_and_calls.md](./docs/reference/language/functions_and_calls.md) |
 | How to build/test/run frontend tools | [nexc.sh](./nexc.sh), [docs/user/frontend.md](./docs/user/frontend.md) |
 | How to write current nex code | [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md) |
 | Normative Core v0 language rules | [docs/language/core_v0.md](./docs/language/core_v0.md) |
@@ -105,7 +144,8 @@ Core v0 currently supports:
 - `while`
 - function calls
 - built-in `print(str) -> void` and `println(str) -> void`
-- experimental built-in `readln() -> str`
+- experimental built-ins `readln()`, `parse_i32`, `parse_u64`, `parse_bool`, and
+  `input_ok()`
 
 Important semantic note: current Core v0 `&&` and `||` are eager boolean
 operators. They do not short-circuit yet.
@@ -143,6 +183,18 @@ Near-term direction after Core v0 is design work, not surprise syntax changes:
 spitball proper Nex I/O APIs (files, stdin/stdout/stderr, pipes) before adding
 surface syntax, then grow beyond v0 with arrays, modules, allocation, and richer
 runtime services.
+
+Documentation direction should also shift from milestone-specific docs toward a
+stable user/reference structure (language reference, toolchain reference,
+runtime/std reference).
+
+Ordered priorities:
+
+1. Long-lived user reference docs as the primary user entrypoint.
+2. Nex-owned I/O model and runtime contract (not host-language-shaped APIs).
+3. String/slice/resource semantics that make I/O honest and predictable.
+4. Arrays first, then slices/views, then vectors after allocation is mature.
+5. Shape-aware linear algebra roadmap integrated early with type/runtime design.
 
 Before or during that, keep docs updated:
 

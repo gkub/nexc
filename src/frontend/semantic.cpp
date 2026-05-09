@@ -270,6 +270,9 @@ private:
     // source code.
     void installBuiltins() {
         const Type str{.kind = BuiltinTypeKind::Str};
+        const Type i32{.kind = BuiltinTypeKind::I32};
+        const Type u64{.kind = BuiltinTypeKind::U64};
+        const Type boolType{.kind = BuiltinTypeKind::Bool};
         const Type voidType{.kind = BuiltinTypeKind::Void};
         const SourceSpan builtinSpan{};
 
@@ -292,6 +295,30 @@ private:
             .nameSpan = builtinSpan,
             .parameterTypes = {},
             .returnType = str,
+            .isBuiltin = true,
+        };
+        functions_["parse_i32"] = FunctionSymbol{
+            .nameSpan = builtinSpan,
+            .parameterTypes = {str},
+            .returnType = i32,
+            .isBuiltin = true,
+        };
+        functions_["parse_u64"] = FunctionSymbol{
+            .nameSpan = builtinSpan,
+            .parameterTypes = {str},
+            .returnType = u64,
+            .isBuiltin = true,
+        };
+        functions_["parse_bool"] = FunctionSymbol{
+            .nameSpan = builtinSpan,
+            .parameterTypes = {str},
+            .returnType = boolType,
+            .isBuiltin = true,
+        };
+        functions_["input_ok"] = FunctionSymbol{
+            .nameSpan = builtinSpan,
+            .parameterTypes = {},
+            .returnType = boolType,
             .isBuiltin = true,
         };
     }

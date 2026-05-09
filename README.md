@@ -1,14 +1,21 @@
 # nexc
 
-`nexc` is the reference compiler for **nex**, a lightweight systems programming language focused on explicit costs, predictable execution, concurrency visibility, realtime-safe regions, mathematical clarity, and native code generation.
-
-Core slogan:
-
-> Nothing expensive is implicit.
+`nexc` is the reference compiler for **nex**, a lightweight systems programming
+language focused on explicit costs, predictable execution, visible resource flow,
+and mathematically serious systems programming.
 
 nex is currently in an early compiler implementation stage. The project remains
 docs-first: syntax, semantics, examples, and design constraints should be defined
 before or alongside implementation.
+
+## Core Principles
+
+- Explicit costs over hidden work
+- Predictable execution and visible control flow
+- Concurrency and effects that remain inspectable
+- Embedded/realtime constraints considered from the start
+- A mathematically serious path toward shape-aware linear algebra
+- Own the language/runtime boundary (I/O included), even when bootstrapping with host tools
 
 ## Project Goals
 
@@ -49,6 +56,8 @@ eager `&&` / `||`
 - native executable generation using `clang` as the host linker/codegen driver
 - runtime-backed `print(str)` and `println(str)` for observable stdout
 - an experimental `readln() -> str` stdin slice for direct input/output examples
+- explicit input parsing helpers: `parse_i32`, `parse_u64`, `parse_bool`, and
+  `input_ok()`
 
 For example, this now builds and prints real output:
 
@@ -57,9 +66,11 @@ build/nexc examples/hello.nexs -o build/hello
 ./build/hello
 ```
 
-The runtime is now built as `build/runtime/libnexrt.a` and discovered relative to
-the `nexc` executable. Set `NEXC_RUNTIME_LIBRARY` only if you are testing an
-unusual runtime location.
+The runtime is built as `build/runtime/libnexrt.a` and discovered relative to the
+`nexc` executable. Set `NEXC_RUNTIME_LIBRARY` only if you are testing an unusual
+runtime location. Current runtime I/O internals are Linux-first (`read(2)` /
+`write(2)`), which keeps us off stdio while preserving the same Nex-level
+built-in behavior.
 
 ## Development Setup
 
@@ -101,7 +112,20 @@ are available for validation.
 
 ## Quick Start
 
-Use the root developer script for day-to-day work:
+`build/nexc` is the primary compiler interface. `nexc.sh` is a convenience
+wrapper for common developer loops.
+
+Build and run the compiler directly:
+
+```sh
+cmake -S . -B build
+cmake --build build
+build/nexc --check examples/hello.nexs
+build/nexc examples/hello.nexs -o build/hello
+./build/hello
+```
+
+Use the helper script for day-to-day development loops:
 
 ```sh
 ./nexc.sh check
@@ -164,6 +188,18 @@ nex.md      Living project overview and AI/context document
 ## Key Documents
 
 - [LLM_REFERENCE.md](./LLM_REFERENCE.md) - compact index for future chats/LLMs
+- [docs/reference/README.md](./docs/reference/README.md) - long-lived user reference spine (language/toolchain/runtime)
+- [docs/reference/toolchain/compiler_cli.md](./docs/reference/toolchain/compiler_cli.md) - formal `build/nexc` CLI reference
+- [docs/reference/toolchain/build_and_test.md](./docs/reference/toolchain/build_and_test.md) - canonical build and test workflows
+- [docs/reference/toolchain/inspection_modes.md](./docs/reference/toolchain/inspection_modes.md) - `--dump-*`, `--check`, and compile mode behavior
+- [docs/reference/toolchain/diagnostics.md](./docs/reference/toolchain/diagnostics.md) - diagnostic format and error categories
+- [docs/reference/toolchain/artifacts.md](./docs/reference/toolchain/artifacts.md) - build/runtime/inspection artifact expectations
+- [docs/reference/language/builtins_and_io.md](./docs/reference/language/builtins_and_io.md) - built-ins and current I/O behavior
+- [docs/reference/language/expressions.md](./docs/reference/language/expressions.md) - expression forms and operator behavior
+- [docs/reference/language/types.md](./docs/reference/language/types.md) - current type system surface
+- [docs/reference/language/statements.md](./docs/reference/language/statements.md) - current statement forms and rules
+- [docs/reference/language/declarations_and_modules.md](./docs/reference/language/declarations_and_modules.md) - translation-unit and top-level declaration rules
+- [docs/reference/language/functions_and_calls.md](./docs/reference/language/functions_and_calls.md) - function signatures, calls, and built-ins
 - [docs/language/core_v0.md](./docs/language/core_v0.md) - normative **Core v0** language (first compiler milestone)
 - [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md) - beginner guide for writing current nex programs
 - [examples/pipeline_walkthrough.nexs](./examples/pipeline_walkthrough.nexs) - nontrivial frontend pipeline walkthrough input
@@ -210,8 +246,35 @@ Long term, nex may become partially or fully self-hosting once the language is m
 
 ## Status
 
-Early-stage. The frontend, typed IR, MLIR/LLVM IR dumps, and scalar native
-executable path are implemented, but runtime-backed features are still missing.
+Early-stage, but Core v0 is implemented end-to-end:
+
+- checked frontend (lexer/parser/semantic analysis)
+- typed IR dumps
+- MLIR and LLVM IR dumps with validation tests
+- native executable generation through `build/nexc <file.nexs> -o <output>`
+- runtime-backed stdout (`print` / `println`)
+- experimental stdin slice (`readln() -> str`) plus explicit parse helpers
+
+## Next Documentation Step
+
+Core v0 milestone docs are intentionally transitional. The next docs pass will
+move toward a long-lived user reference structure (language reference,
+toolchain reference, and runtime/std reference) in the style of mature language
+documentation.
+
+## Forward Priorities
+
+1. Build a proper long-lived user reference (language, toolchain, runtime/std),
+   replacing milestone-centric docs as the main user-facing source of truth.
+2. Design and implement a real Nex-owned I/O model (stdin/stdout/stderr, files,
+   pipes) with explicit effects/costs and clear error behavior.
+3. Stabilize string/slice/resource semantics needed by practical I/O APIs.
+4. Add fixed-size arrays first, then slices/views, then growable vectors after
+   allocation/ownership are ready.
+5. Evolve toward shape-aware linear algebra as a first-class design target, not
+   an afterthought.
+6. Keep compiler/runtime portability in mind from day one (Linux-first is fine),
+   with RISC-V and embedded constraints as active design inputs.
 
 ## License
 

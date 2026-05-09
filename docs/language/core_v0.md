@@ -205,6 +205,10 @@ Core v0 provides two built-in functions:
 print(str) -> void
 println(str) -> void
 readln() -> str
+parse_i32(str) -> i32
+parse_u64(str) -> u64
+parse_bool(str) -> bool
+input_ok() -> bool
 ```
 
 These are semantic built-ins recognized by the compiler frontend. Their runtime
@@ -216,6 +220,10 @@ functions.
 stdin and returns it without the line ending. Its current runtime storage is
 temporary and should be used directly, for example `println(readln());`, until
 owned strings and slices are specified.
+
+`parse_i32`, `parse_u64`, and `parse_bool` are explicit parse helpers for
+converting line input text into typed values. `input_ok()` reports whether the
+last fallible input/parse operation succeeded.
 
 ---
 

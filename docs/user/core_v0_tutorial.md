@@ -380,6 +380,29 @@ printf 'hello\n' | build/stdin_echo
 For now, use the returned string directly. Storing input strings in variables is
 waiting on a fuller string ownership and buffer model.
 
+## Reading Numbers And Booleans
+
+You can parse text input into typed values with explicit helpers:
+
+```c
+fn main() -> i32 {
+    let value: i32 = parse_i32(readln());
+    if (input_ok()) {
+        return value;
+    } else {
+        return 0 - 1;
+    }
+}
+```
+
+Current parse helpers:
+
+- `parse_i32(str) -> i32`
+- `parse_u64(str) -> u64`
+- `parse_bool(str) -> bool` (`true`, `false`, `1`, `0`)
+
+Use `input_ok()` after `readln()`/parse calls to check success.
+
 ## Checking Your Code
 
 Use:

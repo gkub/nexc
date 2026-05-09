@@ -750,6 +750,15 @@ private:
             lowerReadlnBuiltin(operation);
             return;
         }
+        if (operation.text == "input_ok") {
+            lowerInputOkBuiltin(operation);
+            return;
+        }
+        if (operation.text == "parse_i32" || operation.text == "parse_u64" ||
+            operation.text == "parse_bool") {
+            lowerParseBuiltin(operation);
+            return;
+        }
 
         if (operation.arguments.size() != 1) {
             throw std::logic_error("print/println lowering expected one argument");
@@ -787,6 +796,43 @@ private:
             ::mlir::ValueRange{});
         bindString(*operation.result, StringValue{.data = data.getResult(0),
                                                   .length = length.getResult(0)});
+    }
+
+    // Lower parse built-ins that explicitly convert a string to a scalar type.
+    //
+    // This is intentionally explicit conversion (read string, then parse) rather
+    // than implicit typed input. That keeps parsing behavior visible and avoids
+    // scanf-style hidden tokenization rules in the first slice.
+    void lowerParseBuiltin(const ir::Operation& operation) {
+        if (!operation.result || operation.arguments.size() != 1) {
+            throw std::logic_error("parse built-ins expect one str argument and one scalar result");
+        }
+        const StringValue input = lookupString(operation.arguments[0]);
+        ensureRuntimeParseDeclarations();
+
+        const std::string runtimeName =
+            operation.text == "parse_i32"   ? "nex_runtime_parse_i32"
+            : operation.text == "parse_u64" ? "nex_runtime_parse_u64"
+                                            : "nex_runtime_parse_bool";
+        auto call = builder_.create<::mlir::func::CallOp>(
+            loc_, runtimeName, ::mlir::TypeRange{mlirType(builder_, operation.result->type)},
+            ::mlir::ValueRange{input.data, input.length});
+        bindValue(*operation.result, call.getResult(0));
+    }
+
+    // Lower `input_ok() -> bool` that reports success of last runtime input/parse op.
+    //
+    // Until the language has first-class Result types, this gives users an
+    // explicit, checkable success bit for fallible input and parse operations.
+    void lowerInputOkBuiltin(const ir::Operation& operation) {
+        if (!operation.result || !operation.arguments.empty()) {
+            throw std::logic_error("input_ok lowering expects no arguments and bool result");
+        }
+        ensureRuntimeParseDeclarations();
+        auto call = builder_.create<::mlir::func::CallOp>(
+            loc_, "nex_runtime_last_ok_flag",
+            ::mlir::TypeRange{builder_.getI1Type()}, ::mlir::ValueRange{});
+        bindValue(*operation.result, call.getResult(0));
     }
 
     // Lower a structured if statement to `scf.if`.
@@ -1092,6 +1138,26 @@ private:
             {::mlir::LLVM::LLVMPointerType::get(builder_.getContext())});
         ensureRuntimeFunctionDeclaration("nex_runtime_readln_len", {},
                                          {builder_.getI64Type()});
+    }
+
+    void ensureRuntimeParseDeclarations() {
+        ensureRuntimeFunctionDeclaration(
+            "nex_runtime_parse_i32",
+            {::mlir::LLVM::LLVMPointerType::get(builder_.getContext()),
+             builder_.getI64Type()},
+            {builder_.getI32Type()});
+        ensureRuntimeFunctionDeclaration(
+            "nex_runtime_parse_u64",
+            {::mlir::LLVM::LLVMPointerType::get(builder_.getContext()),
+             builder_.getI64Type()},
+            {builder_.getI64Type()});
+        ensureRuntimeFunctionDeclaration(
+            "nex_runtime_parse_bool",
+            {::mlir::LLVM::LLVMPointerType::get(builder_.getContext()),
+             builder_.getI64Type()},
+            {builder_.getI1Type()});
+        ensureRuntimeFunctionDeclaration("nex_runtime_last_ok_flag", {},
+                                         {builder_.getI1Type()});
     }
 
     void ensureRuntimeFunctionDeclaration(std::string_view name,

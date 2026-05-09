@@ -75,6 +75,9 @@ private:
     // same way until a later backend phase needs special runtime handling.
     void installBuiltins() {
         const Type str{.kind = BuiltinTypeKind::Str};
+        const Type i32{.kind = BuiltinTypeKind::I32};
+        const Type u64{.kind = BuiltinTypeKind::U64};
+        const Type boolType{.kind = BuiltinTypeKind::Bool};
         const Type voidType{.kind = BuiltinTypeKind::Void};
 
         functions_["print"] = FunctionSignature{
@@ -90,6 +93,26 @@ private:
         functions_["readln"] = FunctionSignature{
             .parameterTypes = {},
             .returnType = str,
+            .isBuiltin = true,
+        };
+        functions_["parse_i32"] = FunctionSignature{
+            .parameterTypes = {str},
+            .returnType = i32,
+            .isBuiltin = true,
+        };
+        functions_["parse_u64"] = FunctionSignature{
+            .parameterTypes = {str},
+            .returnType = u64,
+            .isBuiltin = true,
+        };
+        functions_["parse_bool"] = FunctionSignature{
+            .parameterTypes = {str},
+            .returnType = boolType,
+            .isBuiltin = true,
+        };
+        functions_["input_ok"] = FunctionSignature{
+            .parameterTypes = {},
+            .returnType = boolType,
             .isBuiltin = true,
         };
     }

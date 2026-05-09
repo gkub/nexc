@@ -585,6 +585,14 @@ add_nexc_executable_stdin_stdout_test(
     "typed input\n"
 )
 
+add_nexc_executable_stdin_stdout_test(
+    run_executable_stdin_parse_i32
+    examples/stdin_parse_i32.nexs
+    "42\n"
+    42
+    ""
+)
+
 add_test(
     NAME semantic_check_add
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/add.nexs
@@ -623,6 +631,11 @@ add_test(
 add_test(
     NAME semantic_check_stdin_echo
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/stdin_echo.nexs
+)
+
+add_test(
+    NAME semantic_check_stdin_parse_i32
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/stdin_parse_i32.nexs
 )
 
 add_test(
