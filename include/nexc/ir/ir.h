@@ -20,7 +20,17 @@ namespace nexc::ir {
 struct Type {
     BuiltinTypeKind kind = BuiltinTypeKind::Invalid;
 
+    // Return true for the special "no value" type used by void functions.
+    //
+    // Lowering frequently needs this check because void functions have no MLIR
+    // result type and void calls have no ValueRef result.
     bool isVoid() const { return kind == BuiltinTypeKind::Void; }
+
+    // Return true for fixed-width integer types.
+    //
+    // This excludes bool even though MLIR lowers bool to i1. At the nex language
+    // level, bool is its own scalar type with condition semantics, not an integer
+    // arithmetic type.
     bool isInteger() const;
 };
 
@@ -221,10 +231,23 @@ struct Module {
     std::vector<Function> functions{};
 };
 
-// Formatting helpers shared by the IR dumper and tests.
+// Convert an IR type back to its source-facing spelling, such as `i32` or
+// `bool`. The textual IR dump uses these names because the dump is for humans
+// learning the compiler, not for machine parsing.
 std::string_view typeName(Type type);
+
+// Format a callable name for dumps.
+//
+// User functions print as `@name`. Compiler-provided built-ins print as
+// `@builtin.name` so it is obvious they did not come from a source declaration.
 std::string callableName(std::string_view name, bool isBuiltin);
+
+// Format a temporary value name. ValueRefs are expression results, so the dump
+// uses `%` just like MLIR/LLVM-style SSA values.
 std::string valueName(ValueRef value);
+
+// Format a local storage slot name. LocalRefs are assignable/readable places, so
+// the dump uses `$` to keep them visually separate from `%` expression results.
 std::string localName(LocalRef local);
 
 } // namespace nexc::ir

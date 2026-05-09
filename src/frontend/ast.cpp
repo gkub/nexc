@@ -14,8 +14,16 @@ namespace {
 // whether the parser understood a piece of syntax the way we expected.
 class AstDumper {
 public:
+    // Create a text dumper that writes to the caller's stream.
+    //
+    // The dumper owns only formatting state such as indentation; the AST itself
+    // is borrowed and never modified.
     explicit AstDumper(std::ostream& out) : out_(out) {}
 
+    // Dump the AST root.
+    //
+    // TranslationUnit is the file-level node, so every item in the source file
+    // appears underneath it in source order.
     void dump(const TranslationUnit& unit) {
         line("TranslationUnit");
         indent_ += 2;
@@ -26,6 +34,10 @@ public:
     }
 
 private:
+    // Write one line with the current indentation level.
+    //
+    // All AST text output funnels through this helper so nested statements and
+    // expressions stay visually aligned.
     void line(std::string_view text) {
         // The text dump uses spaces rather than tree-drawing characters so the
         // golden files stay plain ASCII and easy to update by hand.
@@ -35,6 +47,10 @@ private:
         out_ << text << '\n';
     }
 
+    // Dump one top-level declaration node.
+    //
+    // Items are polymorphic AST nodes, so the dumper recovers the concrete kind
+    // and prints the fields that matter for that syntax form.
     void dumpItem(const Item& item) {
         // AST nodes are stored through base-class pointers, so dumping uses
         // dynamic_cast to recover the concrete node type. This is simple and
@@ -65,6 +81,10 @@ private:
         }
     }
 
+    // Dump one statement subtree.
+    //
+    // Statements are source-level control/effect forms: blocks, local bindings,
+    // assignment, returns, control flow, and call statements.
     void dumpStmt(const Stmt& stmt) {
         if (const auto* block = dynamic_cast<const BlockStmt*>(&stmt)) {
             line("BlockStmt");
@@ -147,6 +167,11 @@ private:
         }
     }
 
+    // Dump one expression subtree.
+    //
+    // Expressions produce values later, but at AST time they are still pure
+    // syntax: names are unresolved, integer literal types are not final, and
+    // parentheses are preserved.
     void dumpExpr(const Expr& expr) {
         // The dumper preserves source-level expression shape. For example,
         // ParenExpr is printed even though later semantic/IR stages can usually
@@ -217,6 +242,10 @@ private:
     int indent_ = 0;
 };
 
+// Escape text for a quoted Graphviz DOT label.
+//
+// DOT has its own string syntax. Without this escaping, a source string literal
+// containing quotes or backslashes could produce invalid graph text.
 std::string dotEscape(std::string_view text) {
     std::string escaped;
     escaped.reserve(text.size());
@@ -248,8 +277,13 @@ std::string dotEscape(std::string_view text) {
 // visually than in the compact text dump.
 class AstDotDumper {
 public:
+    // Create a Graphviz dumper that writes DOT text to the caller's stream.
     explicit AstDotDumper(std::ostream& out) : out_(out) {}
 
+    // Emit one complete DOT graph for the AST.
+    //
+    // The graph starts with a synthetic TranslationUnit root, then connects each
+    // AST node by role-labeled edges where useful.
     void dump(const TranslationUnit& unit) {
         out_ << "digraph NEX_AST {\n";
         out_ << "  graph [rankdir=TB];\n";
@@ -265,6 +299,10 @@ public:
     }
 
 private:
+    // Emit a DOT node and return its synthetic numeric ID.
+    //
+    // Graphviz edges need stable node IDs, but users care about labels. The IDs
+    // are deliberately implementation details local to one graph dump.
     std::size_t node(std::string_view label) {
         // Node IDs are synthetic and local to one graph. Labels carry the
         // educational content; IDs only let DOT connect edges.
@@ -273,6 +311,10 @@ private:
         return id;
     }
 
+    // Emit a DOT edge between two previously-created nodes.
+    //
+    // Optional labels document child roles such as `left`, `right`, `condition`,
+    // or `body`.
     void edge(std::size_t from, std::size_t to, std::string_view label = {}) {
         // Edge labels identify child roles such as `condition`, `then`, or
         // `body` where the relationship is not obvious from node order alone.
@@ -283,6 +325,9 @@ private:
         out_ << ";\n";
     }
 
+    // Dump one item and return the DOT node ID that represents its root.
+    //
+    // Returning the ID lets the caller connect this subtree to its parent.
     std::size_t dumpItem(const Item& item) {
         if (const auto* function = dynamic_cast<const FunctionDecl*>(&item)) {
             const std::size_t id = node("FunctionDecl\n" + function->name);
@@ -308,6 +353,7 @@ private:
         return node("<unknown item>");
     }
 
+    // Dump one statement subtree and return its root DOT node ID.
     std::size_t dumpStmt(const Stmt& stmt) {
         if (const auto* block = dynamic_cast<const BlockStmt*>(&stmt)) {
             const std::size_t id = node("BlockStmt");
@@ -365,6 +411,7 @@ private:
         return node("<unknown stmt>");
     }
 
+    // Dump one expression subtree and return its root DOT node ID.
     std::size_t dumpExpr(const Expr& expr) {
         if (const auto* integer = dynamic_cast<const IntegerLiteralExpr*>(&expr)) {
             return node("IntegerLiteral\n" + integer->raw);
@@ -422,6 +469,10 @@ private:
 
 } // namespace
 
+// Return the canonical source spelling for a built-in type kind.
+//
+// This helper is shared by AST dumps, diagnostics, and IR dumps so the project
+// does not accidentally print the same type in multiple inconsistent ways.
 std::string_view builtinTypeName(BuiltinTypeKind kind) {
     // This spelling is shared by AST dumps, diagnostics, and IR dumps. Keeping
     // it centralized prevents drift between compiler stages.
@@ -455,10 +506,15 @@ std::string_view builtinTypeName(BuiltinTypeKind kind) {
     return "<invalid>";
 }
 
+// Public entry point for the compact textual AST dump.
 void dumpAst(std::ostream& out, const TranslationUnit& unit) {
     AstDumper(out).dump(unit);
 }
 
+// Public entry point for Graphviz DOT AST output.
+//
+// The resulting DOT can be rendered with Graphviz into SVG/PNG for visual
+// inspection of parser output.
 void dumpAstDot(std::ostream& out, const TranslationUnit& unit) {
     AstDotDumper(out).dump(unit);
 }

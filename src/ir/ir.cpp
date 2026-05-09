@@ -51,6 +51,10 @@ std::string valueName(ValueRef value) {
     return "%" + std::to_string(value.id);
 }
 
+// Format a local storage slot name for IR dumps.
+//
+// Locals are "places" rather than expression results, so they use `$` instead
+// of `%`. That visual distinction matters once `let mut` and assignment appear.
 std::string localName(LocalRef local) {
     return "$" + std::to_string(local.id);
 }

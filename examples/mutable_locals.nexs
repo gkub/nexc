@@ -1,0 +1,8 @@
+fn main() -> i32 {
+    let x: i32 = 40;
+    let mut y: i32 = 2;
+
+    y = y + x;
+
+    return y;
+}

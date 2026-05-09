@@ -166,10 +166,10 @@ Core v0 programs toward future MLIR/LLVM lowering.
 The first lowering slice builds a tiny MLIR module from typed IR and prints it:
 
 ```sh
-./nexc.sh mlir examples/comparison.nexs
+./nexc.sh mlir examples/pipeline_walkthrough.nexs
 ```
 
-Current output:
+For a smaller comparison example, the output looks like:
 
 ```mlir
 module {
@@ -193,14 +193,78 @@ module {
 }
 ```
 
-This is intentionally narrow but no longer just `return 42`. It proves the
-lowering boundary using the real MLIR C++ API for scalar expressions, function
-parameters, direct calls, integer comparisons, and returning `if`/`else` before
-the project attempts mutable locals, loops, runtime calls, or LLVM/native output.
+This is intentionally still a learning slice, but it now covers the nontrivial
+pipeline walkthrough: scalar expressions, function parameters, direct calls,
+integer comparisons, mutable local storage, assignment, returning and
+fallthrough `if`/`else`, `while`, and `/` / `%` before the project attempts
+runtime calls or native executable output.
 
 When `mlir-opt` is available, CTest also validates selected `--dump-mlir`
 outputs with MLIR's verifier. Golden tests catch text drift; verifier tests catch
 structurally invalid MLIR.
+
+## Dump LLVM IR
+
+LLVM IR is the next lower inspection stage after MLIR:
+
+```sh
+./nexc.sh llvm examples/return_42.nexs
+```
+
+That prints:
+
+```llvm
+; ModuleID = 'nex_module'
+source_filename = "nex_module"
+
+define i32 @main() {
+  ret i32 42
+}
+```
+
+The same mode also works for the current pipeline walkthrough:
+
+```sh
+./nexc.sh llvm examples/pipeline_walkthrough.nexs
+```
+
+This mode still does not build or run an executable. It lowers MLIR through the
+LLVM dialect, translates that dialect to textual LLVM IR, and prints the result
+for inspection. When `llvm-as` is available, CTest validates selected
+`--dump-llvm` outputs by assembling them to bitcode.
+
+## Compile An Executable
+
+Once `build/nexc` exists, you can use it directly without `nexc.sh`:
+
+```sh
+build/nexc examples/return_42.nexs -o build/return_42
+```
+
+That path currently works for scalar Core v0 programs that do not need runtime
+services. Internally the compiler emits LLVM IR to a temporary file and asks
+`clang` to produce the host executable:
+
+```text
+nex source -> typed IR -> MLIR -> LLVM IR -> clang -> executable
+```
+
+The pipeline walkthrough is also supported:
+
+```sh
+build/nexc examples/pipeline_walkthrough.nexs -o build/pipeline_walkthrough
+```
+
+`print` / `println` still type-check only; they need a runtime ABI before
+compiled executables can perform observable output. That means this command is
+expected to fail for now:
+
+```sh
+build/nexc examples/hello.nexs -o build/hello
+```
+
+The compiler should report that strings/printing are a backend limitation, not an
+internal compiler failure.
 
 ## What Exists Now
 
@@ -217,9 +281,14 @@ The current frontend supports the Core v0 parser surface:
 - textual and Graphviz AST dumps
 - semantic checking with `--check`
 - typed IR dumping with `--dump-ir`
-- MLIR dumping with `--dump-mlir` for simple scalar returns, arithmetic,
-  integer comparisons, direct function calls, and returning `if`/`else`
+- MLIR dumping with `--dump-mlir` for the pipeline walkthrough slice: scalar
+  arithmetic, integer comparisons, direct function calls, mutable local storage,
+  assignment, returning and fallthrough `if`/`else`, `while`, and `/` / `%`
+- LLVM IR dumping with `--dump-llvm` for the same scalar walkthrough slice
+- native executable compilation with `build/nexc <file.nexs> -o <output>` for
+  scalar programs that do not need runtime services
 - conditional `mlir-opt` validation for generated MLIR in the test suite
+- conditional `llvm-as` validation for generated LLVM IR in the test suite
 
 Semantic analysis intentionally remains small. It does not yet implement
 coercions/promotions, definite assignment analysis, arbitrary constant-expression
@@ -230,7 +299,7 @@ overflow evaluation, or inter-file/module resolution.
 The frontend is split into stages:
 
 ```text
-source text -> lexer -> tokens -> parser -> AST -> semantic analysis -> typed IR -> MLIR
+source text -> lexer -> tokens -> parser -> AST -> semantic analysis -> typed IR -> MLIR -> LLVM IR -> executable
 ```
 
 Each stage should answer only one kind of question:

@@ -13,8 +13,15 @@ namespace {
 // indentation and naming conventions as new IR operations are added.
 class ModuleDumper {
 public:
+    // Remember the output stream that receives the textual dump. The dumper does
+    // not own the stream; it just writes one stable view of an already-built IR
+    // module into it.
     explicit ModuleDumper(std::ostream& out) : out_(out) {}
 
+    // Print the module root, then each top-level IR item underneath it.
+    //
+    // This is intentionally deterministic: items are printed in source order so
+    // golden tests change only when the IR shape actually changes.
     void dump(const Module& module) {
         line("Module");
         indent_ += 2;
@@ -31,6 +38,10 @@ public:
     }
 
 private:
+    // Print a module-level const and the block that computes its initializer.
+    //
+    // Consts do not yet lower to MLIR, but dumping them now keeps the typed IR
+    // honest and makes future constant lowering easier to test.
     void dumpConst(const Const& constant) {
         // Const initializers are printed as blocks because they are lowered as a
         // sequence of operations ending in InitValue, not as raw AST expressions.
@@ -41,6 +52,10 @@ private:
         indent_ -= 2;
     }
 
+    // Print a function header, local table, and body block.
+    //
+    // The header includes parameter-local mappings (`$0 a: i32`) because later
+    // LoadLocal operations refer to `$0`, not the original source spelling `a`.
     void dumpFunction(const Function& function) {
         // The function header shows source parameter names and their local slot
         // numbers. That makes the later LoadLocal operations easier to read.
@@ -63,6 +78,11 @@ private:
         indent_ -= 2;
     }
 
+    // Print every local storage slot known to a function.
+    //
+    // This includes parameters and `let` bindings. Keeping the table separate
+    // from the operation stream makes it easier to read loads/stores without
+    // hunting backward through the dump for the declaration site.
     void dumpLocals(const Function& function) {
         if (function.locals.empty()) {
             return;
@@ -85,6 +105,10 @@ private:
         indent_ -= 2;
     }
 
+    // Print one IR block: first its ordered operations, then its terminator.
+    //
+    // A block's operation order matters because later operations can refer to
+    // earlier ValueRefs. The textual format preserves that order exactly.
     void dumpBlock(const Block& block) {
         line("Block");
         indent_ += 2;
@@ -95,6 +119,10 @@ private:
         indent_ -= 2;
     }
 
+    // Print one operation according to the payload selected by Operation::Kind.
+    //
+    // Operation is intentionally a compact union-like structure. This switch is
+    // the readable map from each kind to the fields that matter for that kind.
     void dumpOperation(const Operation& operation) {
         // Operation payloads are union-like: each Kind selects which fields are
         // meaningful. The switch keeps that mapping explicit for readers.
@@ -154,6 +182,10 @@ private:
         }
     }
 
+    // Print a call operation, with or without a result prefix.
+    //
+    // `println("x");` is a void call statement, so it prints as a bare Call.
+    // `let x: i32 = f();` is a value-producing call, so it prints with `%n: T =`.
     void dumpCall(const Operation& operation) {
         // Void calls have no result prefix. Non-void calls look like other
         // value-producing operations: `%n: type = Call @f(...)`.
@@ -173,6 +205,11 @@ private:
         out_ << ")\n";
     }
 
+    // Print a structured if operation with nested Then/Else blocks.
+    //
+    // This is deliberately not a control-flow graph dump. The typed IR still
+    // remembers source structure so the output teaches what the frontend built
+    // before MLIR or LLVM flattening decisions happen.
     void dumpIf(const Operation& operation) {
         // Structured control flow is printed with nested blocks instead of
         // labels/branches because this first IR has not lowered to a CFG yet.
@@ -191,6 +228,10 @@ private:
         indent_ -= 2;
     }
 
+    // Print a structured while operation.
+    //
+    // The condition is its own block because condition expressions can have
+    // multiple operations before the final condition value is known.
     void dumpWhile(const Operation& operation) {
         // A while condition is itself a block. This handles conditions such as
         // `x + 1 < y`, where multiple operations are needed before the final
@@ -208,6 +249,10 @@ private:
         indent_ -= 2;
     }
 
+    // Print the optional block terminator.
+    //
+    // Terminators describe how a block completes: return from a function, yield a
+    // condition value, yield a const initializer value, or fall through.
     void dumpTerminator(const Terminator& terminator) {
         // Terminators are optional at this IR level. If a block has no explicit
         // terminator, it falls through according to the enclosing structured
@@ -230,6 +275,10 @@ private:
         }
     }
 
+    // Print the shared `%id: type =` prefix for value-producing operations.
+    //
+    // Keeping this in one helper prevents tiny formatting differences from
+    // spreading across many operation cases and destabilizing golden tests.
     void dumpResultPrefix(const Operation& operation) {
         // Most value-producing operations share the same printed prefix:
         // `%id: type =`. Centralizing it keeps golden files consistent.
@@ -238,6 +287,10 @@ private:
         out_ << valueName(result) << ": " << typeName(result.type) << " = ";
     }
 
+    // Unwrap a required ValueRef payload or fail loudly if the IR is malformed.
+    //
+    // These are internal sanity checks. A user source error should be caught by
+    // semantic analysis long before the dumper sees the IR.
     static ValueRef requiredValue(const std::optional<ValueRef>& value) {
         if (!value) {
             // These checks catch mismatches between Operation::Kind and payload
@@ -248,6 +301,10 @@ private:
         return *value;
     }
 
+    // Unwrap a required child block from a structured operation.
+    //
+    // If this fails, the builder created an If/While operation without the block
+    // shape that the operation kind promises.
     static const Block& requiredBlock(const std::unique_ptr<Block>& block) {
         if (!block) {
             // Structured operations always own their required child blocks. A
@@ -257,11 +314,16 @@ private:
         return *block;
     }
 
+    // Write one already-formatted logical line at the current indentation level.
     void line(const std::string& text) {
         writeIndent();
         out_ << text << '\n';
     }
 
+    // Emit spaces for the current indentation level.
+    //
+    // The dumper tracks indentation as a simple count of spaces because the dump
+    // format is intentionally small and stable for golden tests.
     void writeIndent() {
         for (int i = 0; i < indent_; ++i) {
             out_ << ' ';
@@ -274,6 +336,10 @@ private:
 
 } // namespace
 
+// Public entry point for `--dump-ir`.
+//
+// All formatting state stays inside ModuleDumper so callers only need to pass an
+// output stream and a completed typed IR module.
 void dumpModule(std::ostream& out, const Module& module) {
     ModuleDumper(out).dump(module);
 }

@@ -9,18 +9,30 @@ namespace {
 // Core v0 syntax is ASCII-only outside comments and string literals. These
 // helpers intentionally avoid locale-sensitive <cctype> classification so the
 // lexer behaves the same on every developer machine.
+// Return true for ASCII letters only.
+//
+// We do not use std::isalpha here because that can depend on locale. A compiler
+// should tokenize the same source file the same way on every machine.
 bool isAsciiAlpha(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
 
+// Return true for the first character of an identifier.
+//
+// Core v0 keeps identifiers deliberately simple: ASCII letters and underscore.
 bool isIdentifierStart(char c) {
     return isAsciiAlpha(c) || c == '_';
 }
 
+// Return true for every character after the first identifier character.
+//
+// Digits are allowed after the first character, so `x1` is one identifier but
+// `1x` starts as an integer literal followed by an identifier.
 bool isIdentifierContinue(char c) {
     return isIdentifierStart(c) || (c >= '0' && c <= '9');
 }
 
+// Return true for a digit accepted inside a hexadecimal integer literal.
 bool isHexDigit(char c) {
     // Hex literal validation accepts both lowercase and uppercase digits after
     // the 0x/0X prefix.
@@ -28,15 +40,26 @@ bool isHexDigit(char c) {
            (c >= 'A' && c <= 'F');
 }
 
+// Detect bytes outside ASCII so diagnostics can explain why the lexer rejected a
+// character in Core v0 syntax.
 bool isNonAscii(char c) {
     return static_cast<unsigned char>(c) >= 0x80;
 }
 
 } // namespace
 
+// Create a lexer for one source file.
+//
+// The lexer borrows the SourceFile so token spans can refer back to byte ranges
+// in the original text. Diagnostics are also borrowed so lexing errors join the
+// same DiagnosticBag used by later compiler stages.
 Lexer::Lexer(const SourceFile& source, DiagnosticBag& diagnostics)
     : source_(source), diagnostics_(diagnostics) {}
 
+// Convert the entire source file into a token stream.
+//
+// Tokenization is a single left-to-right pass. The result always ends with an
+// explicit EndOfFile token so the parser has a stable sentinel to stop on.
 std::vector<Token> Lexer::tokenize() {
     std::vector<Token> tokens;
 
@@ -63,10 +86,15 @@ std::vector<Token> Lexer::tokenize() {
     return tokens;
 }
 
+// Return true once current_ has reached or passed the end of the source buffer.
 bool Lexer::isAtEnd() const {
     return current_ >= source_.size();
 }
 
+// Look ahead without consuming characters.
+//
+// Returning '\0' past the end is a common lexer trick: callers can inspect
+// peek(1) for two-character operators without needing separate bounds checks.
 char Lexer::peek(std::size_t offset) const {
     const std::size_t index = current_ + offset;
     if (index >= source_.size()) {
@@ -75,10 +103,18 @@ char Lexer::peek(std::size_t offset) const {
     return source_.text()[index];
 }
 
+// Consume and return the current character.
+//
+// Callers are responsible for checking isAtEnd() first. Keeping advance() small
+// makes the main lexing loops easy to read.
 char Lexer::advance() {
     return source_.text()[current_++];
 }
 
+// Consume the next character only if it matches the expected byte.
+//
+// This is used for two-character tokens such as `==`, `!=`, `<=`, `>=`, `&&`,
+// `||`, and `->`.
 bool Lexer::match(char expected) {
     if (isAtEnd() || peek() != expected) {
         return false;
@@ -88,6 +124,10 @@ bool Lexer::match(char expected) {
     return true;
 }
 
+// Skip trivia before the next real token.
+//
+// Trivia is source text that affects spans/locations but does not appear in the
+// parser's grammar: whitespace, line comments, and block comments.
 void Lexer::skipWhitespaceAndComments() {
     while (!isAtEnd()) {
         const char c = peek();
@@ -133,6 +173,11 @@ void Lexer::skipWhitespaceAndComments() {
     }
 }
 
+// Lex one non-trivia token at the current position.
+//
+// The caller has already skipped whitespace/comments. This function consumes the
+// bytes that make up exactly one token, reports unsupported characters, and
+// returns a Token carrying both kind and source span.
 Token Lexer::lexToken() {
     const std::size_t start = current_;
     const char c = advance();
@@ -217,6 +262,11 @@ Token Lexer::lexToken() {
     };
 }
 
+// Lex an identifier-like spelling and classify it as a keyword if reserved.
+//
+// The lexer does not need a separate path for `fn`, `return`, or user names:
+// maximal-munch scanning collects the spelling, then keywordKind decides whether
+// that spelling is reserved in Core v0.
 Token Lexer::lexIdentifierOrKeyword() {
     const std::size_t start = current_ - 1;
 
@@ -231,6 +281,11 @@ Token Lexer::lexIdentifierOrKeyword() {
     };
 }
 
+// Lex an integer literal spelling.
+//
+// This validates decimal vs hexadecimal surface syntax but does not choose a
+// numeric type or check whether the value fits. Those questions require context
+// from semantic analysis.
 Token Lexer::lexIntegerLiteral() {
     const std::size_t start = current_ - 1;
 
@@ -266,6 +321,11 @@ Token Lexer::lexIntegerLiteral() {
     };
 }
 
+// Lex a double-quoted string literal.
+//
+// The token keeps the raw source spelling, including quotes and escape
+// backslashes. Later stages can decide whether and how to decode that spelling
+// into runtime string data.
 Token Lexer::lexStringLiteral(std::size_t start) {
     // String support is intentionally small: preserve the raw spelling and
     // validate only the escape sequences Core v0 recognizes. Actual runtime
@@ -314,6 +374,10 @@ Token Lexer::lexStringLiteral(std::size_t start) {
     };
 }
 
+// Build a token for punctuation/operator forms whose span is already known.
+//
+// By the time this helper is called, lexToken() has consumed the token's bytes,
+// so current_ points one past the end.
 Token Lexer::single(TokenKind kind, std::size_t start) {
     return Token{
         .kind = kind,

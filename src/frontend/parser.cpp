@@ -4,10 +4,20 @@
 
 namespace nexc {
 
+// Create a parser over an already-tokenized source file.
+//
+// The parser borrows tokens rather than owning them because tokenization is a
+// separate compiler stage. It also borrows SourceFile so it can recover token
+// text for identifiers and literals while building AST nodes.
 Parser::Parser(const SourceFile& source, std::span<const Token> tokens,
                DiagnosticBag& diagnostics)
     : source_(source), tokens_(tokens), diagnostics_(diagnostics) {}
 
+// Parse the whole file into the AST root.
+//
+// A TranslationUnit is the parser's representation of one source file. Core v0
+// only permits top-level declarations, so this loop repeatedly parses items
+// until it reaches the explicit EOF token.
 TranslationUnit Parser::parseTranslationUnit() {
     TranslationUnit unit;
 
@@ -26,6 +36,10 @@ TranslationUnit Parser::parseTranslationUnit() {
     return unit;
 }
 
+// Look ahead in the token stream without consuming.
+//
+// Recursive-descent parsers use lookahead to decide which grammar branch to take
+// before committing. Core v0 usually needs only one token of lookahead.
 const Token& Parser::peek(std::size_t offset) const {
     const std::size_t index = current_ + offset;
     if (index >= tokens_.size()) {
@@ -36,18 +50,28 @@ const Token& Parser::peek(std::size_t offset) const {
     return tokens_[index];
 }
 
+// Return the token most recently consumed by advance().
+//
+// This is useful after match(): if match(KwTrue) succeeds, previous() is the
+// exact token span used to build the BoolLiteralExpr.
 const Token& Parser::previous() const {
     return tokens_[current_ - 1];
 }
 
+// Return true when the current token is the EOF sentinel from the lexer.
 bool Parser::isAtEnd() const {
     return peek().kind == TokenKind::EndOfFile;
 }
 
+// Test whether the current token has a specific kind without consuming it.
 bool Parser::check(TokenKind kind) const {
     return !isAtEnd() && peek().kind == kind;
 }
 
+// Consume the current token if it has the requested kind.
+//
+// Returns true on success and false without side effects otherwise. This keeps
+// grammar code compact for optional tokens such as `else` or commas.
 bool Parser::match(TokenKind kind) {
     if (!check(kind)) {
         return false;
@@ -57,6 +81,10 @@ bool Parser::match(TokenKind kind) {
     return true;
 }
 
+// Consume one token and return it.
+//
+// advance() never moves past EOF, so repeated recovery calls remain safe even
+// after a syntax error near the end of the file.
 const Token& Parser::advance() {
     if (!isAtEnd()) {
         ++current_;
@@ -64,6 +92,11 @@ const Token& Parser::advance() {
     return previous();
 }
 
+// Consume a required token or report a syntax error.
+//
+// The placeholder token lets parsing continue and build a partial AST. That is
+// important for friendly diagnostics because one missing `)` should not prevent
+// every later parser check from running.
 Token Parser::expect(TokenKind kind, std::string_view message) {
     if (check(kind)) {
         return advance();
@@ -76,6 +109,10 @@ Token Parser::expect(TokenKind kind, std::string_view message) {
     return Token{.kind = kind, .span = peek().span};
 }
 
+// Parse one top-level item.
+//
+// In Core v0 an item is either a function declaration or a module constant.
+// Statements are intentionally not allowed at file scope.
 std::unique_ptr<Item> Parser::parseItem() {
     // Top-level parsing is intentionally strict. A stray statement at module
     // scope should be diagnosed as an item-level error, not parsed and rejected
@@ -93,6 +130,10 @@ std::unique_ptr<Item> Parser::parseItem() {
     return nullptr;
 }
 
+// Parse a function declaration and body.
+//
+// The AST keeps the syntactic pieces separate: name, parameters, return type,
+// and body. Later semantic analysis decides whether the signature is valid.
 std::unique_ptr<FunctionDecl> Parser::parseFunctionDecl() {
     // Function parsing follows the concrete source order:
     // `fn name(params) -> return_type body`.
@@ -111,6 +152,10 @@ std::unique_ptr<FunctionDecl> Parser::parseFunctionDecl() {
                                           std::move(body));
 }
 
+// Parse a module-level const declaration.
+//
+// The parser only checks the syntax shape. Semantic analysis later verifies that
+// the initializer is type-correct and compile-time evaluable.
 std::unique_ptr<ConstDecl> Parser::parseConstDecl() {
     // Core v0 constants are module-level only. The parser handles that by only
     // calling this routine from parseItem(); inner `const` is rejected in
@@ -129,6 +174,10 @@ std::unique_ptr<ConstDecl> Parser::parseConstDecl() {
                                        std::move(init));
 }
 
+// Parse the comma-separated parameter list inside function parentheses.
+//
+// The surrounding parseFunctionDecl() has already consumed `(` and will consume
+// `)`. This helper only owns the list contents.
 std::vector<ParameterSyntax> Parser::parseParameterList() {
     std::vector<ParameterSyntax> parameters;
 
@@ -154,6 +203,10 @@ std::vector<ParameterSyntax> Parser::parseParameterList() {
     return parameters;
 }
 
+// Parse one `name: Type` parameter entry.
+//
+// ParameterSyntax is still syntax, not a resolved semantic symbol. The semantic
+// pass later turns it into an immutable local binding.
 ParameterSyntax Parser::parseParameter() {
     const Token name = expect(TokenKind::Identifier, "expected parameter name");
     expect(TokenKind::Colon, "expected `:` after parameter name");
@@ -167,6 +220,11 @@ ParameterSyntax Parser::parseParameter() {
     };
 }
 
+// Parse a Core v0 builtin type name.
+//
+// User-defined types do not exist yet, so every accepted type is represented by
+// BuiltinTypeKind. Invalid type syntax still produces a TypeSyntax placeholder so
+// parsing can continue.
 TypeSyntax Parser::parseType() {
     const Token token = advance();
     const BuiltinTypeKind kind = builtinTypeKind(token);
@@ -181,6 +239,10 @@ TypeSyntax Parser::parseType() {
     return TypeSyntax{.kind = kind, .span = token.span};
 }
 
+// Parse a `{ ... }` statement block.
+//
+// Blocks collect statements and keep a span from the opening brace through the
+// closing brace. Semantic analysis later gives blocks lexical-scope meaning.
 std::unique_ptr<BlockStmt> Parser::parseBlockStmt() {
     const Token leftBrace = expect(TokenKind::LeftBrace, "expected `{`");
     auto block = std::make_unique<BlockStmt>(
@@ -201,6 +263,10 @@ std::unique_ptr<BlockStmt> Parser::parseBlockStmt() {
     return block;
 }
 
+// Parse one statement inside a function body or nested block.
+//
+// This is the statement-level dispatch table for Core v0. Each branch mirrors a
+// grammar production such as let-statement, return-statement, or if-statement.
 std::unique_ptr<Stmt> Parser::parseStmt() {
     // Statement dispatch is based on the first token. This is recursive descent:
     // each source construct has a small parser routine that mirrors the grammar.
@@ -235,6 +301,10 @@ std::unique_ptr<Stmt> Parser::parseStmt() {
     return nullptr;
 }
 
+// Parse `let` or `let mut`.
+//
+// The parser records mutability as a flag but does not enforce reassignment
+// rules; that belongs to semantic analysis where names can be resolved.
 std::unique_ptr<Stmt> Parser::parseLetStmt() {
     // `let mut` is represented as one LetStmt node with an isMutable flag. The
     // parser records the syntax; semantic analysis enforces assignment rules.
@@ -253,6 +323,10 @@ std::unique_ptr<Stmt> Parser::parseLetStmt() {
         isMutable, tokenText(name), name.span, type, std::move(init));
 }
 
+// Parse `return;` or `return expr;`.
+//
+// The AST distinguishes those forms by storing an optional expression. Semantic
+// analysis then compares the form against the current function return type.
 std::unique_ptr<Stmt> Parser::parseReturnStmt() {
     const Token keyword = expect(TokenKind::KwReturn, "expected `return`");
 
@@ -272,6 +346,10 @@ std::unique_ptr<Stmt> Parser::parseReturnStmt() {
         std::move(value));
 }
 
+// Parse an `if (condition) then [else else]` statement.
+//
+// The then/else bodies are general statements, not only blocks, which matches C
+// style syntax and naturally supports `if (...) return 1;`.
 std::unique_ptr<Stmt> Parser::parseIfStmt() {
     const Token keyword = expect(TokenKind::KwIf, "expected `if`");
     expect(TokenKind::LeftParen, "expected `(` after `if`");
@@ -295,6 +373,10 @@ std::unique_ptr<Stmt> Parser::parseIfStmt() {
         std::move(thenBranch), std::move(elseBranch));
 }
 
+// Parse a `while (condition) body` statement.
+//
+// The parser only captures shape. Semantic analysis checks that the condition is
+// bool/integer, and lowering later decides how to represent the loop.
 std::unique_ptr<Stmt> Parser::parseWhileStmt() {
     const Token keyword = expect(TokenKind::KwWhile, "expected `while`");
     expect(TokenKind::LeftParen, "expected `(` after `while`");
@@ -308,6 +390,11 @@ std::unique_ptr<Stmt> Parser::parseWhileStmt() {
         std::move(body));
 }
 
+// Parse the statement forms that start like expressions.
+//
+// An identifier followed by `=` is assignment. Otherwise Core v0 allows only a
+// call expression as a statement. This function exists because both forms begin
+// with expression-looking tokens.
 std::unique_ptr<Stmt> Parser::parseAssignmentOrCallStmt() {
     if (peek(1).kind == TokenKind::Equal) {
         // A single token of lookahead is enough for Core v0 assignment:
@@ -346,6 +433,11 @@ std::unique_ptr<Stmt> Parser::parseAssignmentOrCallStmt() {
         std::unique_ptr<CallExpr>(call));
 }
 
+// Parse an expression using precedence climbing.
+//
+// minPrecedence says "do not consume operators looser than this." Recursive
+// calls with higher minimum precedence produce the usual grouping for arithmetic,
+// comparison, equality, and logical operators.
 std::unique_ptr<Expr> Parser::parseExpr(int minPrecedence) {
     std::unique_ptr<Expr> left = parseUnaryExpr();
 
@@ -368,6 +460,10 @@ std::unique_ptr<Expr> Parser::parseExpr(int minPrecedence) {
     return left;
 }
 
+// Parse prefix unary operators before falling through to calls/primary forms.
+//
+// Prefix operators bind more tightly than binary operators, so they are parsed
+// before parseExpr starts consuming infix operators.
 std::unique_ptr<Expr> Parser::parseUnaryExpr() {
     if (check(TokenKind::Minus) || check(TokenKind::Bang)) {
         const Token op = advance();
@@ -383,6 +479,11 @@ std::unique_ptr<Expr> Parser::parseUnaryExpr() {
     return parsePostfixExpr();
 }
 
+// Parse postfix expression forms such as function calls.
+//
+// Starting from a primary expression, repeatedly attach argument lists. This
+// supports `f()(x)` syntactically even if semantic analysis later rejects
+// non-name callees in Core v0.
 std::unique_ptr<Expr> Parser::parsePostfixExpr() {
     std::unique_ptr<Expr> expr = parsePrimaryExpr();
 
@@ -401,6 +502,10 @@ std::unique_ptr<Expr> Parser::parsePostfixExpr() {
     return expr;
 }
 
+// Parse the atomic expression forms.
+//
+// Primaries are the leaves that larger unary, call, and binary expressions are
+// built from: literals, names, and parenthesized expressions.
 std::unique_ptr<Expr> Parser::parsePrimaryExpr() {
     // Primary expressions are the leaves of the expression grammar: literals,
     // names, and parenthesized subexpressions.
@@ -444,6 +549,10 @@ std::unique_ptr<Expr> Parser::parsePrimaryExpr() {
     return std::make_unique<NameExpr>(token.span, "<error>");
 }
 
+// Parse the comma-separated expression list inside a call.
+//
+// The caller has already consumed `(` and will consume the final `)`. This
+// helper intentionally rejects trailing commas for the Core v0 grammar.
 std::vector<std::unique_ptr<Expr>> Parser::parseArgumentList() {
     std::vector<std::unique_ptr<Expr>> arguments;
 
@@ -468,6 +577,10 @@ std::vector<std::unique_ptr<Expr>> Parser::parseArgumentList() {
     return arguments;
 }
 
+// Return the binding power for a binary operator token.
+//
+// Precedence climbing depends on larger numbers binding more tightly. Tokens
+// that are not binary operators return 0 so parseExpr stops consuming.
 int Parser::binaryPrecedence(TokenKind kind) const {
     // Larger numbers bind more tightly. Returning 0 means "not a binary
     // operator at the current expression position."
@@ -496,6 +609,11 @@ int Parser::binaryPrecedence(TokenKind kind) const {
     }
 }
 
+// Interpret a token as a builtin type name in type syntax context.
+//
+// Some type names, such as `i32` and `str`, lex as identifiers because they are
+// not globally reserved keywords. This parser-context check is what makes them
+// type names after `:` or `->`.
 BuiltinTypeKind Parser::builtinTypeKind(const Token& token) const {
     if (token.kind == TokenKind::KwBool) {
         return BuiltinTypeKind::Bool;
@@ -540,6 +658,10 @@ BuiltinTypeKind Parser::builtinTypeKind(const Token& token) const {
     return BuiltinTypeKind::Invalid;
 }
 
+// Copy the source spelling covered by a token span.
+//
+// AST nodes keep names/literal spellings as strings so later stages do not need
+// to repeatedly slice SourceFile text.
 std::string Parser::tokenText(const Token& token) const {
     return std::string(source_.slice(token.span));
 }

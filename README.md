@@ -40,10 +40,19 @@ The compiler currently supports:
 - AST text and Graphviz DOT dumps
 - semantic checking for Core v0 examples
 - typed IR dumps
-- MLIR lowering for simple scalar returns, arithmetic, integer comparisons,
-function parameters, direct function calls, and returning `if`/`else`
+- MLIR lowering for the nontrivial pipeline walkthrough: scalar arithmetic,
+integer comparisons, direct function calls, mutable local storage, assignment,
+fallthrough and returning `if`/`else`, `while`, and `/` / `%`
+- LLVM IR dumping for the same scalar walkthrough slice, with `llvm-as`
+validation when LLVM tools are available
+- native executable generation for scalar Core v0 programs that do not need
+runtime services, using `clang` as the host linker/codegen driver
 
-It does **not** yet generate LLVM IR, native objects, or executable programs.
+It does **not** yet support runtime-backed features such as real `print` /
+`println` execution.
+
+For example, `examples/hello.nexs` type-checks but does not compile to a native
+executable yet because strings and `println` need runtime lowering.
 
 ## Development Setup
 
@@ -55,14 +64,21 @@ sudo apt-get install -y cmake ninja-build build-essential clang graphviz
 sudo apt-get install -y libmlir-18-dev mlir-18-tools
 ```
 
-The MLIR packages install headers, CMake config files, libraries, and tools under
+The LLVM/MLIR packages install headers, CMake config files, libraries, and tools under
 `/usr/lib/llvm-18`. Adding the LLVM tools directory to the shell `PATH` makes
-commands such as `mlir-opt` and `mlir-translate` available directly:
+commands such as `mlir-opt`, `mlir-translate`, and `llvm-as` available directly:
 
 ```sh
 echo 'export PATH=/usr/lib/llvm-18/bin:$PATH' >> ~/.zshrc
 source ~/.zshrc
 mlir-opt --version
+```
+
+After building the compiler, you can use `build/nexc` directly to compile a nex
+program without the helper script:
+
+```sh
+build/nexc examples/pipeline_walkthrough.nexs -o build/pipeline_walkthrough
 ```
 
 Official setup references:
@@ -96,6 +112,7 @@ Useful inspection commands:
 ./nexc.sh ast examples/add.nexs
 ./nexc.sh ir examples/add.nexs
 ./nexc.sh mlir examples/comparison.nexs
+./nexc.sh llvm examples/return_42.nexs
 ./nexc.sh ast-graph examples/add.nexs
 ```
 
@@ -107,6 +124,10 @@ different output prefix:
 ```
 
 ## Planned Compiler Pipeline
+
+For a hand-held explanation of the difference between building `nexc`, dumping
+compiler stages, and eventually compiling a nex program, see
+[NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md#1-current-pipeline).
 
 Source code  
 → Lexer  
@@ -138,8 +159,10 @@ nex.md      Living project overview and AI/context document
 - [LLM_REFERENCE.md](./LLM_REFERENCE.md) - compact index for future chats/LLMs
 - [docs/language/core_v0.md](./docs/language/core_v0.md) - normative **Core v0** language (first compiler milestone)
 - [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md) - beginner guide for writing current nex programs
+- [examples/pipeline_walkthrough.nexs](./examples/pipeline_walkthrough.nexs) - nontrivial frontend pipeline walkthrough input
 - [docs/design/frontend_contract.md](./docs/design/frontend_contract.md) - lexer/parser/AST contract for the first frontend implementation
 - [docs/design/core_v0_typed_ir.md](./docs/design/core_v0_typed_ir.md) - design note for the first backend-facing typed IR
+- [docs/design/llvm_native_first_slice.md](./docs/design/llvm_native_first_slice.md) - first LLVM/native lowering milestone plan
 - [NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md) - educational guide to the compiler as it grows
 - [docs/user/frontend.md](./docs/user/frontend.md) - practical guide for frontend inspection and semantic checking
 - [nex.md](./nex.md) - living project overview and language-planning context
@@ -178,8 +201,8 @@ Long term, nex may become partially or fully self-hosting once the language is m
 
 ## Status
 
-Early-stage. The frontend, typed IR, and first scalar MLIR lowering slices are
-implemented, but the compiler does not yet produce native executables.
+Early-stage. The frontend, typed IR, MLIR/LLVM IR dumps, and scalar native
+executable path are implemented, but runtime-backed features are still missing.
 
 ## License
 

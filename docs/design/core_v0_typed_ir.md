@@ -299,8 +299,8 @@ Current policy:
 - Lower immutable expression results naturally as MLIR SSA values.
 - Treat current function parameters as MLIR block arguments when lowering
   `LoadLocal` operations.
-- Lower mutable locals through explicit storage or structured operations until a
-  later pass can promote/simplify them.
+- Lower mutable locals through explicit MLIR `memref` storage until a later pass
+  can promote/simplify them.
 - Revisit a nex-owned SSA/CFG layer only when a concrete nex-specific analysis
   needs it.
 
@@ -336,6 +336,6 @@ parse -> semantic analyze -> build typed IR -> dump typed IR
 
 Do not emit LLVM IR or native code until the typed IR and MLIR lowering continue
 to represent Core v0 scalar examples clearly and have golden tests plus MLIR
-verifier coverage for the relevant shape. The immediate next backend work is to
-lower mutable locals, general `if` shapes, and `while` before attempting
-LLVM/native output.
+verifier coverage for the relevant shape. The walkthrough example now meets that
+bar for the current structured-control-flow slice, so the next backend design
+step can be the first LLVM/native lowering plan.

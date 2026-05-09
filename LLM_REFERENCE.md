@@ -13,6 +13,11 @@ MLIR lowering**:
 source -> lexer -> tokens -> parser -> AST -> semantic analysis -> typed IR -> MLIR
 ```
 
+For the human-oriented explanation of build vs dump vs compile flow, start with
+[NEXC_HOLY_BOOK.md §1 Current Pipeline](./NEXC_HOLY_BOOK.md#1-current-pipeline).
+The main walkthrough input is
+[examples/pipeline_walkthrough.nexs](./examples/pipeline_walkthrough.nexs).
+
 Current frontend capabilities:
 
 - token dumping: `./nexc.sh tokens <file.nexs>`
@@ -22,14 +27,13 @@ Current frontend capabilities:
 - semantic checking: `./nexc.sh check-file <file.nexs>`
 - typed IR dumping: `./nexc.sh ir <file.nexs>`
 - first MLIR dumping: `./nexc.sh mlir <file.nexs>`
+- LLVM IR dumping: `./nexc.sh llvm <file.nexs>`
+- direct scalar executable compilation: `build/nexc <file.nexs> -o <output>`
 
 Not implemented yet:
 
-- native code generation
-- complete MLIR lowering beyond simple scalar returns, arithmetic, integer
-  comparisons, direct function calls, and returning `if`/`else`
-- LLVM lowering
-- runtime execution
+- complete MLIR lowering beyond the pipeline walkthrough slice
+- runtime-backed native execution
 - real `print` / `println` output at runtime
 - arrays, imports/modules, user-defined types, allocation, channels, tasks
 
@@ -69,6 +73,7 @@ Useful one-file commands:
 | Educational compiler guide | [NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md) |
 | Frontend implementation contract | [docs/design/frontend_contract.md](./docs/design/frontend_contract.md) |
 | Core v0 typed IR design note | [docs/design/core_v0_typed_ir.md](./docs/design/core_v0_typed_ir.md) |
+| First LLVM/native slice | [docs/design/llvm_native_first_slice.md](./docs/design/llvm_native_first_slice.md) |
 | Optimization / analysis direction | [docs/design/optimization_goals.md](./docs/design/optimization_goals.md) |
 | Lexer/parser/AST/semantic headers | [include/nexc/frontend/](./include/nexc/frontend/) |
 | Frontend implementation | [src/frontend/](./src/frontend/) |
@@ -76,6 +81,7 @@ Useful one-file commands:
 | MLIR lowering and textual dump API | [include/nexc/mlir/](./include/nexc/mlir/), [src/mlir/](./src/mlir/) |
 | CLI driver | [src/tools/nexc/main.cpp](./src/tools/nexc/main.cpp) |
 | Example nex programs | [examples/](./examples/) |
+| Nontrivial pipeline walkthrough input | [examples/pipeline_walkthrough.nexs](./examples/pipeline_walkthrough.nexs) |
 | Invalid/semantic test fixtures | [tests/](./tests/) |
 | Golden expected output | [tests/golden/](./tests/golden/) |
 | CI workflow | [.github/workflows/ci.yml](./.github/workflows/ci.yml) |
@@ -129,12 +135,15 @@ The next major implementation direction is lowering from the tiny typed IR. See
 
 Recommended next slice:
 
-1. Keep IR golden tests growing as Core v0 grows.
-2. Grow MLIR beyond returning `if`/`else` toward mutable locals, loop lowering,
-   module constants, and runtime calls.
-3. Keep MLIR output covered by golden tests and conditional `mlir-opt`
+1. Design the minimal runtime ABI for observable output, starting with
+   `print` / `println`.
+2. Keep growing MLIR/LLVM for module constants, strings, built-in runtime calls, and
+   unsigned-specific integer behavior.
+3. Keep IR/MLIR/LLVM output covered by golden tests and conditional verifier
    validation.
 4. Add runtime strategy only after scalar lowering is clear.
+5. After LLVM v0 stabilizes, write a formal language reference in the style of
+   Python/C/C++ docs.
 
 Before or during that, keep docs updated:
 

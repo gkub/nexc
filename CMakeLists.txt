@@ -29,6 +29,32 @@ if(MLIR_FOUND)
     else()
         message(STATUS "mlir-opt not found; MLIR validation tests will be skipped")
     endif()
+
+    find_program(NEXC_LLVM_AS_EXECUTABLE
+        NAMES llvm-as llvm-as-18
+        HINTS
+            ${LLVM_TOOLS_BINARY_DIR}
+            /usr/lib/llvm-18/bin
+    )
+
+    if(NEXC_LLVM_AS_EXECUTABLE)
+        message(STATUS "Found llvm-as: ${NEXC_LLVM_AS_EXECUTABLE}")
+    else()
+        message(STATUS "llvm-as not found; LLVM IR validation tests will be skipped")
+    endif()
+
+    find_program(NEXC_CLANG_EXECUTABLE
+        NAMES clang clang-18
+        HINTS
+            ${LLVM_TOOLS_BINARY_DIR}
+            /usr/lib/llvm-18/bin
+    )
+
+    if(NEXC_CLANG_EXECUTABLE)
+        message(STATUS "Found clang: ${NEXC_CLANG_EXECUTABLE}")
+    else()
+        message(STATUS "clang not found; native executable tests will be skipped")
+    endif()
 endif()
 
 function(nexc_target_warnings target)
@@ -102,12 +128,45 @@ if(MLIR_FOUND)
             MLIRFuncDialect
             MLIRArithDialect
             MLIRSCFDialect
+            MLIRMemRefDialect
     )
 endif()
 nexc_target_warnings(nexc_mlir)
 
+add_library(nexc_llvm
+    src/llvm/textual.cpp
+)
+
+target_include_directories(nexc_llvm
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(nexc_llvm PUBLIC nexc_mlir)
+if(MLIR_FOUND)
+    target_compile_definitions(nexc_llvm PRIVATE NEXC_HAS_REAL_MLIR=1)
+    target_include_directories(nexc_llvm SYSTEM PRIVATE ${MLIR_INCLUDE_DIRS})
+    target_link_libraries(nexc_llvm
+        PRIVATE
+            MLIRArithToLLVM
+            MLIRControlFlowDialect
+            MLIRControlFlowToLLVM
+            MLIRFuncToLLVM
+            MLIRLLVMDialect
+            MLIRMemRefToLLVM
+            MLIRReconcileUnrealizedCasts
+            MLIRSCFToControlFlow
+            MLIRTargetLLVMIRExport
+            MLIRBuiltinToLLVMIRTranslation
+            MLIRLLVMToLLVMIRTranslation
+            LLVMCore
+            LLVMSupport
+    )
+endif()
+nexc_target_warnings(nexc_llvm)
+
 add_executable(nexc src/tools/nexc/main.cpp)
-target_link_libraries(nexc PRIVATE nexc_mlir)
+target_link_libraries(nexc PRIVATE nexc_llvm)
 nexc_target_warnings(nexc)
 
 enable_testing()
@@ -154,6 +213,53 @@ function(add_nexc_mlir_validation_test name input)
             -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${name}.mlir
             -DWORKING_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunMlirVerify.cmake
+    )
+endfunction()
+
+function(add_nexc_llvm_validation_test name input)
+    if(NOT NEXC_LLVM_AS_EXECUTABLE)
+        return()
+    endif()
+
+    add_test(
+        NAME ${name}
+        COMMAND ${CMAKE_COMMAND}
+            -DNEXC_EXECUTABLE=$<TARGET_FILE:nexc>
+            -DINPUT=${input}
+            -DLLVM_AS_EXECUTABLE=${NEXC_LLVM_AS_EXECUTABLE}
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${name}.ll
+            -DWORKING_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunLlvmVerify.cmake
+    )
+endfunction()
+
+function(add_nexc_executable_test name input expected_exit_code)
+    if(NOT NEXC_CLANG_EXECUTABLE)
+        return()
+    endif()
+
+    add_test(
+        NAME ${name}
+        COMMAND ${CMAKE_COMMAND}
+            -DNEXC_EXECUTABLE=$<TARGET_FILE:nexc>
+            -DINPUT=${input}
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${name}
+            -DEXPECTED_RUN_EXIT_CODE=${expected_exit_code}
+            -DWORKING_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunExecutable.cmake
+    )
+endfunction()
+
+function(add_nexc_compile_failure_test name input expected_stderr_contains)
+    add_test(
+        NAME ${name}
+        COMMAND ${CMAKE_COMMAND}
+            -DNEXC_EXECUTABLE=$<TARGET_FILE:nexc>
+            -DINPUT=${input}
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${name}
+            -DEXPECTED_STDERR_CONTAINS=${expected_stderr_contains}
+            -DWORKING_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunCompileFailure.cmake
     )
 endfunction()
 
@@ -217,6 +323,13 @@ add_nexc_golden_test(
 )
 
 add_nexc_golden_test(
+    dump_ir_mutable_locals_golden
+    --dump-ir
+    examples/mutable_locals.nexs
+    tests/golden/dump_ir/mutable_locals.ir.txt
+)
+
+add_nexc_golden_test(
     dump_ir_if_else_returns_golden
     --dump-ir
     tests/semantic_if_else_returns.nexs
@@ -258,6 +371,55 @@ add_nexc_golden_test(
     tests/golden/dump_mlir/comparison.mlir
 )
 
+add_nexc_golden_test(
+    dump_mlir_mutable_locals_golden
+    --dump-mlir
+    examples/mutable_locals.nexs
+    tests/golden/dump_mlir/mutable_locals.mlir
+)
+
+add_nexc_golden_test(
+    dump_mlir_pipeline_walkthrough_golden
+    --dump-mlir
+    examples/pipeline_walkthrough.nexs
+    tests/golden/dump_mlir/pipeline_walkthrough.mlir
+)
+
+add_nexc_golden_test(
+    dump_llvm_return_42_golden
+    --dump-llvm
+    examples/return_42.nexs
+    tests/golden/dump_llvm/return_42.ll
+)
+
+add_nexc_golden_test(
+    dump_llvm_scalar_expr_golden
+    --dump-llvm
+    examples/scalar_expr.nexs
+    tests/golden/dump_llvm/scalar_expr.ll
+)
+
+add_nexc_golden_test(
+    dump_llvm_function_call_golden
+    --dump-llvm
+    examples/function_call.nexs
+    tests/golden/dump_llvm/function_call.ll
+)
+
+add_nexc_golden_test(
+    dump_llvm_mutable_locals_golden
+    --dump-llvm
+    examples/mutable_locals.nexs
+    tests/golden/dump_llvm/mutable_locals.ll
+)
+
+add_nexc_golden_test(
+    dump_llvm_pipeline_walkthrough_golden
+    --dump-llvm
+    examples/pipeline_walkthrough.nexs
+    tests/golden/dump_llvm/pipeline_walkthrough.ll
+)
+
 add_nexc_mlir_validation_test(
     validate_mlir_return_42
     examples/return_42.nexs
@@ -283,6 +445,59 @@ add_nexc_mlir_validation_test(
     examples/comparison.nexs
 )
 
+add_nexc_mlir_validation_test(
+    validate_mlir_mutable_locals
+    examples/mutable_locals.nexs
+)
+
+add_nexc_mlir_validation_test(
+    validate_mlir_pipeline_walkthrough
+    examples/pipeline_walkthrough.nexs
+)
+
+add_nexc_llvm_validation_test(
+    validate_llvm_return_42
+    examples/return_42.nexs
+)
+
+add_nexc_llvm_validation_test(
+    validate_llvm_scalar_expr
+    examples/scalar_expr.nexs
+)
+
+add_nexc_llvm_validation_test(
+    validate_llvm_function_call
+    examples/function_call.nexs
+)
+
+add_nexc_llvm_validation_test(
+    validate_llvm_mutable_locals
+    examples/mutable_locals.nexs
+)
+
+add_nexc_llvm_validation_test(
+    validate_llvm_pipeline_walkthrough
+    examples/pipeline_walkthrough.nexs
+)
+
+add_nexc_executable_test(
+    run_executable_return_42
+    examples/return_42.nexs
+    42
+)
+
+add_nexc_executable_test(
+    run_executable_pipeline_walkthrough
+    examples/pipeline_walkthrough.nexs
+    30
+)
+
+add_nexc_compile_failure_test(
+    compile_hello_runtime_limitation
+    examples/hello.nexs
+    "backend limitation: string literals are not lowered yet"
+)
+
 add_test(
     NAME semantic_check_add
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/add.nexs
@@ -299,8 +514,18 @@ add_test(
 )
 
 add_test(
+    NAME semantic_check_mutable_locals
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/mutable_locals.nexs
+)
+
+add_test(
     NAME semantic_check_comparison
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/comparison.nexs
+)
+
+add_test(
+    NAME semantic_check_pipeline_walkthrough
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/pipeline_walkthrough.nexs
 )
 
 add_test(

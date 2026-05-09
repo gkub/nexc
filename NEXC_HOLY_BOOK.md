@@ -21,10 +21,12 @@ This guide is about how the compiler implementation works.
 - [9. Semantic Analysis](#9-semantic-analysis)
 - [10. Typed IR](#10-typed-ir)
 - [11. MLIR Lowering](#11-mlir-lowering)
-- [12. CLI Inspection Modes](#12-cli-inspection-modes)
-- [13. Tests, Golden Files, and CI](#13-tests-golden-files-and-ci)
-- [14. Current Limitations](#14-current-limitations)
-- [15. Recommended Next Steps](#15-recommended-next-steps)
+- [12. LLVM IR Lowering](#12-llvm-ir-lowering)
+- [13. Native Executable Driver](#13-native-executable-driver)
+- [14. CLI Inspection Modes](#14-cli-inspection-modes)
+- [15. Tests, Golden Files, and CI](#15-tests-golden-files-and-ci)
+- [16. Current Limitations](#16-current-limitations)
+- [17. Recommended Next Steps](#17-recommended-next-steps)
 
 ## Developer Workflow
 
@@ -78,11 +80,51 @@ CMAKE_GENERATOR=Ninja ./nexc.sh configure
 
 ## 1. Current Pipeline
 
-The compiler currently implements a checked Core v0 frontend, a first typed IR
-dump, and a tiny MLIR lowering slice:
+Before the stages, keep one distinction clear:
 
 ```text
-source text
+building nexc != compiling a nex program
+```
+
+When you run:
+
+```sh
+./nexc.sh build
+```
+
+you are compiling the C++ implementation of the compiler. That produces the tool
+we are writing:
+
+```text
+C++ source files
+  -> CMake configures build/
+  -> C++ compiler builds nexc_frontend, nexc_ir, nexc_mlir
+  -> linker produces build/nexc
+```
+
+No user nex program has been compiled at that point. We have only built the
+compiler executable.
+
+When you run:
+
+```sh
+./nexc.sh ir examples/pipeline_walkthrough.nexs
+```
+
+or:
+
+```sh
+./nexc.sh mlir examples/comparison.nexs
+```
+
+you are running `build/nexc` on a `.nexs` input file. That is the compiler
+pipeline.
+
+The compiler currently implements a checked Core v0 frontend, a first typed IR
+dump, and a small MLIR lowering slice:
+
+```text
+.nexs source file
   -> SourceFile
   -> Lexer
   -> tokens
@@ -93,7 +135,8 @@ source text
   -> MLIR
 ```
 
-LLVM lowering and native code generation are not implemented yet.
+LLVM IR dumping and host executable generation are implemented for the current
+scalar walkthrough slice.
 
 Each stage has a narrow job:
 
@@ -116,6 +159,128 @@ fn f() -> i32 {
 
 The parser only knows that `return expression;` is valid syntax. A later semantic
 pass must reject returning `bool` from an `i32` function.
+
+### 1.1 Dumps Are Pipeline Stop Points
+
+The `--dump-*` commands are not separate compilers. They run the same pipeline
+and stop at different points to print what exists there:
+
+```text
+--dump-tokens
+  source -> SourceFile -> Lexer -> tokens
+
+--dump-ast / --dump-ast-dot
+  source -> SourceFile -> Lexer -> tokens -> Parser -> AST
+
+--check
+  source -> SourceFile -> Lexer -> tokens -> Parser -> AST -> SemanticAnalyzer
+
+--dump-ir
+  source -> SourceFile -> Lexer -> tokens -> Parser -> AST
+         -> SemanticAnalyzer -> typed IR
+
+--dump-mlir
+  source -> SourceFile -> Lexer -> tokens -> Parser -> AST
+         -> SemanticAnalyzer -> typed IR -> MLIR
+```
+
+That means building usually happens before dumping only because `build/nexc`
+must exist before you can run it. Once the compiler executable exists, each dump
+command is just "run this `.nexs` file through the pipeline until this stage."
+
+### 1.2 Walkthrough Input
+
+Use [examples/pipeline_walkthrough.nexs](examples/pipeline_walkthrough.nexs) as a
+small-but-real frontend walkthrough program:
+
+```nex
+fn sum_even_to(limit: i32) -> i32 {
+    let mut i: i32 = 0;
+    let mut total: i32 = 0;
+
+    while (i <= limit) {
+        if (i % 2 == 0) {
+            total = total + i;
+        } else {
+            total = total;
+        }
+
+        i = i + 1;
+    }
+
+    return total;
+}
+
+fn main() -> i32 {
+    return sum_even_to(10);
+}
+```
+
+This program uses function calls, parameters, mutable locals, assignment, a
+`while` loop, an `if` / `else`, arithmetic, remainder, comparison, and equality.
+It is intentionally more useful for learning the pipeline than `return 42;`.
+
+At each current stage:
+
+- **SourceFile** owns exactly this file text and records line starts for
+diagnostics.
+- **Lexer** turns the text into tokens such as `KwFn`, `Identifier`, `KwWhile`,
+`LessEqual`, `Percent`, and `IntegerLiteral`.
+- **Parser** turns the flat token stream into an AST with a `FunctionDecl`, a
+`WhileStmt`, an `IfStmt`, `AssignStmt` nodes, and nested `BinaryExpr` nodes.
+- **SemanticAnalyzer** checks that `i` and `total` are defined and mutable, that
+conditions are bool/integer-compatible, that `%`, `+`, `<=`, and `==` operate on
+valid types, and that both functions return `i32` correctly.
+- **Typed IR** resolves source names into local slots like `$0`, `$1`, and `$2`,
+turns expression results into typed temporaries like `%0`, `%1`, and `%2`, and
+keeps the loop/if structure explicit.
+- **MLIR lowering** now supports this full walkthrough. Mutable locals lower
+through `memref`, the loop lowers through `scf.while`, the inner fallthrough
+`if` lowers through `scf.if`, and `%` lowers through `arith.remsi`.
+
+To inspect the current backend milestone, run:
+
+```sh
+./nexc.sh mlir examples/pipeline_walkthrough.nexs
+```
+
+### 1.3 Future Full Compilation Pipeline
+
+The intended full compile path is:
+
+```text
+.nexs source file
+  -> SourceFile
+  -> Lexer
+  -> tokens
+  -> Parser
+  -> AST
+  -> SemanticAnalyzer
+  -> typed IR
+  -> MLIR
+  -> lower MLIR dialects
+  -> LLVM dialect / LLVM IR
+  -> object file
+  -> linker
+  -> native executable
+```
+
+The pipeline now reaches textual LLVM IR:
+
+```sh
+./nexc.sh llvm examples/pipeline_walkthrough.nexs
+```
+
+It can also ask the real `nexc` binary to produce a host executable:
+
+```sh
+build/nexc examples/pipeline_walkthrough.nexs -o build/pipeline_walkthrough
+```
+
+That direct command is the important mental model. `nexc.sh` is only a developer
+helper for building and testing the compiler itself. The compiler executable is
+`build/nexc`; once it exists, it should be able to compile nex programs without
+the helper script.
 
 ## 2. Build Shape
 
@@ -825,6 +990,7 @@ types for one abstraction level. The current nex slice uses:
 - `func`: function definitions, entry-block arguments, calls, and returns
 - `arith`: integer constants and arithmetic operations
 - `scf`: structured control flow such as `if` / `else`
+- `memref`: explicit local storage slots for `let` / `let mut`
 
 This small nex program:
 
@@ -907,6 +1073,45 @@ There are two important MLIR ideas packed into that output:
   branch computes a value and hands it back with `scf.yield`; the outer function
   then returns the result of the whole `scf.if`.
 
+The lowering now also handles function-local storage:
+
+```nex
+fn main() -> i32 {
+    let x: i32 = 40;
+    let mut y: i32 = 2;
+
+    y = y + x;
+
+    return y;
+}
+```
+
+That produces MLIR shaped like this:
+
+```mlir
+module {
+  func.func @main() -> i32 {
+    %c40_i32 = arith.constant 40 : i32
+    %alloca = memref.alloca() : memref<i32>
+    memref.store %c40_i32, %alloca[] : memref<i32>
+    %c2_i32 = arith.constant 2 : i32
+    %alloca_0 = memref.alloca() : memref<i32>
+    memref.store %c2_i32, %alloca_0[] : memref<i32>
+    %0 = memref.load %alloca_0[] : memref<i32>
+    %1 = memref.load %alloca[] : memref<i32>
+    %2 = arith.addi %0, %1 : i32
+    memref.store %2, %alloca_0[] : memref<i32>
+    %3 = memref.load %alloca_0[] : memref<i32>
+    return %3 : i32
+  }
+}
+```
+
+This is deliberately not optimized. Both `let` and `let mut` become explicit
+storage slots in this first slice. Later MLIR/LLVM passes can promote obvious
+single-assignment locals away, but the initial lowering stays easy to inspect:
+allocation, store initializer, load when read, store when assigned.
+
 That produces:
 
 ```mlir
@@ -932,7 +1137,7 @@ represent programs at several abstraction levels:
 
 ```text
 nex typed IR
-  -> MLIR func/arith/scf
+  -> MLIR func/arith/scf/memref
   -> lower-level MLIR dialects
   -> LLVM dialect
   -> LLVM IR
@@ -1023,7 +1228,55 @@ Unary `!` lowers as a comparison against false:
 That is intentionally boring and explicit. It keeps the first lowering easy to
 inspect before adding more clever canonicalization.
 
-### 11.4 Structured `if` Lowering
+### 11.4 Local Storage Lowering
+
+Core v0 has named local bindings:
+
+```nex
+let x: i32 = 40;
+let mut y: i32 = 2;
+y = y + x;
+```
+
+The typed IR represents those as:
+
+```text
+DeclareLocal $0 = %0
+DeclareLocal $1 mutable = %1
+%2: i32 = LoadLocal $1
+%3: i32 = LoadLocal $0
+%4: i32 = Binary Plus %2, %3
+StoreLocal $1 = %4
+```
+
+MLIR values are SSA, which means a value like `%2` cannot be reassigned. A source
+local, especially `let mut`, is different: it is a place that can be read and
+written over time. The current lowering models that place as a zero-dimensional
+memref:
+
+```mlir
+%alloca = memref.alloca() : memref<i32>
+memref.store %c40_i32, %alloca[] : memref<i32>
+%0 = memref.load %alloca[] : memref<i32>
+```
+
+Read that as:
+
+```text
+allocate one i32 slot
+store the initializer into it
+later, load the current value from that slot
+```
+
+Parameters are still different. Function parameters arrive as MLIR block
+arguments such as `%arg0`, and Core v0 parameters are immutable, so loading a
+parameter can stay a direct SSA alias instead of allocating memory.
+
+This storage-first strategy is intentionally conservative. It gives every local a
+clear place to live before we implement optimization. Later passes can promote
+simple slots back into SSA values when it is safe.
+
+### 11.5 Structured `if` Lowering
 
 The typed IR keeps control flow structured:
 
@@ -1062,12 +1315,55 @@ Why use `scf.yield` instead of returning directly inside each branch? Because an
 produce the value for the whole operation. The function-level `return` happens
 after the `scf.if` result exists.
 
-The current implementation only lowers the simple case where both branches
-return. That matches the first semantic test fixture and keeps the control-flow
-lowering small. General `if` statements that fall through, nested returning
-branches, mutable locals across branches, and `while` loops are later slices.
+The current implementation lowers both the value-returning shape above and the
+fallthrough shape used inside loops:
 
-### 11.5 Implementation Location
+```nex
+if (i % 2 == 0) {
+    total = total + i;
+} else {
+    total = total;
+}
+```
+
+The fallthrough form produces a no-result `scf.if`. Each branch performs its
+stores and then control continues after the operation. Branches that return from
+inside a larger non-returning region are still a later control-flow slice because
+they require more careful region/terminator handling.
+
+### 11.6 Structured `while` Lowering
+
+The typed IR keeps a while loop as two blocks:
+
+```text
+While
+  Condition
+    Block
+      ...
+      ConditionValue %cond
+  Body
+    Block
+      ...
+```
+
+That maps to MLIR `scf.while`:
+
+```mlir
+scf.while : () -> () {
+  %cond = ...
+  scf.condition(%cond)
+} do {
+  ...
+  scf.yield
+}
+```
+
+The current lowering does not use loop-carried SSA values yet. That is possible
+because Core v0 locals are lowered through explicit `memref` slots: the loop body
+updates the slots with `memref.store`, and the next condition evaluation reloads
+the current values with `memref.load`.
+
+### 11.7 Implementation Location
 
 The MLIR lowering layer lives under:
 
@@ -1083,7 +1379,7 @@ core bridge between the two representations:
 
 ```text
 nex typed IR value `%2`
-  -> concrete MLIR Value produced by arith.addi, call, or a block argument
+  -> concrete MLIR Value produced by arith.addi, memref.load, call, or a block argument
 ```
 
 The public wrapper remains small:
@@ -1096,7 +1392,7 @@ The name still says `Textual` because the user-visible mode dumps MLIR text. The
 important implementation detail is that the text is produced by a real MLIR
 module, not by hand-concatenating strings.
 
-### 11.6 Installation And Tooling
+### 11.8 Installation And Tooling
 
 On Ubuntu 24.04, install LLVM/MLIR 18 development packages:
 
@@ -1135,7 +1431,7 @@ Official setup references:
 On platforms without matching distro packages, building LLVM from source with
 `-DLLVM_ENABLE_PROJECTS=mlir` is the standard route documented by upstream LLVM.
 
-### 11.7 Current Command
+### 11.9 Current Command
 
 Current command:
 
@@ -1184,14 +1480,116 @@ available. The CMake configuration looks for the tool through the MLIR install
 metadata and the normal shell `PATH`; if it cannot find the tool, the validation
 tests are skipped rather than breaking frontend-only development machines.
 
-The current MLIR lowering is still intentionally incomplete. It supports scalar
-literals for `i32` and `bool`, `+`, `-`, `*`, integer comparisons, unary `!`,
-function parameters, direct function calls, function returns, and returning
-`if`/`else` statements. It does not yet lower module constants, mutable locals,
-strings, built-in `print` / `println`, general fallthrough `if`, nested returning
-control flow, `while`, or runtime/native execution.
+The current MLIR lowering is still intentionally incomplete, but it now covers
+the nontrivial pipeline walkthrough. It supports scalar literals for `i32` and
+`bool`, `+`, `-`, `*`, `/`, `%`, integer comparisons, unary `!`, function
+parameters, direct function calls, function returns, local declarations, local
+loads/stores, assignment, returning `if`/`else`, fallthrough `if`/`else`, and
+`while`. It does not yet lower module constants, strings, built-in `print` /
+`println`, nested returning control flow, unsigned-specific comparisons, or
+runtime/native execution.
 
-## 12. CLI Inspection Modes
+## 12. LLVM IR Lowering
+
+LLVM IR is the next representation below the current MLIR slice. It is much
+closer to machine code than nex typed IR or structured MLIR:
+
+```text
+nex typed IR
+  -> MLIR func/arith/scf/memref
+  -> MLIR cf/LLVM dialect
+  -> textual LLVM IR
+```
+
+The current implementation still uses MLIR as the lowering engine. That means
+nex does not hand-write LLVM IR directly. Instead:
+
+1. nex builds the same high-level MLIR module used by `--dump-mlir`.
+2. MLIR passes lower `scf` into branch-based `cf`.
+3. MLIR passes lower `memref`, `func`, `arith`, and `cf` into the LLVM dialect.
+4. MLIR translates the LLVM dialect module into real LLVM IR.
+
+The first tiny example:
+
+```nex
+fn main() -> i32 {
+    return 42;
+}
+```
+
+prints:
+
+```llvm
+; ModuleID = 'nex_module'
+source_filename = "nex_module"
+
+define i32 @main() {
+  ret i32 42
+}
+```
+
+The pipeline walkthrough also lowers to LLVM IR now. Its `scf.while` becomes
+plain LLVM-style basic blocks and branches, and its memref-backed locals become
+LLVM `alloca`, `load`, and `store` operations. That is why the LLVM output is
+less beginner-friendly than MLIR: the high-level source structure has been
+flattened into lower-level control flow.
+
+This inspection mode is still not native execution. LLVM IR is an input to later
+LLVM tools and code generation. The separate executable driver below is the path
+that turns this IR into a runnable host program.
+
+## 13. Native Executable Driver
+
+The first native driver path is intentionally simple:
+
+```sh
+build/nexc examples/return_42.nexs -o build/return_42
+```
+
+That command does **not** use `nexc.sh`. It uses the compiler executable directly.
+Internally, the driver currently does this:
+
+```text
+parse/check source
+  -> build typed IR
+  -> lower to MLIR
+  -> lower to LLVM IR
+  -> write temporary .ll file
+  -> invoke clang -x ir temp.ll -o output
+```
+
+Using `clang` here is a deliberate early-driver choice. `clang` already knows how
+to invoke the host linker and find the platform startup/runtime files. That lets
+`nexc` prove end-to-end native execution before we implement our own object-file
+emission and linker driver.
+
+The current executable tests cover:
+
+```sh
+build/nexc examples/return_42.nexs -o <temp>
+build/nexc examples/pipeline_walkthrough.nexs -o <temp>
+```
+
+The first executable exits with status `42`. The walkthrough executable exits
+with status `30`, because `sum_even_to(10)` returns `0 + 2 + 4 + 6 + 8 + 10`.
+
+This still is not the full runtime story. Programs that need strings,
+`print`/`println`, files, allocation, or richer system interaction still need a
+runtime ABI. But for pure scalar Core v0 programs, the compiler can now build and
+run native host executables.
+
+For example, this currently fails on purpose:
+
+```sh
+build/nexc examples/hello.nexs -o build/hello
+```
+
+`hello.nexs` contains a string literal and `println("Hello, world!")`. The
+frontend accepts that program because `println(str)` is a known built-in, but the
+backend cannot lower strings or built-in printing yet. The compiler should say
+that clearly as a backend limitation until the runtime exists.
+
+## 14. CLI Inspection Modes
 
 File:
 
@@ -1199,7 +1597,7 @@ File:
 src/tools/nexc/main.cpp
 ```
 
-The CLI currently supports six inspection/checking modes:
+The CLI currently supports seven inspection/checking modes:
 
 ```sh
 build/nexc --dump-tokens examples/minimal.nexs
@@ -1207,21 +1605,24 @@ build/nexc --dump-ast examples/add.nexs
 build/nexc --dump-ast-dot examples/add.nexs
 build/nexc --dump-ir examples/add.nexs
 build/nexc --dump-mlir examples/comparison.nexs
+build/nexc --dump-llvm examples/return_42.nexs
 build/nexc --check examples/add.nexs
+build/nexc examples/return_42.nexs -o build/return_42
 ```
 
 All modes lex the file first. `--dump-tokens` prints the token stream and stops.
 `--dump-ast` and `--dump-ast-dot` pass the token stream into the parser and print
 the resulting tree as either plain text or Graphviz DOT. `--check` parses the
-file and then runs semantic analysis without dumping the tree. `--dump-ir` and
-`--dump-mlir` run the same parse and semantic checks, then build typed IR only if
-there were no diagnostics. `--dump-ir` prints the nex-owned typed IR;
-`--dump-mlir` lowers that IR into the current MLIR slice.
+file and then runs semantic analysis without dumping the tree. `--dump-ir`,
+`--dump-mlir`, and `--dump-llvm` run the same parse and semantic checks, then
+build typed IR only if there were no diagnostics. `--dump-ir` prints the
+nex-owned typed IR; `--dump-mlir` lowers that IR into the current MLIR slice;
+`--dump-llvm` lowers through MLIR's LLVM dialect and prints LLVM IR.
 
 These modes are intentionally early because they let us inspect every compiler
 stage while building it.
 
-## 13. Tests, Golden Files, and CI
+## 15. Tests, Golden Files, and CI
 
 CTest is the local test runner:
 
@@ -1238,6 +1639,11 @@ The current tests cover:
 dumps
 - conditional MLIR verifier checks for selected `--dump-mlir` outputs when
 `mlir-opt` is available
+- golden output checks for LLVM IR dumps
+- conditional LLVM IR assembler checks for selected `--dump-llvm` outputs when
+`llvm-as` is available
+- native executable compile/run checks for selected scalar programs when `clang`
+is available
 - parser-negative fixtures
 - semantic success checks for valid examples
 - semantic-negative fixtures for type errors, undefined names, mutability,
@@ -1258,6 +1664,10 @@ tests/golden/dump_mlir/scalar_expr.mlir
 tests/golden/dump_mlir/function_call.mlir
 tests/golden/dump_mlir/if_else_returns.mlir
 tests/golden/dump_mlir/comparison.mlir
+tests/golden/dump_mlir/mutable_locals.mlir
+tests/golden/dump_mlir/pipeline_walkthrough.mlir
+tests/golden/dump_llvm/return_42.ll
+tests/golden/dump_llvm/pipeline_walkthrough.ll
 tests/golden/diagnostics/semantic_return_type_mismatch.stderr.txt
 ```
 
@@ -1298,6 +1708,25 @@ accept this generated module as structurally valid?" Both matter: text stability
 is useful for review, while verifier acceptance catches broken lowering even if
 the output happens to look plausible.
 
+LLVM validation follows the same pattern with:
+
+```text
+cmake/RunLlvmVerify.cmake
+```
+
+and `llvm-as`. It answers "does LLVM accept this generated `.ll` file?" before we
+try to create object files or executables.
+
+Executable validation uses:
+
+```text
+cmake/RunExecutable.cmake
+```
+
+That helper compiles a nex file with `build/nexc input.nexs -o output`, runs the
+resulting executable, and checks its exit status. It is the first CTest coverage
+for the compiler as a producer of runnable programs rather than only text dumps.
+
 GitHub Actions runs the same build and CTest loop on pushes and pull requests:
 
 ```text
@@ -1308,7 +1737,7 @@ The goal is one local command and one CI command path. As more frontend and
 semantic tests appear, they should become CTest entries so CI picks them up
 automatically.
 
-## 14. Current Limitations
+## 16. Current Limitations
 
 The current compiler does not yet implement:
 
@@ -1317,24 +1746,27 @@ The current compiler does not yet implement:
 - precise signed negative constant values
 - formatting/interpolation for strings
 - runtime implementation for `print` / `println`
-- complete MLIR lowering for mutable locals, general `if`, `while`, strings,
-  built-in printing, and runtime calls
+- complete MLIR lowering for strings, built-in printing, module constants,
+  unsigned-specific behavior, nested returning control flow, and runtime calls
 - inter-file/module resolution
-- LLVM lowering
-- native code generation
+- direct object-file emission without delegating to `clang`
+- native execution for programs that require runtime support
 
 Those are later stages. The current project state is a checked Core v0 frontend
-plus typed IR dumps and a tiny MLIR slice, not a full compiler.
+plus typed IR, MLIR, LLVM IR dumps, and native executable generation for scalar
+programs that do not need runtime services.
 
-## 15. Recommended Next Steps
+## 17. Recommended Next Steps
 
 The safest next steps are:
 
-1. Keep typed IR and MLIR tests growing as new Core v0 forms are added.
-2. Lower mutable locals, stores, and variable reads beyond parameter aliases.
-3. Lower `while` and more general `if` shapes.
-4. Consider a minimal `print_i32` runtime helper once backend lowering can
-  represent simple calls.
+1. Keep typed IR, MLIR, and LLVM IR tests growing as new Core v0 forms are added.
+2. Decide the minimal runtime ABI for observable output before lowering
+  `print` / `println`.
+3. Add unsigned-specific lowering behavior before treating the integer tower as
+  complete.
+4. After LLVM v0 settles, write the formal language reference in a Python/C/C++
+  documentation style.
 
 Lowering should stay boring at first. The goal is to prove the frontend can feed
 a backend with checked Core v0 programs before adding richer language features.

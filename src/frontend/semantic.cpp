@@ -22,11 +22,24 @@ namespace {
 struct Type {
     BuiltinTypeKind kind = BuiltinTypeKind::Invalid;
 
+    // Invalid is an error-recovery type. Treating it specially prevents one bad
+    // expression from causing a flood of follow-up type errors.
     bool isInvalid() const { return kind == BuiltinTypeKind::Invalid; }
+
+    // Void is allowed as a function return type, but not as a first-class value.
     bool isVoid() const { return kind == BuiltinTypeKind::Void; }
+
+    // Bool is a distinct Core v0 scalar type, even though lowering later maps it
+    // to MLIR i1.
     bool isBool() const { return kind == BuiltinTypeKind::Bool; }
+
+    // String literals currently have type str for semantic built-in printing.
     bool isString() const { return kind == BuiltinTypeKind::Str; }
 
+    // Return true for fixed-width signed/unsigned integer types.
+    //
+    // Bool is intentionally not treated as an integer here. Conditions accept
+    // bool and integers, but arithmetic requires real integer types.
     bool isInteger() const {
         switch (kind) {
         case BuiltinTypeKind::I8:
@@ -49,20 +62,31 @@ struct Type {
     }
 };
 
+// Compare two semantic types for exact equality, with invalid acting as a
+// recovery wildcard.
 bool sameType(Type left, Type right) {
     // Invalid types are treated as compatible so one earlier error does not
     // cascade into many redundant "type mismatch" diagnostics.
     return left.kind == right.kind || left.isInvalid() || right.isInvalid();
 }
 
+// Convert a semantic type to the spelling used in diagnostics.
 std::string typeName(Type type) {
     return std::string(builtinTypeName(type.kind));
 }
 
+// Convert parser type syntax into semantic type information.
+//
+// This is tiny today because Core v0 only has built-in scalar types. Keeping the
+// conversion explicit gives future user-defined types a clear expansion point.
 Type typeFromSyntax(TypeSyntax syntax) {
     return Type{.kind = syntax.kind};
 }
 
+// Return true if a type is allowed in `if`, `while`, and `!` condition contexts.
+//
+// Core v0 intentionally follows C-like integer truthiness only for integer and
+// bool values. Strings and void are not condition-like.
 bool canBeCondition(Type type) {
     // Core v0 allows bool and integer conditions. Invalid is accepted here only
     // to avoid cascading diagnostics after an expression already failed.
@@ -99,6 +123,11 @@ struct ExprInfo {
     std::optional<unsigned long long> integerValue = std::nullopt;
 };
 
+// Parse the raw spelling of an integer literal into an unsigned payload.
+//
+// This helper is deliberately unsigned because the parser represents unary minus
+// as a separate UnaryExpr. A source spelling like `-1` is not one negative token;
+// it is `Minus` plus integer literal `1`.
 std::optional<unsigned long long> parseUnsignedInteger(std::string_view raw) {
     // The lexer already validated the surface spelling. Semantic analysis parses
     // the value so it can check type ranges and simple constant expressions.
@@ -118,6 +147,10 @@ std::optional<unsigned long long> parseUnsignedInteger(std::string_view raw) {
     return value;
 }
 
+// Return the number of bits in a fixed-width integer type.
+//
+// Non-integer types return 0 so callers can use that as "not applicable" after
+// checking type.isInteger().
 unsigned bitWidth(Type type) {
     // Integer widths are needed for literal range checks and constant overflow
     // diagnostics. Non-integer types return 0 because they have no integer range.
@@ -144,6 +177,10 @@ unsigned bitWidth(Type type) {
     return 0;
 }
 
+// Return whether an integer type is signed.
+//
+// Signedness is needed for literal range and overflow checks because i8 and u8
+// have the same bit width but different maximum positive literal values.
 bool isSigned(Type type) {
     // Signedness only matters for integer types. Returning false for non-integers
     // keeps helper code simple after callers have already checked isInteger().
@@ -167,6 +204,11 @@ bool isSigned(Type type) {
     return false;
 }
 
+// Return the maximum non-negative literal value that fits in an integer type.
+//
+// This first semantic pass tracks only unsigned literal payloads, so signed
+// types use their positive range here. Negative signed constants are represented
+// as unary minus plus a positive literal and need richer evaluation later.
 unsigned long long maxIntegerValue(Type type) {
     const unsigned width = bitWidth(type);
     if (width == 0) {
@@ -190,8 +232,17 @@ unsigned long long maxIntegerValue(Type type) {
 // function state without exposing those details in the header.
 class AnalyzerImpl {
 public:
+    // Create one analysis run over a translation unit.
+    //
+    // The analyzer borrows the DiagnosticBag so all semantic errors join lexer
+    // and parser diagnostics in the same reporting path.
     explicit AnalyzerImpl(DiagnosticBag& diagnostics) : diagnostics_(diagnostics) {}
 
+    // Analyze a full AST translation unit.
+    //
+    // This is the main pass driver. It intentionally separates declaration
+    // collection from body checking so functions can call declarations that
+    // appear later in the file.
     void analyze(const TranslationUnit& unit) {
         // Analysis has two broad phases:
         //
@@ -213,6 +264,10 @@ public:
     }
 
 private:
+    // Install compiler-provided functions before collecting user declarations.
+    //
+    // Built-ins participate in normal call checking but cannot be redefined by
+    // source code.
     void installBuiltins() {
         const Type str{.kind = BuiltinTypeKind::Str};
         const Type voidType{.kind = BuiltinTypeKind::Void};
@@ -235,6 +290,10 @@ private:
         };
     }
 
+    // Collect top-level function signatures and constants.
+    //
+    // This phase does not analyze bodies or initializer expressions. It only
+    // builds symbol tables needed for later checks and detects duplicate names.
     void collectItems(const TranslationUnit& unit) {
         // This pass is intentionally shallow: inspect declarations and record
         // names/signatures, but do not analyze initializer or body expressions
@@ -276,6 +335,10 @@ private:
         }
     }
 
+    // Record a top-level name in the module namespace.
+    //
+    // Core v0 uses one namespace for functions and module constants, so `fn foo`
+    // and `const foo` conflict.
     void declareTopLevel(const std::string& name, SourceSpan span) {
         // Functions and constants share one module namespace in Core v0.
         if (topLevelNames_.contains(name)) {
@@ -287,6 +350,10 @@ private:
         topLevelNames_[name] = span;
     }
 
+    // Check the special executable entry function if the file defines one.
+    //
+    // Files without `main` are allowed as library units. Files with `main` must
+    // use the narrow Core v0 executable signatures.
     void validateMainIfPresent() {
         // `main` is optional because a source file may be a library unit. If it
         // exists, Core v0 restricts its shape so future execution has a clear
@@ -308,6 +375,10 @@ private:
         }
     }
 
+    // Analyze one module-level constant declaration.
+    //
+    // A const initializer must type-check against the declared type and be
+    // compile-time evaluable according to the current small constant evaluator.
     void analyzeConstDecl(const ConstDecl& constant) {
         // Module consts must be type-correct and compile-time evaluable. The
         // current evaluator is deliberately small but already catches literals,
@@ -326,6 +397,10 @@ private:
         }
     }
 
+    // Analyze one function body.
+    //
+    // This sets up parameter locals, checks every statement, and verifies that a
+    // non-void function definitely returns along all structured paths.
     void analyzeFunction(const FunctionDecl& function) {
         // Function analysis resets per-function state: return type, local scopes,
         // and return-path tracking.
@@ -355,9 +430,19 @@ private:
         popScope();
     }
 
+    // Start a new lexical local scope.
+    //
+    // Blocks and function bodies use this to make shadowing/local lifetime match
+    // source nesting.
     void pushScope() { scopes_.push_back({}); }
+
+    // End the current lexical local scope.
     void popScope() { scopes_.pop_back(); }
 
+    // Declare a local or parameter in the current scope.
+    //
+    // Mutability is stored with the symbol because assignment checking needs to
+    // know whether `x = value;` is allowed.
     void declareLocal(const std::string& name, SourceSpan span, Type type,
                       bool isMutable) {
         // Duplicates are only rejected within the current lexical scope. Shadowing
@@ -379,6 +464,10 @@ private:
         };
     }
 
+    // Resolve a value-like name in lexical scopes, then module constants.
+    //
+    // Returns nullptr for an unresolved name so callers can issue a diagnostic
+    // tailored to the context.
     const ValueSymbol* lookupValue(const std::string& name) const {
         // Lexical lookup walks from innermost scope outward, then falls back to
         // module constants. Function names are handled separately by call
@@ -396,6 +485,10 @@ private:
         return nullptr;
     }
 
+    // Analyze one statement and report whether it definitely returns.
+    //
+    // The bool return is for return-path analysis only. It does not mean the
+    // statement is valid/invalid; diagnostics are emitted into diagnostics_.
     bool analyzeStmt(const Stmt& stmt) {
         if (const auto* block = dynamic_cast<const BlockStmt*>(&stmt)) {
             // Blocks introduce scopes. The returned bool summarizes whether
@@ -492,6 +585,10 @@ private:
         return false;
     }
 
+    // Check a return statement against the current function return type.
+    //
+    // The function context is stored in currentReturnType_ while analyzeFunction
+    // walks the body.
     void analyzeReturn(const ReturnStmt& ret) {
         if (!ret.value) {
             // Bare `return;` is only valid in void functions.
@@ -521,6 +618,11 @@ private:
         }
     }
 
+    // Analyze an expression used as a condition.
+    //
+    // Conditions are special because Core v0 accepts both bool and integers
+    // there. Passing no expected type lets integer literals default before the
+    // condition-kind check runs.
     void analyzeCondition(const Expr& condition, std::string_view label) {
         // Conditions deliberately do not pass an expected type. Integer and bool
         // are both accepted in Core v0, so the expression should choose its
@@ -534,6 +636,10 @@ private:
         }
     }
 
+    // Analyze one expression and return its semantic facts.
+    //
+    // expected is a contextual type from declarations, returns, or call
+    // arguments. It is especially important for unsuffixed integer literals.
     ExprInfo analyzeExpr(const Expr& expr, std::optional<Type> expected) {
         if (const auto* integer = dynamic_cast<const IntegerLiteralExpr*>(&expr)) {
             // Unsuffixed integer literals get their type from context when there
@@ -610,6 +716,10 @@ private:
         return ExprInfo{.type = Type{}, .isConstant = false};
     }
 
+    // Analyze a direct function call expression.
+    //
+    // This resolves the callee name, checks argument count and argument types,
+    // and returns the function's result type.
     ExprInfo analyzeCallExpr(const CallExpr& call) {
         const auto* callee = dynamic_cast<const NameExpr*>(call.callee.get());
         if (!callee) {
@@ -668,6 +778,10 @@ private:
         return ExprInfo{.type = symbol.returnType, .isConstant = false};
     }
 
+    // Analyze a unary expression.
+    //
+    // `!` is condition-like and always produces bool. Unary `-` is integer-only
+    // and keeps the operand type.
     ExprInfo analyzeUnaryExpr(const UnaryExpr& unary, std::optional<Type> expected) {
         if (unary.op == TokenKind::Bang) {
             // `!` always produces bool. Core v0 accepts either bool or integer
@@ -698,6 +812,11 @@ private:
         return ExprInfo{.type = Type{}, .isConstant = false};
     }
 
+    // Analyze a binary expression.
+    //
+    // This is where operator-specific type rules live: arithmetic requires
+    // integers and returns the operand type; comparison/equality returns bool;
+    // logical operators accept condition-like operands and return bool.
     ExprInfo analyzeBinaryExpr(const BinaryExpr& binary, std::optional<Type> expected) {
         if (binary.op == TokenKind::AmpAmp || binary.op == TokenKind::PipePipe) {
             // Logical binary operators are condition-like on both sides and
@@ -767,6 +886,11 @@ private:
         return ExprInfo{.type = Type{}, .isConstant = false};
     }
 
+    // Evaluate enough constant arithmetic to diagnose obvious Core v0 errors.
+    //
+    // This helper returns normal ExprInfo either way. Diagnostics record overflow
+    // or division-by-zero; the compiler can continue analyzing the rest of the
+    // file after reporting them.
     ExprInfo analyzeConstantArithmetic(const BinaryExpr& binary, ExprInfo left,
                                        ExprInfo right) {
         // This is intentionally not a full constant evaluator. It only evaluates
@@ -843,6 +967,10 @@ private:
         }
     }
 
+    // Check that an integer literal fits in its selected semantic type.
+    //
+    // The selected type comes from context or the i32 default, so this check must
+    // happen in semantic analysis rather than lexing.
     void checkIntegerLiteralRange(const IntegerLiteralExpr& literal, Type type) {
         // Literal range checks use the selected semantic type. The same spelling
         // can be valid in one context and invalid in another, e.g. `255` for u8
@@ -880,10 +1008,18 @@ private:
 
 } // namespace
 
+// Create the public semantic analyzer wrapper.
+//
+// The SourceFile parameter is kept in the API for symmetry with lexer/parser and
+// future diagnostics, even though the current implementation only needs the bag.
 SemanticAnalyzer::SemanticAnalyzer(const SourceFile&,
                                    DiagnosticBag& diagnostics)
     : diagnostics_(diagnostics) {}
 
+// Run semantic analysis over a parsed AST.
+//
+// All mutable analysis state is kept in AnalyzerImpl so this public class remains
+// a small stable facade for the CLI and later tools.
 void SemanticAnalyzer::analyze(const TranslationUnit& unit) {
     AnalyzerImpl(diagnostics_).analyze(unit);
 }
