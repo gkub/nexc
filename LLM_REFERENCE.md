@@ -6,8 +6,8 @@ It is an index, not a full spec.
 ## Current Project State
 
 `nexc` is a C++ compiler project for the nex language. The current implementation
-is a **checked Core v0 frontend with typed IR dumps and first scalar MLIR
-lowering**:
+is a **checked Core v0 frontend with typed IR dumps and first scalar/control-flow
+MLIR lowering**:
 
 ```text
 source -> lexer -> tokens -> parser -> AST -> semantic analysis -> typed IR -> MLIR
@@ -26,8 +26,8 @@ Current frontend capabilities:
 Not implemented yet:
 
 - native code generation
-- complete MLIR lowering beyond straight-line `i32` returns, arithmetic, and
-  direct function calls
+- complete MLIR lowering beyond simple scalar returns, arithmetic, integer
+  comparisons, direct function calls, and returning `if`/`else`
 - LLVM lowering
 - runtime execution
 - real `print` / `println` output at runtime
@@ -53,7 +53,7 @@ Useful one-file commands:
 ./nexc.sh tokens examples/hello.nexs
 ./nexc.sh ast examples/hello.nexs
 ./nexc.sh ir examples/hello.nexs
-./nexc.sh mlir examples/function_call.nexs
+./nexc.sh mlir examples/comparison.nexs
 ./nexc.sh ast-graph examples/hello.nexs
 ```
 
@@ -110,6 +110,8 @@ Current categories:
 - smoke tests for token/AST dumping
 - golden output tests for tokens, AST, Graphviz DOT, and selected diagnostics
 - golden output tests for typed IR and MLIR dumps
+- conditional `mlir-opt` validation tests for generated MLIR when MLIR tools are
+  available
 - parser-negative fixtures
 - semantic success fixtures
 - semantic-negative fixtures
@@ -128,9 +130,10 @@ The next major implementation direction is lowering from the tiny typed IR. See
 Recommended next slice:
 
 1. Keep IR golden tests growing as Core v0 grows.
-2. Grow MLIR beyond straight-line `i32` expressions and calls toward mutable
-   locals, booleans/comparisons, and structured control flow.
-3. Keep MLIR output covered by golden tests and `mlir-opt` validation.
+2. Grow MLIR beyond returning `if`/`else` toward mutable locals, loop lowering,
+   module constants, and runtime calls.
+3. Keep MLIR output covered by golden tests and conditional `mlir-opt`
+   validation.
 4. Add runtime strategy only after scalar lowering is clear.
 
 Before or during that, keep docs updated:

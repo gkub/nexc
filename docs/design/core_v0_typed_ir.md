@@ -271,17 +271,20 @@ module {
 The typed IR keeps the lowering choice reversible while the frontend is still
 small.
 
-The current scalar slice has grown beyond the first literal return. It can also
-lower straight-line `i32` arithmetic and direct calls between nex functions:
+The current scalar/control-flow slice has grown beyond the first literal return.
+It can also lower straight-line `i32` arithmetic, integer comparisons, direct
+calls between nex functions, and returning `if`/`else`:
 
 ```sh
-./nexc.sh mlir examples/function_call.nexs
+./nexc.sh mlir examples/comparison.nexs
 ```
 
 That example demonstrates two important MLIR ideas. Function parameters become
 entry-block arguments such as `%arg0`; no memory load is needed to read them yet.
 Expression results become SSA values produced by MLIR operations such as
-`arith.addi` and `func.call`.
+`arith.addi`, `arith.cmpi`, and `call`. A returning `if`/`else` becomes
+`scf.if`, with each branch using `scf.yield` to produce the value returned by the
+whole operation.
 
 ## SSA Policy
 
@@ -332,7 +335,7 @@ parse -> semantic analyze -> build typed IR -> dump typed IR
 ```
 
 Do not emit LLVM IR or native code until the typed IR and MLIR lowering continue
-to represent Core v0 scalar examples clearly and have golden tests for the
-relevant shape. The immediate next backend work is to lower mutable locals,
-booleans/comparisons, and structured control flow into appropriate MLIR dialects
-before attempting LLVM/native output.
+to represent Core v0 scalar examples clearly and have golden tests plus MLIR
+verifier coverage for the relevant shape. The immediate next backend work is to
+lower mutable locals, general `if` shapes, and `while` before attempting
+LLVM/native output.

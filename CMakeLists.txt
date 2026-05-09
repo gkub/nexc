@@ -16,6 +16,19 @@ find_package(MLIR CONFIG
 
 if(MLIR_FOUND)
     message(STATUS "Found MLIR ${MLIR_VERSION}: ${MLIR_DIR}")
+
+    find_program(NEXC_MLIR_OPT_EXECUTABLE
+        NAMES mlir-opt
+        HINTS
+            ${LLVM_TOOLS_BINARY_DIR}
+            /usr/lib/llvm-18/bin
+    )
+
+    if(NEXC_MLIR_OPT_EXECUTABLE)
+        message(STATUS "Found mlir-opt: ${NEXC_MLIR_OPT_EXECUTABLE}")
+    else()
+        message(STATUS "mlir-opt not found; MLIR validation tests will be skipped")
+    endif()
 endif()
 
 function(nexc_target_warnings target)
@@ -88,6 +101,7 @@ if(MLIR_FOUND)
             MLIRIR
             MLIRFuncDialect
             MLIRArithDialect
+            MLIRSCFDialect
     )
 endif()
 nexc_target_warnings(nexc_mlir)
@@ -123,6 +137,23 @@ function(add_nexc_golden_diagnostic_test name mode input expected_stderr)
             -DEXPECTED_EXIT_CODE=1
             -DWORKING_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunGolden.cmake
+    )
+endfunction()
+
+function(add_nexc_mlir_validation_test name input)
+    if(NOT NEXC_MLIR_OPT_EXECUTABLE)
+        return()
+    endif()
+
+    add_test(
+        NAME ${name}
+        COMMAND ${CMAKE_COMMAND}
+            -DNEXC_EXECUTABLE=$<TARGET_FILE:nexc>
+            -DINPUT=${input}
+            -DMLIR_OPT_EXECUTABLE=${NEXC_MLIR_OPT_EXECUTABLE}
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${name}.mlir
+            -DWORKING_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunMlirVerify.cmake
     )
 endfunction()
 
@@ -213,6 +244,45 @@ add_nexc_golden_test(
     tests/golden/dump_mlir/function_call.mlir
 )
 
+add_nexc_golden_test(
+    dump_mlir_if_else_returns_golden
+    --dump-mlir
+    tests/semantic_if_else_returns.nexs
+    tests/golden/dump_mlir/if_else_returns.mlir
+)
+
+add_nexc_golden_test(
+    dump_mlir_comparison_golden
+    --dump-mlir
+    examples/comparison.nexs
+    tests/golden/dump_mlir/comparison.mlir
+)
+
+add_nexc_mlir_validation_test(
+    validate_mlir_return_42
+    examples/return_42.nexs
+)
+
+add_nexc_mlir_validation_test(
+    validate_mlir_scalar_expr
+    examples/scalar_expr.nexs
+)
+
+add_nexc_mlir_validation_test(
+    validate_mlir_function_call
+    examples/function_call.nexs
+)
+
+add_nexc_mlir_validation_test(
+    validate_mlir_if_else_returns
+    tests/semantic_if_else_returns.nexs
+)
+
+add_nexc_mlir_validation_test(
+    validate_mlir_comparison
+    examples/comparison.nexs
+)
+
 add_test(
     NAME semantic_check_add
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/add.nexs
@@ -226,6 +296,11 @@ add_test(
 add_test(
     NAME semantic_check_hello
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/hello.nexs
+)
+
+add_test(
+    NAME semantic_check_comparison
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/comparison.nexs
 )
 
 add_test(

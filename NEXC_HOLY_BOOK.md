@@ -824,6 +824,7 @@ types for one abstraction level. The current nex slice uses:
 - `builtin`: module containers and core MLIR infrastructure
 - `func`: function definitions, entry-block arguments, calls, and returns
 - `arith`: integer constants and arithmetic operations
+- `scf`: structured control flow such as `if` / `else`
 
 This small nex program:
 
@@ -844,7 +845,7 @@ module {
 }
 ```
 
-The lowering now also handles straight-line `i32` arithmetic and direct calls
+The lowering also handles straight-line scalar arithmetic and direct calls
 between nex functions:
 
 ```nex
@@ -857,19 +858,68 @@ fn main() -> i32 {
 }
 ```
 
+The newest slice lowers integer comparisons and returning `if` / `else`
+statements:
+
+```nex
+fn less_than(a: i32, b: i32) -> bool {
+    return a < b;
+}
+
+fn main() -> i32 {
+    if (less_than(40, 42)) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+```
+
+That produces:
+
+```mlir
+module {
+  func.func @less_than(%arg0: i32, %arg1: i32) -> i1 {
+    %0 = arith.cmpi slt, %arg0, %arg1 : i32
+    return %0 : i1
+  }
+  func.func @main() -> i32 {
+    %c40_i32 = arith.constant 40 : i32
+    %c42_i32 = arith.constant 42 : i32
+    %0 = call @less_than(%c40_i32, %c42_i32) : (i32, i32) -> i1
+    %1 = scf.if %0 -> (i32) {
+      %c1_i32 = arith.constant 1 : i32
+      scf.yield %c1_i32 : i32
+    } else {
+      %c0_i32 = arith.constant 0 : i32
+      scf.yield %c0_i32 : i32
+    }
+    return %1 : i32
+  }
+}
+```
+
+There are two important MLIR ideas packed into that output:
+
+- MLIR uses `i1` for a one-bit boolean value. nex calls the source type `bool`;
+  this lowering represents it as MLIR `i1`.
+- `scf.if` is an expression-like structured operation when it has a result. Each
+  branch computes a value and hands it back with `scf.yield`; the outer function
+  then returns the result of the whole `scf.if`.
+
 That produces:
 
 ```mlir
 module {
   func.func @add(%arg0: i32, %arg1: i32) -> i32 {
-    %2 = arith.addi %arg0, %arg1 : i32
-    return %2 : i32
+    %0 = arith.addi %arg0, %arg1 : i32
+    return %0 : i32
   }
   func.func @main() -> i32 {
     %c40_i32 = arith.constant 40 : i32
     %c2_i32 = arith.constant 2 : i32
-    %2 = func.call @add(%c40_i32, %c2_i32) : (i32, i32) -> i32
-    return %2 : i32
+    %0 = call @add(%c40_i32, %c2_i32) : (i32, i32) -> i32
+    return %0 : i32
   }
 }
 ```
@@ -926,7 +976,98 @@ fusion, bounds-check elimination, and realtime/concurrency analysis. Until one
 of those becomes concrete, using MLIR first avoids reinventing a large compiler
 middle end prematurely.
 
-### 11.3 Implementation Location
+### 11.3 Boolean And Comparison Lowering
+
+Core v0 source code uses `bool`, `true`, `false`, and operators such as `<` and
+`==`. MLIR does not have a nex-specific boolean type. In this slice:
+
+```text
+nex bool -> MLIR i1
+```
+
+`i1` means an integer type with one bit. That one bit is enough to represent
+false (`0`) and true (`1`).
+
+Integer comparisons lower through `arith.cmpi`:
+
+```mlir
+%0 = arith.cmpi slt, %arg0, %arg1 : i32
+```
+
+Read that as:
+
+```text
+compare two i32 values using signed-less-than, producing an i1 result
+```
+
+The predicate names are MLIR spellings:
+
+- `eq`: equal
+- `ne`: not equal
+- `slt`: signed less than
+- `sle`: signed less than or equal
+- `sgt`: signed greater than
+- `sge`: signed greater than or equal
+
+For now, lowering uses signed comparison predicates because the implemented MLIR
+slice only accepts `i32`. When unsigned integer lowering is expanded, the
+lowerer will need to choose unsigned predicates (`ult`, `ule`, `ugt`, `uge`) for
+`u*` source types.
+
+Unary `!` lowers as a comparison against false:
+
+```text
+!x  ->  x == false
+```
+
+That is intentionally boring and explicit. It keeps the first lowering easy to
+inspect before adding more clever canonicalization.
+
+### 11.4 Structured `if` Lowering
+
+The typed IR keeps control flow structured:
+
+```text
+If %condition
+  Then
+    Block
+      ...
+      ReturnValue %then_value
+  Else
+    Block
+      ...
+      ReturnValue %else_value
+```
+
+That maps naturally to MLIR's `scf.if` operation:
+
+```mlir
+%1 = scf.if %0 -> (i32) {
+  %c1_i32 = arith.constant 1 : i32
+  scf.yield %c1_i32 : i32
+} else {
+  %c0_i32 = arith.constant 0 : i32
+  scf.yield %c0_i32 : i32
+}
+return %1 : i32
+```
+
+This is not the same shape as low-level LLVM IR yet. There are no explicit
+branch labels in this text. `scf.if` preserves the high-level fact that the
+program has an `if` with two regions. Later MLIR passes can lower that structured
+operation into lower-level control flow.
+
+Why use `scf.yield` instead of returning directly inside each branch? Because an
+`scf.if` with a result behaves like an expression in MLIR: each branch must
+produce the value for the whole operation. The function-level `return` happens
+after the `scf.if` result exists.
+
+The current implementation only lowers the simple case where both branches
+return. That matches the first semantic test fixture and keeps the control-flow
+lowering small. General `if` statements that fall through, nested returning
+branches, mutable locals across branches, and `while` loops are later slices.
+
+### 11.5 Implementation Location
 
 The MLIR lowering layer lives under:
 
@@ -942,7 +1083,7 @@ core bridge between the two representations:
 
 ```text
 nex typed IR value `%2`
-  -> concrete MLIR Value produced by arith.addi, func.call, or a block argument
+  -> concrete MLIR Value produced by arith.addi, call, or a block argument
 ```
 
 The public wrapper remains small:
@@ -955,7 +1096,7 @@ The name still says `Textual` because the user-visible mode dumps MLIR text. The
 important implementation detail is that the text is produced by a real MLIR
 module, not by hand-concatenating strings.
 
-### 11.4 Installation And Tooling
+### 11.6 Installation And Tooling
 
 On Ubuntu 24.04, install LLVM/MLIR 18 development packages:
 
@@ -994,27 +1135,34 @@ Official setup references:
 On platforms without matching distro packages, building LLVM from source with
 `-DLLVM_ENABLE_PROJECTS=mlir` is the standard route documented by upstream LLVM.
 
-### 11.5 Current Command
+### 11.7 Current Command
 
 Current command:
 
 ```sh
-./nexc.sh mlir examples/function_call.nexs
+./nexc.sh mlir examples/comparison.nexs
 ```
 
 Current output:
 
 ```mlir
 module {
-  func.func @add(%arg0: i32, %arg1: i32) -> i32 {
-    %2 = arith.addi %arg0, %arg1 : i32
-    return %2 : i32
+  func.func @less_than(%arg0: i32, %arg1: i32) -> i1 {
+    %0 = arith.cmpi slt, %arg0, %arg1 : i32
+    return %0 : i1
   }
   func.func @main() -> i32 {
     %c40_i32 = arith.constant 40 : i32
-    %c2_i32 = arith.constant 2 : i32
-    %2 = func.call @add(%c40_i32, %c2_i32) : (i32, i32) -> i32
-    return %2 : i32
+    %c42_i32 = arith.constant 42 : i32
+    %0 = call @less_than(%c40_i32, %c42_i32) : (i32, i32) -> i1
+    %1 = scf.if %0 -> (i32) {
+      %c1_i32 = arith.constant 1 : i32
+      scf.yield %c1_i32 : i32
+    } else {
+      %c0_i32 = arith.constant 0 : i32
+      scf.yield %c0_i32 : i32
+    }
+    return %1 : i32
   }
 }
 ```
@@ -1028,14 +1176,20 @@ checked AST -> typed IR -> MLIR
 The generated MLIR can be checked by MLIR tooling:
 
 ```sh
-./nexc.sh mlir examples/function_call.nexs | mlir-opt --verify-diagnostics
+./nexc.sh mlir examples/comparison.nexs | mlir-opt --verify-diagnostics
 ```
 
-The current MLIR lowering is still intentionally incomplete. It supports
-straight-line `i32` literals, `+`, `-`, `*`, function parameters, direct function
-calls, and function returns. It does not yet lower module constants, mutable
-locals, strings, booleans, comparisons, built-in `print` / `println`, `if`,
-`while`, or runtime/native execution.
+CTest now does this automatically for selected MLIR examples when `mlir-opt` is
+available. The CMake configuration looks for the tool through the MLIR install
+metadata and the normal shell `PATH`; if it cannot find the tool, the validation
+tests are skipped rather than breaking frontend-only development machines.
+
+The current MLIR lowering is still intentionally incomplete. It supports scalar
+literals for `i32` and `bool`, `+`, `-`, `*`, integer comparisons, unary `!`,
+function parameters, direct function calls, function returns, and returning
+`if`/`else` statements. It does not yet lower module constants, mutable locals,
+strings, built-in `print` / `println`, general fallthrough `if`, nested returning
+control flow, `while`, or runtime/native execution.
 
 ## 12. CLI Inspection Modes
 
@@ -1052,7 +1206,7 @@ build/nexc --dump-tokens examples/minimal.nexs
 build/nexc --dump-ast examples/add.nexs
 build/nexc --dump-ast-dot examples/add.nexs
 build/nexc --dump-ir examples/add.nexs
-build/nexc --dump-mlir examples/function_call.nexs
+build/nexc --dump-mlir examples/comparison.nexs
 build/nexc --check examples/add.nexs
 ```
 
@@ -1082,6 +1236,8 @@ The current tests cover:
 - smoke checks for `--dump-tokens` and `--dump-ast`
 - golden output checks for token, AST, Graphviz DOT, typed IR, and MLIR
 dumps
+- conditional MLIR verifier checks for selected `--dump-mlir` outputs when
+`mlir-opt` is available
 - parser-negative fixtures
 - semantic success checks for valid examples
 - semantic-negative fixtures for type errors, undefined names, mutability,
@@ -1100,6 +1256,8 @@ tests/golden/dump_ir/add.ir.txt
 tests/golden/dump_mlir/return_42.mlir
 tests/golden/dump_mlir/scalar_expr.mlir
 tests/golden/dump_mlir/function_call.mlir
+tests/golden/dump_mlir/if_else_returns.mlir
+tests/golden/dump_mlir/comparison.mlir
 tests/golden/diagnostics/semantic_return_type_mismatch.stderr.txt
 ```
 
@@ -1122,6 +1280,24 @@ add_nexc_golden_test(name mode input expected)
 
 That keeps future tests easy to add.
 
+MLIR validation uses a separate helper:
+
+```text
+cmake/RunMlirVerify.cmake
+```
+
+and a separate CMake function:
+
+```cmake
+add_nexc_mlir_validation_test(name input)
+```
+
+This deliberately checks a different property from the golden tests. A golden
+file answers "did the printed text change?" The MLIR verifier answers "does MLIR
+accept this generated module as structurally valid?" Both matter: text stability
+is useful for review, while verifier acceptance catches broken lowering even if
+the output happens to look plausible.
+
 GitHub Actions runs the same build and CTest loop on pushes and pull requests:
 
 ```text
@@ -1141,6 +1317,8 @@ The current compiler does not yet implement:
 - precise signed negative constant values
 - formatting/interpolation for strings
 - runtime implementation for `print` / `println`
+- complete MLIR lowering for mutable locals, general `if`, `while`, strings,
+  built-in printing, and runtime calls
 - inter-file/module resolution
 - LLVM lowering
 - native code generation
@@ -1152,11 +1330,10 @@ plus typed IR dumps and a tiny MLIR slice, not a full compiler.
 
 The safest next steps are:
 
-1. Keep typed IR golden tests growing as new Core v0 forms are added.
-2. Grow MLIR lowering from `return 42` toward simple scalar expressions and calls.
-3. Keep MLIR output covered by golden tests and `mlir-opt` validation.
-4. Keep semantic tests growing as new frontend behavior appears.
-5. Consider a minimal `print_i32` runtime helper once backend lowering can
+1. Keep typed IR and MLIR tests growing as new Core v0 forms are added.
+2. Lower mutable locals, stores, and variable reads beyond parameter aliases.
+3. Lower `while` and more general `if` shapes.
+4. Consider a minimal `print_i32` runtime helper once backend lowering can
   represent simple calls.
 
 Lowering should stay boring at first. The goal is to prove the frontend can feed

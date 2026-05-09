@@ -1,0 +1,11 @@
+fn less_than(a: i32, b: i32) -> bool {
+    return a < b;
+}
+
+fn main() -> i32 {
+    if (less_than(40, 42)) {
+        return 1;
+    } else {
+        return 0;
+    }
+}

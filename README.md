@@ -40,8 +40,8 @@ The compiler currently supports:
 - AST text and Graphviz DOT dumps
 - semantic checking for Core v0 examples
 - typed IR dumps
-- MLIR lowering for simple `i32` returns, scalar arithmetic, function parameters,
-and direct function calls
+- MLIR lowering for simple scalar returns, arithmetic, integer comparisons,
+function parameters, direct function calls, and returning `if`/`else`
 
 It does **not** yet generate LLVM IR, native objects, or executable programs.
 
@@ -85,6 +85,8 @@ Use the root developer script for day-to-day work:
 ```
 
 That configures CMake, builds the compiler, and runs the CTest suite.
+When MLIR and `mlir-opt` are available, the test suite also validates generated
+MLIR modules with MLIR's verifier.
 
 Useful inspection commands:
 
@@ -93,7 +95,7 @@ Useful inspection commands:
 ./nexc.sh check-file examples/hello.nexs
 ./nexc.sh ast examples/add.nexs
 ./nexc.sh ir examples/add.nexs
-./nexc.sh mlir examples/function_call.nexs
+./nexc.sh mlir examples/comparison.nexs
 ./nexc.sh ast-graph examples/add.nexs
 ```
 

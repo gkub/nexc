@@ -166,30 +166,41 @@ Core v0 programs toward future MLIR/LLVM lowering.
 The first lowering slice builds a tiny MLIR module from typed IR and prints it:
 
 ```sh
-./nexc.sh mlir examples/function_call.nexs
+./nexc.sh mlir examples/comparison.nexs
 ```
 
 Current output:
 
 ```mlir
 module {
-  func.func @add(%arg0: i32, %arg1: i32) -> i32 {
-    %2 = arith.addi %arg0, %arg1 : i32
-    return %2 : i32
+  func.func @less_than(%arg0: i32, %arg1: i32) -> i1 {
+    %0 = arith.cmpi slt, %arg0, %arg1 : i32
+    return %0 : i1
   }
   func.func @main() -> i32 {
     %c40_i32 = arith.constant 40 : i32
-    %c2_i32 = arith.constant 2 : i32
-    %2 = func.call @add(%c40_i32, %c2_i32) : (i32, i32) -> i32
-    return %2 : i32
+    %c42_i32 = arith.constant 42 : i32
+    %0 = call @less_than(%c40_i32, %c42_i32) : (i32, i32) -> i1
+    %1 = scf.if %0 -> (i32) {
+      %c1_i32 = arith.constant 1 : i32
+      scf.yield %c1_i32 : i32
+    } else {
+      %c0_i32 = arith.constant 0 : i32
+      scf.yield %c0_i32 : i32
+    }
+    return %1 : i32
   }
 }
 ```
 
 This is intentionally narrow but no longer just `return 42`. It proves the
-lowering boundary using the real MLIR C++ API for straight-line `i32`
-expressions, function parameters, and direct calls before the project attempts
-mutable locals, booleans, control flow, runtime calls, or LLVM/native output.
+lowering boundary using the real MLIR C++ API for scalar expressions, function
+parameters, direct calls, integer comparisons, and returning `if`/`else` before
+the project attempts mutable locals, loops, runtime calls, or LLVM/native output.
+
+When `mlir-opt` is available, CTest also validates selected `--dump-mlir`
+outputs with MLIR's verifier. Golden tests catch text drift; verifier tests catch
+structurally invalid MLIR.
 
 ## What Exists Now
 
@@ -206,8 +217,9 @@ The current frontend supports the Core v0 parser surface:
 - textual and Graphviz AST dumps
 - semantic checking with `--check`
 - typed IR dumping with `--dump-ir`
-- MLIR dumping with `--dump-mlir` for simple `i32` returns, arithmetic, and
-  direct function calls
+- MLIR dumping with `--dump-mlir` for simple scalar returns, arithmetic,
+  integer comparisons, direct function calls, and returning `if`/`else`
+- conditional `mlir-opt` validation for generated MLIR in the test suite
 
 Semantic analysis intentionally remains small. It does not yet implement
 coercions/promotions, definite assignment analysis, arbitrary constant-expression
