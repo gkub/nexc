@@ -1,34 +1,36 @@
 # nex Reference Documentation
 
-This directory is the long-lived, user-facing reference for the nex language and
-its toolchain.
+Long-lived, user-facing reference for the nex language and its toolchain—contrasted with tutorial prose in `docs/user/`, design drafts in `docs/design/`, and the educational compiler tour in `NEXC_HOLY_BOOK.md`.
 
-The goal is to grow this into the primary documentation surface in the style of
-established language references (C/C++/Python-style structure): precise,
-navigable, and stable as the language evolves.
+## Contents
 
-## Structure
+| Section | Role |
+| -------- | ---- |
+| [language/](language/README.md) | Normative language rules by topic (types, statements, builtins, …). |
+| [toolchain/](toolchain/README.md) | How to invoke `nexc`, build, test, interpret dumps and diagnostics. |
+| [runtime/](runtime/README.md) | Intended home for stable runtime/stdlib contracts; today mostly bootstrap notes. |
 
-- `language/`: normative language reference by feature area
-- `toolchain/`: compiler CLI, build/test flow, diagnostics, output formats
-- `runtime/`: runtime and standard-library-facing APIs as they become stable
+**Ambiguous names**
+
+- **“Reference” vs “Core v0”:** Milestone rules still live in [`docs/language/core_v0.md`](../language/core_v0.md). Reference pages describe **what the current compiler does**, including extensions (for example local fixed arrays) that may run ahead of that milestone doc.
+- **`nexc.sh` vs `build/nexc`:** The shell helper automates configure/build/test; **`build/nexc` is the canonical CLI** surface documented under toolchain.
 
 ## Scope Rules
 
 - Put stable user-facing behavior here.
 - Keep design brainstorming in `docs/design/`.
 - Keep implementation walkthroughs in `NEXC_HOLY_BOOK.md`.
-- Keep milestone snapshots (like `core_v0`) as historical/versioned baselines.
+- Keep milestone snapshots (like `core_v0`) as historical/versioned baselines where they already exist.
 
 ## Versioning Strategy
 
-- `language/core_v0.md` remains the canonical milestone baseline.
-- New references should be additive and forward-looking.
+- `docs/language/core_v0.md` remains the canonical milestone baseline for “original Core v0 shape.”
+- New reference pages should be additive and forward-looking.
 - When behavior changes, update reference docs and tests in the same change.
 
-## Build Order (Suggested)
+## Suggested Build Order (for doc authors)
 
-1. Language reference skeleton pages
-2. Toolchain reference pages (`build/nexc`, flags, modes, diagnostics)
-3. Runtime/I/O reference pages once API contracts stabilize
-4. Cross-links between tutorial, reference, and design notes
+1. Language reference pages stay authoritative per feature area.
+2. Toolchain reference stays aligned with `build/nexc`, CMake, and CTest.
+3. Runtime reference grows once APIs stabilize beyond `runtime/nex_runtime.c`.
+4. Cross-link tutorial ↔ reference ↔ design when topics overlap.
