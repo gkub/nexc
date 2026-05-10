@@ -151,6 +151,7 @@ add_library(nexc_frontend
     src/frontend/parser.cpp
     src/frontend/semantic.cpp
     src/frontend/source.cpp
+    src/frontend/string_literal_decode.cpp
     src/frontend/token.cpp
 )
 
@@ -661,6 +662,13 @@ add_nexc_executable_stdout_test(
     "Hello, world!\n"
 )
 
+add_nexc_executable_stdout_test(
+    run_executable_format_print_stdout
+    examples/format_print.nexs
+    0
+    "x=42\n"
+)
+
 add_nexc_executable_stdin_stdout_test(
     run_executable_stdin_echo
     examples/stdin_echo.nexs
@@ -695,6 +703,11 @@ add_test(
 add_test(
     NAME semantic_check_hello
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/hello.nexs
+)
+
+add_test(
+    NAME semantic_check_format_print
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/format_print.nexs
 )
 
 add_test(

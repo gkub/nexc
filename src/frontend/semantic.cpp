@@ -1,5 +1,7 @@
 #include "nexc/frontend/semantic.h"
 
+#include "nexc/frontend/string_literal_decode.h"
+
 #include <algorithm>
 #include <charconv>
 #include <cstdint>
@@ -320,15 +322,17 @@ private:
         // Built-ins enter the same function table as user functions so call
         // checking can be uniform. `isBuiltin` lets us reject source attempts to
         // redefine them.
+        // `print` / `println` use Rust-style format strings (`"{}"`) checked in
+        // analyzeFormatPrintCall; arity is not fixed here.
         functions_["print"] = FunctionSymbol{
             .nameSpan = builtinSpan,
-            .parameterTypes = {str},
+            .parameterTypes = {},
             .returnType = voidType,
             .isBuiltin = true,
         };
         functions_["println"] = FunctionSymbol{
             .nameSpan = builtinSpan,
-            .parameterTypes = {str},
+            .parameterTypes = {},
             .returnType = voidType,
             .isBuiltin = true,
         };
@@ -960,6 +964,94 @@ private:
         return ExprInfo{.type = Type{}, .isConstant = false};
     }
 
+    static bool isFormatSubstitutionType(Type type) {
+        return type.isInteger() || type.isBool() || type.isString();
+    }
+
+    // `print("…{}…", …)` / `println`: Rust-style placeholders, checked against
+    // compile-time string literal (first argument).
+    ExprInfo analyzeFormatPrintCall(const CallExpr& call, const std::string& builtinName) {
+        const Type voidType = builtinScalar(BuiltinTypeKind::Void);
+        const Type strType = builtinScalar(BuiltinTypeKind::Str);
+        if (call.arguments.empty()) {
+            diagnostics_.error(call.span, "`" + builtinName +
+                                              "` requires at least a format string argument");
+            return ExprInfo{.type = voidType, .isConstant = false};
+        }
+
+        const auto* fmtLit = dynamic_cast<const StringLiteralExpr*>(call.arguments[0].get());
+        if (!fmtLit) {
+            // `print(x)` / `println(x)` when `x` is `str`: legacy passthrough (no `{}`
+            // placeholders). Multiple arguments always require a compile-time format
+            // literal so placeholders can be checked.
+            if (call.arguments.size() != 1) {
+                diagnostics_.error(call.arguments[0]->span,
+                                   "`" + builtinName +
+                                       "` with multiple arguments requires a string "
+                                       "literal format as the first argument");
+                for (std::size_t i = 1; i < call.arguments.size(); ++i) {
+                    analyzeExpr(*call.arguments[i], std::nullopt);
+                }
+                return ExprInfo{.type = voidType, .isConstant = false};
+            }
+
+            ExprInfo arg = analyzeExpr(*call.arguments[0], strType);
+            if (!sameType(arg.type, strType)) {
+                diagnostics_.error(call.arguments[0]->span,
+                                   "`" + builtinName +
+                                       "` expects either a format string literal or "
+                                       "one `str` argument");
+            }
+            return ExprInfo{.type = voidType, .isConstant = false};
+        }
+
+        std::string decoded;
+        std::string decErr;
+        if (!decodeStringLiteralContent(fmtLit->raw, decoded, &decErr)) {
+            diagnostics_.error(fmtLit->span, decErr);
+            for (std::size_t i = 1; i < call.arguments.size(); ++i) {
+                analyzeExpr(*call.arguments[i], std::nullopt);
+            }
+            return ExprInfo{.type = voidType, .isConstant = false};
+        }
+
+        std::vector<std::string> literals;
+        std::string splitErr;
+        if (!splitFormatString(decoded, literals, splitErr)) {
+            diagnostics_.error(fmtLit->span, splitErr);
+            for (std::size_t i = 1; i < call.arguments.size(); ++i) {
+                analyzeExpr(*call.arguments[i], std::nullopt);
+            }
+            return ExprInfo{.type = voidType, .isConstant = false};
+        }
+
+        const std::size_t holes = literals.size() - 1;
+        if (call.arguments.size() != 1 + holes) {
+            diagnostics_.error(call.span,
+                               "`" + builtinName + "` format string has " +
+                                   std::to_string(holes) +
+                                   " `{}` placeholder(s), but callsite has " +
+                                   std::to_string(call.arguments.size()) +
+                                   " argument(s) (expected " + std::to_string(1 + holes) + ")");
+        }
+
+        const std::size_t toCheck =
+            std::min(call.arguments.size() > 0 ? call.arguments.size() - 1 : 0, holes);
+        for (std::size_t i = 0; i < toCheck; ++i) {
+            ExprInfo arg = analyzeExpr(*call.arguments[i + 1], std::nullopt);
+            if (!arg.type.isInvalid() && !isFormatSubstitutionType(arg.type)) {
+                diagnostics_.error(call.arguments[i + 1]->span,
+                                   "format argument has type `" + typeName(arg.type) +
+                                       "`; supported types are integers, bool, and str");
+            }
+        }
+        for (std::size_t i = 1 + toCheck; i < call.arguments.size(); ++i) {
+            analyzeExpr(*call.arguments[i], std::nullopt);
+        }
+
+        return ExprInfo{.type = voidType, .isConstant = false};
+    }
+
     // Analyze a direct function call expression.
     //
     // This resolves the callee name, checks argument count and argument types,
@@ -990,6 +1082,11 @@ private:
         }
 
         const FunctionSymbol& symbol = function->second;
+        if (symbol.isBuiltin &&
+            (callee->name == "print" || callee->name == "println")) {
+            return analyzeFormatPrintCall(call, callee->name);
+        }
+
         if (call.arguments.size() != symbol.parameterTypes.size()) {
             diagnostics_.error(call.span,
                                "function `" + callee->name + "` expects " +

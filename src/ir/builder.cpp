@@ -87,12 +87,12 @@ private:
         const Type voidType{.kind = BuiltinTypeKind::Void};
 
         functions_["print"] = FunctionSignature{
-            .parameterTypes = {str},
+            .parameterTypes = {},
             .returnType = voidType,
             .isBuiltin = true,
         };
         functions_["println"] = FunctionSignature{
-            .parameterTypes = {str},
+            .parameterTypes = {},
             .returnType = voidType,
             .isBuiltin = true,
         };
@@ -640,6 +640,21 @@ private:
         const auto signature = functions_.find(callee->name);
         if (signature == functions_.end()) {
             throw std::logic_error("typed IR call target was not resolved");
+        }
+
+        if (signature->second.isBuiltin &&
+            (callee->name == "print" || callee->name == "println")) {
+            Operation op{
+                .kind = Operation::Kind::Call,
+                .span = call.span,
+                .text = callee->name,
+                .isBuiltin = true,
+            };
+            for (const std::unique_ptr<Expr>& argument : call.arguments) {
+                op.arguments.push_back(buildExpr(*argument, std::nullopt));
+            }
+            append(std::move(op));
+            return std::nullopt;
         }
 
         Operation op{

@@ -68,8 +68,8 @@ Discarding non-`void` call results is currently rejected.
 
 Current built-ins:
 
-- `print(str) -> void`
-- `println(str) -> void`
+- `print(fmt: str, ...) -> void` — format string literal plus `{}` placeholders (see built-ins reference), or one `str` value with no extra arguments.
+- `println(fmt: str, ...) -> void` — same as `print`, then one newline after the formatted output.
 - `readln() -> str`
 - `parse_i32(str) -> i32`
 - `parse_u64(str) -> u64`

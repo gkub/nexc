@@ -1,0 +1,4 @@
+fn main() -> void {
+    println("x={}", 40 + 2);
+    return;
+}

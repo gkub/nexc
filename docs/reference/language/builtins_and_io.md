@@ -27,8 +27,8 @@ Define current language-level built-ins for observable I/O behavior.
 Current built-ins:
 
 ```text
-print(str) -> void
-println(str) -> void
+print(fmt: str, ...) -> void
+println(fmt: str, ...) -> void
 readln() -> str
 parse_i32(str) -> i32
 parse_u64(str) -> u64
@@ -60,9 +60,18 @@ fn main() -> void {
 
 ## Printing
 
-- `print(str)` writes exactly the string bytes.
-- `println(str)` writes string bytes then one newline.
-- Printing currently expects `str` only.
+Rust-style formatting applies when the **first** argument is a **string literal**:
+
+- Placeholders are exactly `{}` (one pair of braces). Literal `{` / `}` escapes may be added later.
+- Each `{}` matches one following argument, in order. Supported argument types: integers (`i*`/`u*`), `bool`, and `str`.
+- `print("…{}…", …)` writes the formatted bytes only.
+- `println("…{}…", …)` writes the formatted bytes, then **one** newline (`\n`) after the whole expansion.
+
+Legacy convenience when there are **no** placeholders:
+
+- `print(x)` / `println(x)` with a **single** `str` expression (not necessarily a literal), e.g. `println(readln())`, writes that string; `println` still appends one trailing newline.
+
+Escape sequences in string literals follow the usual Core v0 rules (`\n`, `\t`, `\"`, `\\`, `\r`).
 
 ## Input
 

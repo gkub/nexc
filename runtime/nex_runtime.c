@@ -213,3 +213,48 @@ _Bool nex_runtime_parse_bool(const char* data, uint64_t length) {
 _Bool nex_runtime_last_ok_flag(void) {
     return nex_runtime_last_ok ? 1 : 0;
 }
+
+static void print_u64_decimal(uint64_t u) {
+    if (u == 0) {
+        nex_runtime_print_str("0", 1);
+        return;
+    }
+    char buf[32];
+    int n = 0;
+    uint64_t t = u;
+    while (t > 0) {
+        buf[n++] = (char)('0' + (t % 10));
+        t /= 10;
+    }
+    char forward[32];
+    for (int i = 0; i < n; ++i) {
+        forward[i] = buf[n - 1 - i];
+    }
+    nex_runtime_print_str(forward, (uint64_t)n);
+}
+
+void nex_runtime_print_u64(uint64_t v) {
+    print_u64_decimal(v);
+}
+
+/*
+ * Signed decimal printing without relying on printf. Negative magnitudes use
+ * unsigned two's-complement arithmetic so `INT64_MIN` is handled portably.
+ */
+void nex_runtime_print_i64(int64_t v) {
+    uint64_t uv = (uint64_t)v;
+    if ((int64_t)uv >= 0) {
+        print_u64_decimal(uv);
+        return;
+    }
+    nex_runtime_print_str("-", 1);
+    print_u64_decimal(~uv + 1);
+}
+
+void nex_runtime_print_bool(_Bool v) {
+    if (v) {
+        nex_runtime_print_str("true", 4);
+    } else {
+        nex_runtime_print_str("false", 5);
+    }
+}

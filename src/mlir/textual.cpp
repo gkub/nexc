@@ -16,14 +16,19 @@
 #include "llvm/Support/raw_os_ostream.h"
 #endif
 
+#include "nexc/frontend/string_literal_decode.h"
+
 #include <algorithm>
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <ostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace nexc::mlir {
 
@@ -58,50 +63,54 @@ ir::ValueRef requiredValue(const std::optional<ir::ValueRef>& value,
     return *value;
 }
 
-// Decode the raw source spelling of a Core v0 string literal into bytes.
-//
-// The lexer/parser preserve string literals with their surrounding quotes and
-// backslash escapes so dumps can show exactly what the user typed. Runtime
-// lowering needs the actual byte sequence, so this helper performs the small
-// Core v0 escape decoding step: \" \\ \n \t and \r.
-std::string decodeStringLiteral(std::string_view raw) {
-    if (raw.size() < 2 || raw.front() != '"' || raw.back() != '"') {
-        throw std::logic_error("string literal lowering expected quoted source text");
-    }
-
+std::string decodeStringLiteralOrThrow(std::string_view raw) {
     std::string decoded;
-    for (std::size_t i = 1; i + 1 < raw.size(); ++i) {
-        const char c = raw[i];
-        if (c != '\\') {
-            decoded.push_back(c);
-            continue;
-        }
-
-        if (i + 2 >= raw.size()) {
-            throw std::logic_error("string literal ended during escape decoding");
-        }
-        const char escaped = raw[++i];
-        switch (escaped) {
-        case '"':
-            decoded.push_back('"');
-            break;
-        case '\\':
-            decoded.push_back('\\');
-            break;
-        case 'n':
-            decoded.push_back('\n');
-            break;
-        case 't':
-            decoded.push_back('\t');
-            break;
-        case 'r':
-            decoded.push_back('\r');
-            break;
-        default:
-            throw std::logic_error("unsupported string escape reached lowering");
-        }
+    std::string err;
+    if (!decodeStringLiteralContent(raw, decoded, &err)) {
+        throw std::logic_error(err.empty() ? "invalid string literal" : err);
     }
     return decoded;
+}
+
+std::optional<std::string> findStringLiteralRaw(const ir::Function& fn,
+                                              std::size_t valueId) {
+    std::optional<std::string> found;
+    const std::function<void(const ir::Block&)> scan = [&](const ir::Block& block) {
+        if (found) {
+            return;
+        }
+        for (const ir::Operation& op : block.operations) {
+            if (op.kind == ir::Operation::Kind::StringLiteral && op.result &&
+                op.result->id == valueId) {
+                found = op.text;
+                return;
+            }
+            if (op.kind == ir::Operation::Kind::If) {
+                if (op.thenBlock) {
+                    scan(*op.thenBlock);
+                }
+                if (found) {
+                    return;
+                }
+                if (op.elseBlock) {
+                    scan(*op.elseBlock);
+                }
+            }
+            if (op.kind == ir::Operation::Kind::While) {
+                if (op.conditionBlock) {
+                    scan(*op.conditionBlock);
+                }
+                if (found) {
+                    return;
+                }
+                if (op.bodyBlock) {
+                    scan(*op.bodyBlock);
+                }
+            }
+        }
+    };
+    scan(fn.body);
+    return found;
 }
 
 #ifdef NEXC_HAS_REAL_MLIR
@@ -271,7 +280,8 @@ public:
         : builder_(builder),
           function_(function),
           constants_(constants),
-          loc_(builder.getUnknownLoc()) {}
+          loc_(builder.getUnknownLoc()),
+          formatLiteralCounter_(0) {}
 
     // Create the MLIR `func.func`, create its entry block, seed parameter locals,
     // and lower the function body into that entry block.
@@ -432,7 +442,7 @@ private:
     // and can eventually support arbitrary byte strings.
     void lowerStringLiteral(const ir::Operation& operation) {
         const ir::ValueRef result = requiredValue(operation.result, "string literal");
-        const std::string bytes = decodeStringLiteral(operation.text);
+        const std::string bytes = decodeStringLiteralOrThrow(operation.text);
         const std::string symbol =
             "__nex_str_" + function_.name + "_" + std::to_string(result.id);
 
@@ -857,9 +867,156 @@ private:
 
     // Lower Core v0 printing built-ins to bootstrap runtime calls.
     //
-    // The source language owns `print` and `println`; the runtime names are just
-    // the binary ABI we call after lowering. Both built-ins accept a single `str`,
-    // which lowerStringLiteral() represented as pointer + length.
+    // `print` / `println` use Rust-style `"…{}…"` format strings (first argument
+    // must be a string literal). Segments lower to `nex_runtime_print_str`; typed
+    // holes lower to small `nex_runtime_print_*` helpers.
+    StringValue emitGlobalFormatBytes(const std::string& bytes) {
+        const std::string symbol =
+            "__nex_fmt_" + function_.name + "_" + std::to_string(formatLiteralCounter_++);
+        const ::mlir::Type i8 = builder_.getI8Type();
+        const ::mlir::Type arrayType =
+            ::mlir::LLVM::LLVMArrayType::get(i8, static_cast<unsigned>(bytes.size()));
+
+        ::mlir::ModuleOp module = functionModule();
+        {
+            ::mlir::OpBuilder::InsertionGuard guard(builder_);
+            builder_.setInsertionPointToStart(module.getBody());
+            if (!module.lookupSymbol<::mlir::LLVM::GlobalOp>(symbol)) {
+                builder_.create<::mlir::LLVM::GlobalOp>(
+                    loc_, arrayType, true, ::mlir::LLVM::Linkage::Private,
+                    symbol, builder_.getStringAttr(bytes), 0, 0);
+            }
+        }
+
+        auto address = builder_.create<::mlir::LLVM::AddressOfOp>(
+            loc_, ::mlir::LLVM::LLVMPointerType::get(builder_.getContext()),
+            symbol);
+        auto length = builder_.create<::mlir::arith::ConstantIntOp>(
+            loc_, static_cast<std::int64_t>(bytes.size()), 64);
+        return StringValue{.data = address.getResult(), .length = length.getResult()};
+    }
+
+    void emitRuntimePrintStr(const StringValue& string) {
+        ensureRuntimePrintDeclaration("nex_runtime_print_str");
+        builder_.create<::mlir::func::CallOp>(
+            loc_, "nex_runtime_print_str", ::mlir::TypeRange{},
+            ::mlir::ValueRange{string.data, string.length});
+    }
+
+    void ensureRuntimePrintI64Declaration() {
+        ensureRuntimeFunctionDeclaration("nex_runtime_print_i64", {builder_.getI64Type()},
+                                         {});
+    }
+
+    void ensureRuntimePrintU64Declaration() {
+        ensureRuntimeFunctionDeclaration("nex_runtime_print_u64", {builder_.getI64Type()},
+                                         {});
+    }
+
+    void ensureRuntimePrintBoolDeclaration() {
+        ensureRuntimeFunctionDeclaration("nex_runtime_print_bool", {builder_.getI1Type()},
+                                         {});
+    }
+
+    ::mlir::Value widenIntegerArgumentToI64(ir::ValueRef ref) {
+        ::mlir::Value value = lookupValue(ref);
+        const ir::Type type = ref.type;
+        const unsigned width = integerBitWidth(type);
+        if (width == 0 || width > 64) {
+            throw std::logic_error("integer format widening expects a fixed-width integer");
+        }
+        const auto i64Ty = builder_.getI64Type();
+        if (width == 64) {
+            return value;
+        }
+        if (isUnsignedInteger(type)) {
+            return builder_.create<::mlir::arith::ExtUIOp>(loc_, i64Ty, value).getResult();
+        }
+        return builder_.create<::mlir::arith::ExtSIOp>(loc_, i64Ty, value).getResult();
+    }
+
+    void lowerOneFormatArgument(ir::ValueRef ref) {
+        const ir::Type type = ref.type;
+        if (type.kind == BuiltinTypeKind::Bool) {
+            ensureRuntimePrintBoolDeclaration();
+            builder_.create<::mlir::func::CallOp>(
+                loc_, "nex_runtime_print_bool", ::mlir::TypeRange{},
+                ::mlir::ValueRange{lookupValue(ref)});
+            return;
+        }
+        if (type.kind == BuiltinTypeKind::Str) {
+            emitRuntimePrintStr(lookupString(ref));
+            return;
+        }
+        if (type.isInteger()) {
+            ::mlir::Value wide = widenIntegerArgumentToI64(ref);
+            if (isUnsignedInteger(type)) {
+                ensureRuntimePrintU64Declaration();
+                builder_.create<::mlir::func::CallOp>(
+                    loc_, "nex_runtime_print_u64", ::mlir::TypeRange{},
+                    ::mlir::ValueRange{wide});
+            } else {
+                ensureRuntimePrintI64Declaration();
+                builder_.create<::mlir::func::CallOp>(
+                    loc_, "nex_runtime_print_i64", ::mlir::TypeRange{},
+                    ::mlir::ValueRange{wide});
+            }
+            return;
+        }
+
+        throw std::logic_error("unsupported format argument type in MLIR lowering");
+    }
+
+    void lowerFormattedPrintBuiltin(const ir::Operation& operation, bool newlineAtEnd) {
+        if (operation.arguments.empty()) {
+            throw std::logic_error("formatted print expects at least a format string");
+        }
+
+        const std::optional<std::string> rawFmt =
+            findStringLiteralRaw(function_, operation.arguments[0].id);
+        if (!rawFmt) {
+            // Dynamic `str` with no placeholders (`println(readln())`): single
+            // runtime print of pointer+length.
+            if (operation.arguments.size() != 1) {
+                throw std::logic_error(
+                    "formatted print with multiple arguments requires a string literal "
+                    "format operand");
+            }
+            emitRuntimePrintStr(lookupString(operation.arguments[0]));
+            if (newlineAtEnd) {
+                emitRuntimePrintStr(emitGlobalFormatBytes(std::string("\n")));
+            }
+            return;
+        }
+
+        const std::string decoded = decodeStringLiteralOrThrow(*rawFmt);
+        std::vector<std::string> literals;
+        std::string splitErr;
+        if (!splitFormatString(decoded, literals, splitErr)) {
+            throw std::logic_error(splitErr);
+        }
+
+        const std::size_t holes = literals.size() - 1;
+        if (operation.arguments.size() != 1 + holes) {
+            throw std::logic_error("internal error: format arity mismatch at lowering");
+        }
+
+        for (std::size_t i = 0; i < holes; ++i) {
+            if (!literals[i].empty()) {
+                emitRuntimePrintStr(emitGlobalFormatBytes(literals[i]));
+            }
+            lowerOneFormatArgument(operation.arguments[i + 1]);
+        }
+
+        if (!literals.empty() && !literals[holes].empty()) {
+            emitRuntimePrintStr(emitGlobalFormatBytes(literals[holes]));
+        }
+
+        if (newlineAtEnd) {
+            emitRuntimePrintStr(emitGlobalFormatBytes(std::string("\n")));
+        }
+    }
+
     void lowerBuiltinCall(const ir::Operation& operation) {
         if (operation.text == "readln") {
             lowerReadlnBuiltin(operation);
@@ -875,18 +1032,12 @@ private:
             return;
         }
 
-        if (operation.arguments.size() != 1) {
-            throw std::logic_error("print/println lowering expected one argument");
+        if (operation.text == "print" || operation.text == "println") {
+            lowerFormattedPrintBuiltin(operation, operation.text == "println");
+            return;
         }
 
-        const StringValue string = lookupString(operation.arguments[0]);
-        const std::string runtimeName =
-            operation.text == "println" ? "nex_runtime_println_str"
-                                        : "nex_runtime_print_str";
-        ensureRuntimePrintDeclaration(runtimeName);
-        builder_.create<::mlir::func::CallOp>(
-            loc_, runtimeName, ::mlir::TypeRange{},
-            ::mlir::ValueRange{string.data, string.length});
+        throw std::logic_error("unknown builtin in MLIR lowering");
     }
 
     // Lower `readln() -> str` to the tiny stdin runtime bridge.
@@ -1296,6 +1447,7 @@ private:
     ::mlir::Location loc_;
     std::unordered_map<std::size_t, ::mlir::Value> values_;
     std::unordered_map<std::size_t, StringValue> strings_;
+    std::size_t formatLiteralCounter_;
     // directLocals_ maps immutable parameter locals to existing MLIR block
     // arguments. No memory is needed for them in the current Core v0 slice.
     std::unordered_map<std::size_t, ::mlir::Value> directLocals_;

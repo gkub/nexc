@@ -1,0 +1,4 @@
+fn main() -> void {
+    print("test{}\nlol\n", 400-53);
+    return;
+}
