@@ -4,10 +4,17 @@
 
 namespace nexc::ir {
 
+Type Type::elementType() const {
+    return Type{.shape = Shape::Scalar, .kind = elementKind};
+}
+
 // Keep integer classification close to the IR type wrapper. Later, if Type
 // grows beyond BuiltinTypeKind, lowering code can continue asking this semantic
 // question without knowing the exact representation.
 bool Type::isInteger() const {
+    if (shape != Shape::Scalar) {
+        return false;
+    }
     switch (kind) {
     case BuiltinTypeKind::I8:
     case BuiltinTypeKind::I16:
@@ -31,6 +38,15 @@ bool Type::isInteger() const {
 // The IR currently reuses the frontend spelling for built-in type names. That
 // keeps AST dumps, semantic diagnostics, and IR dumps visually consistent.
 std::string_view typeName(Type type) {
+    static thread_local std::string scratch;
+    if (type.shape == Type::Shape::FixedArray) {
+        scratch = "[";
+        scratch += builtinTypeName(type.elementKind);
+        scratch += "; ";
+        scratch += std::to_string(type.arrayLength);
+        scratch += "]";
+        return scratch;
+    }
     return builtinTypeName(type.kind);
 }
 

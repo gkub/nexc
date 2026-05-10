@@ -1,0 +1,8 @@
+// Fixed-size arrays: `[T; N]` type, array literals, indexing, and mut element store.
+
+fn main() -> i32 {
+    let xs: [i32; 3] = [10, 20, 30];
+    let mut ys: [i32; 2] = [1, 2];
+    ys[0] = 40;
+    return xs[1] + ys[0];
+}

@@ -69,3 +69,34 @@ return xs[0];
 That gives the compiler a concrete layout problem without dragging in heap
 allocation. Growable vectors can wait until the language has ownership,
 allocation, and error handling.
+
+## What `[T; N]` Means (Normative For This Repo)
+
+`[T; N]` is the **type** of a fixed-length array: `N` identical slots of type `T`,
+where `N` is a **compile-time** integer literal (and eventually other `const`
+expressions). It is **not** a growable buffer and **not** a slice; those are
+separate concepts (see [Recommended Order](#recommended-order)).
+
+Surface syntax (target shape, not all implemented yet):
+
+- **Array type:** `[` element-type `;` length `]` — example `[i32; 4]`.
+- **Array literal:** `[` expr `,` expr `,` … `]` — length must match the context
+  type when one is known.
+- **Index:** `primary `[` index-expr `]`** — loads one element.
+
+**Locals path is implemented** (ranked `memref`, `arith.index_cast` for dynamic
+indices, `run_executable_array_fixed`). ABI (`fn` parameters/returns), `const`
+arrays, and nested arrays remain future work.
+
+## Implementation Handoff Checklist (Arrays)
+
+**Local fixed arrays are implemented** in `nexc` (stack `memref`s, indexed
+load/store). Keep this list when extending the surface:
+
+1. **Language reference:** `docs/reference/language/types.md`,
+   `docs/reference/language/expressions.md`, `docs/reference/language/statements.md`.
+2. **Future:** array **parameters** / **returns** (ABI), **`const`** array
+   initializers, nested `[ [T; N]; M ]`, **`str` arrays**.
+3. **Tests:** `examples/array_fixed.nexs`, CTest `run_executable_array_fixed`,
+   `semantic_check_array_fixed`.
+4. **This file:** update open questions when slices/vectors split from `[T; N]`.

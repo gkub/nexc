@@ -6,6 +6,7 @@
 - [Status](#status)
 - [Expression Forms](#expression-forms)
 - [Operator Precedence](#operator-precedence)
+- [Arrays And Indexing](#arrays-and-indexing)
 - [Type Rules (Current)](#type-rules-current)
 - [Logical Operators Note](#logical-operators-note)
 - [Examples](#examples)
@@ -33,12 +34,15 @@ Current expression forms:
 - unary operators: `-`, `!`
 - binary operators: `+`, `-`, `*`, `/`, `%`, comparisons, equality, `&&`, `||`
 - parenthesized expressions
+- array literals: `[expr, expr, …]` (length must match the contextual `[T; N]` type,
+  or types must agree for inference)
+- postfix indexing: `expr[expr]` on an array value
 
 ## Operator Precedence
 
 From highest to lowest:
 
-1. function call
+1. postfix: calls `f(args)`, then indexing `a[i]` (left-associative; e.g. `f()[0]`)
 2. unary (`-`, `!`)
 3. multiplicative (`*`, `/`, `%`)
 4. additive (`+`, `-`)
@@ -46,6 +50,13 @@ From highest to lowest:
 6. equality (`==`, `!=`)
 7. logical and (`&&`)
 8. logical or (`||`)
+
+## Arrays And Indexing
+
+- An array **literal** lists element expressions separated by commas inside `[` `]`.
+- An array **load** is postfix: the base expression must have a fixed array type;
+  the index must be an integer type (`i32` is typical).
+- Assignment to `name[index]` requires `let mut` on the array binding.
 
 ## Type Rules (Current)
 

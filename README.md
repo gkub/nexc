@@ -53,7 +53,8 @@ booleans, module constants, mutable local storage, assignment, function calls,
 eager `&&` / `||`
 - string literal lowering to global bytes plus length
 - LLVM IR dumping with `llvm-as` validation when LLVM tools are available
-- native executable generation using `clang` as the host linker/codegen driver
+- native executable generation using `llc` (IR to object) and `ld.lld` (link),
+  with Linux CRT paths discovered at CMake configure time (no `clang` linker driver)
 - runtime-backed `print(str)` and `println(str)` for observable stdout
 - an experimental `readln() -> str` stdin slice for direct input/output examples
 - explicit input parsing helpers: `parse_i32`, `parse_u64`, `parse_bool`, and
@@ -79,7 +80,7 @@ On Ubuntu 24.04, install the basic build tools plus LLVM/MLIR 18:
 ```sh
 sudo apt-get update
 sudo apt-get install -y cmake ninja-build build-essential clang graphviz
-sudo apt-get install -y libmlir-18-dev mlir-18-tools
+sudo apt-get install -y libmlir-18-dev mlir-18-tools lld-18
 ```
 
 The LLVM/MLIR packages install headers, CMake config files, libraries, and tools under

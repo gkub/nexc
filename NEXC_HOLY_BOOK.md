@@ -22,11 +22,17 @@ This guide is about how the compiler implementation works.
 - [10. Typed IR](#10-typed-ir)
 - [11. MLIR Lowering](#11-mlir-lowering)
 - [12. LLVM IR Lowering](#12-llvm-ir-lowering)
-- [13. Native Executable Driver](#13-native-executable-driver)
-- [14. CLI Inspection Modes](#14-cli-inspection-modes)
-- [15. Tests, Golden Files, and CI](#15-tests-golden-files-and-ci)
-- [16. Current Limitations](#16-current-limitations)
-- [17. Recommended Next Steps](#17-recommended-next-steps)
+- [13. Runtime Library And Language I/O (Current Status)](#13-runtime-library-and-language-io-current-status)
+- [14. Native Executable Driver](#14-native-executable-driver)
+  - [End-to-end steps](#end-to-end-steps-what-actually-runs)
+  - [What `llc` is](#what-llc-is)
+  - [What `ld.lld` is](#what-ldlld-is)
+  - [CRT, libc, and linking today](#crt-libc-and-linking-today)
+  - [How this compares to `gcc`](#how-this-compares-to-gcc)
+- [15. CLI Inspection Modes](#15-cli-inspection-modes)
+- [16. Tests, Golden Files, and CI](#16-tests-golden-files-and-ci)
+- [17. Current Limitations](#17-current-limitations)
+- [18. Recommended Next Steps](#18-recommended-next-steps)
 
 ## Developer Workflow
 
@@ -1538,38 +1544,219 @@ less beginner-friendly than MLIR: the high-level source structure has been
 flattened into lower-level control flow.
 
 This inspection mode is still not native execution by itself. LLVM IR is the
-input to later LLVM tools and code generation. The executable driver below is the
-path that turns this IR into a runnable host program.
+input to later LLVM tools and code generation. **§13** documents what Nex programs can
+do at the language/runtime boundary (built-ins, strings, I/O). **§14** documents the
+host toolchain driver (`llc`, `ld.lld`) that turns LLVM IR into an executable file.
 
-## 13. Native Executable Driver
+## 13. Runtime Library And Language I/O (Current Status)
 
-The first native driver path is intentionally simple:
+**Scope:** this section is about **what the language and `libnexrt.a` offer today**—not
+about how `llc` or `ld.lld` are invoked (that is **§14**).
+
+### libnexrt.a and built-ins
+
+**`libnexrt.a`** is a small static archive linked into every Nex executable today.
+It exports stable symbol names that LLVM IR calls for built-ins: printing, stdin
+line reading, parse helpers, and `input_ok()` bookkeeping.
+
+### `str`, `readln()`, and ownership
+
+In the language, **`str`** is still lowered as **pointer + byte length**; there is
+no general heap string, growable buffer, or **slice** type in Core v0 yet.
+**`readln()`** stores the last line in a **process-local scratch buffer**; it is
+meant for experiments and small CLIs, not a final ownership or threading story.
+
+#### Integer (and boolean) input from the user: where things stand
+
+**You can turn stdin text into typed values today**, but only through an explicit
+two-step pattern the language supports:
+
+1. Read one line as **`str`**: **`readln()`**.
+2. Parse with **`parse_i32`**, **`parse_u64`**, or **`parse_bool`**.
+3. Check **`input_ok()`** after **`readln`** / parse when you care about failure.
+
+There is **no** single built-in that behaves like C **`scanf`** (“read an `i32`
+directly from stdin”) yet—by design so far: parsing stays visible and composes
+with future **Result**-style APIs.
+
+**Unsigned / signed coverage:** **`parse_i32`** and **`parse_u64`** exist;
+**`parse_i64`** / other widths are not implemented yet if you need them.
+
+#### Formatted strings (“variables in the string”): where things stand
+
+**Not implemented.** Core v0 has:
+
+- **string literals** and **`print` / `println` taking one `str`**, so output is
+  either static text or whatever you can assemble into a **`str`** by hand.
+
+There is **no** printf-style format API, **no** Python-style f-string or
+interpolation, and **no** standard library helper for “append an integer to a
+string” yet—because honest formatting usually implies **allocation**, conversion
+rules, and error behavior the language has not finalized.
+
+**Near-term direction** (design-first, then implementation): specify how Nex builds
+strings (concatenation, conversion `i32 -> str`, formatting with explicit cost),
+then add lexer/parser support if the syntax is not plain function calls. Until
+then, interactive programs are limited to patterns like printing literals,
+printing **`readln()`** results as-is, or printing **parse results** with separate
+`println` calls rather than one interpolated message.
+
+#### Relation to C / `gcc`
+
+**`gcc`** compiles **C** and links objects against **C’s** library and conventions.
+That gives C programmers `printf`, `sprintf`, `stdin`, etc. **automatically for C
+source**. Nex does not inherit those APIs by virtue of linking libc at the ELF
+level; Nex still needs **its own** definitions for formatting, dynamic strings, and
+I/O surfaces. Linking libc today only means the **process** can use the same OS
+machinery as other hosted binaries; it does not replace Nex language design work.
+
+Built-ins today include **`print`**, **`println`**, **`readln`**, **`parse_i32`**,
+**`parse_u64`**, **`parse_bool`**, and **`input_ok()`**; see
+[docs/reference/language/builtins_and_io.md](docs/reference/language/builtins_and_io.md)
+for behavior details.
+
+## 14. Native Executable Driver
+
+Use the compiler executable directly (not `nexc.sh`) when you want a binary:
 
 ```sh
 build/nexc examples/return_42.nexs -o build/return_42
 ```
 
-That command does **not** use `nexc.sh`. It uses the compiler executable directly.
-Internally, the driver currently does this:
+Sections **1–12** describe the compiler pipeline ending in LLVM IR as text.
+**§13** summarizes built-ins, **`str`**, and I/O behavior at the language/runtime
+layer. **This section** is strictly the **native driver**: **turn LLVM IR into
+machine code with `llc` and link** an ELF executable the Linux kernel can run.
+
+### End-to-end steps (what actually runs)
 
 ```text
-parse/check source
-  -> build typed IR
-  -> lower to MLIR
-  -> lower to LLVM IR
-  -> write temporary .ll file
-  -> find build/runtime/libnexrt.a relative to the nexc executable
-  -> invoke clang -x ir temp.ll -x none libnexrt.a -o output
+parse and semantic-check source
+  -> typed IR
+  -> MLIR lowerings
+  -> LLVM IR (written to a temporary .ll file)
+  -> llc      : LLVM IR -> relocatable object file (.o)
+  -> ld.lld   : link .o + startup objects + libc + libnexrt.a -> executable
 ```
 
-Using `clang` here is a deliberate early-driver choice. `clang` already knows how
-to invoke the host linker and find the platform startup/runtime files. The Nex
-runtime is no longer passed as a source-tree `.c` file; CMake builds it as
-`build/runtime/libnexrt.a`, and `nexc` finds that archive relative to its own
-executable. For unusual packaging experiments, `NEXC_RUNTIME_LIBRARY` can point
-at a different runtime archive.
+At configure time, CMake asks the host C compiler where typical Linux **startup
+object files** live (`-print-file-name=Scrt1.o`, `crti.o`, `crtn.o`) and where
+**`libc`** should be resolved from (`-print-file-name=libc.so.6`), finds **`llc`**
+and **`ld.lld`** on the PATH or under the LLVM install, and writes those paths
+into `build/generated/nexc_link_config.h`. `nexc` reads that header so it can run
+the tools without hand-maintaining distribution-specific paths.
 
-The current executable tests cover:
+The archive `build/runtime/libnexrt.a` contains small implementations for built-in
+calls (`print`, `readln`, parse helpers, …). `nexc` locates it next to itself, or
+you set **`NEXC_RUNTIME_LIBRARY`** to a full path. If Linux, `llc`, or `ld.lld`
+are missing, or CMake could not record a supported layout, **`nexc … -o …` fails
+with an error** instead of producing a half-linked binary.
+
+### What `llc` is
+
+**LLVM IR is not machine code.** It is a portable text (or bitcode) description of
+functions, types, and operations. **`llc`** ("LLVM static compiler") reads that IR
+and emits a **relocatable object file** (`.o`) for a chosen target (here: the
+host CPU). That file contains real instructions and **unresolved symbol
+references** (for example to libc or to `nex_runtime_*` functions) that the
+**linker** fills in next.
+
+### What `ld.lld` is
+
+**`ld.lld`** is LLVM's linker (GNU-compatible on Linux). It takes `.o` files and
+**static archives** (`.a`), **matches symbol names** across them (`main`,
+`nex_runtime_print_str`, …), assigns final layouts, and writes the **ELF
+executable**. It also follows the link line we give it: which startup objects to
+include, which directories to search for **`-lc`**, and where to write the
+output file.
+
+### CRT, libc, and linking today
+
+This subsection is reference material you can come back to when reading link
+lines, CI setup, or discussions of “why libc.”
+
+#### What “CRT” stands for
+
+**CRT** usually expands to **C Run-Time** (read “**C runtime**”). People use the
+term in two related ways:
+
+1. **Narrow sense:** the **startup and teardown glue** linked into a normal
+   executable—the code that runs **before and after** your `main` so the process
+   can start and shut down in a way the OS and dynamic linker expect. On Linux
+   this shows up as small **object files** such as `Scrt1.o`, `crti.o`, and
+   `crtn.o` (exact names vary by toolchain and PIE vs non-PIE). Our CMake queries
+   locate these via `-print-file-name=...` so `ld.lld` receives the same family of
+   objects a typical C toolchain would use.
+
+2. **Loose sense:** some writers say “CRT” when they mean **everything that is not
+   your program’s object code**—startup objects **plus** the C library and related
+   conventions. That overlap is why “CRT” sounds vague; when precision matters,
+   separate **startup objects**, **libc**, and **your `.o`**.
+
+Neither meaning implies that **Nex source code is C**. These are **link-time**
+artifacts for producing a normal ELF executable on Linux.
+
+#### Startup objects (`crt*.o`) vs **libc**
+
+- **`crt*.o` files** are **statically linked** snippets of machine code bundled
+  into your executable. They provide the **entry path** from the kernel/dynamic
+  linker into hosted user code (eventually reaching `main`).
+
+- **`-lc`** asks the linker to resolve symbols against the **C standard library**
+  (`libc.so.6` on typical glibc Linux). That shared library contains a huge set of
+  POSIX/C APIs: `write`, `malloc`, most of `printf`, thread helpers, locale
+  machinery, and more.
+
+**Nex today:** the native driver links **both**: crt-style startup objects **and**
+`-lc`, plus **`libnexrt.a`** (our small archive for Nex built-ins). So the final
+binary is in the same **hosted Linux / glibc ecosystem** as programs built with
+`gcc`, even though the compiler front half is entirely Nex → LLVM IR.
+
+#### Syscalls vs libc (still independent of Nex syntax)
+
+A **syscall** is a direct kernel interface (`read`, `write`, …). **libc**
+implements higher-level behavior **on top of** syscalls (including buffering for
+`stdio`, error handling, allocation). The Nex runtime can call syscalls **inside**
+`libnexrt.a` while the executable **still** links against libc for the normal
+process model—those facts do not contradict each other.
+
+#### libc and linking: stance for this project (explicit)
+
+**Through the current milestone, producing ordinary Linux executables that link
+against glibc (`-lc`) and standard startup objects is an acceptable and
+intentional baseline.** It keeps debugging, tooling, and OS interaction boringly
+familiar.
+
+That choice is about **the hosted executable boundary**, not about defining Nex’s
+semantics in terms of C. Language rules, types, and diagnostics remain Nex-owned.
+When Nex grows **real** string and I/O APIs, they should be specified in Nex terms;
+the implementation may continue to use syscalls, libc helpers, or both **under**
+that API—exactly like any systems runtime.
+
+#### Other link modes (reference only)
+
+Toolchains can instead link with **`-nostdlib`** (omit default crt/libc), use an
+alternate libc such as **musl**, or target **freestanding** environments. That
+usually means supplying your own entry (`_start`), avoiding most libc, and relying
+on syscalls or a tiny support library. **That is not the default Nex driver
+today**; it remains a future option when the project deliberately targets minimal
+or embedded link layouts.
+
+### How this compares to `gcc`
+
+When you run `gcc main.c -o main`, `gcc` is a **driver**: it runs the
+preprocessor, the actual compiler (`cc1`), the assembler (`as`), and finally
+invokes the **linker** (`ld` or `ld.lld`) with hidden paths to **crt\*.o** and
+**`-lc`**. One command hides many steps.
+
+Our pipeline is analogous **after** LLVM IR exists: **`llc`** plays the role of
+“compile to object code,” and **`ld.lld`** plays the role of “link into an
+executable.” Nex owns everything **up to** LLVM IR; LLVM’s tools own the **machine
+code and link** steps in the current driver.
+
+### Executable tests (what CI exercises)
+
+CTest compiles and runs selected programs. Representative commands:
 
 ```sh
 build/nexc examples/return_42.nexs -o <temp>
@@ -1579,56 +1766,11 @@ build/nexc examples/hello.nexs -o <temp>
 build/nexc examples/stdin_echo.nexs -o <temp>
 ```
 
-The first executable exits with status `42`. The walkthrough executable exits
-with status `30`, because `sum_even_to(10)` returns `0 + 2 + 4 + 6 + 8 + 10`.
-The backend coverage executable exits with `33` after exercising constants,
-non-`i32` integer widths, unsigned division/remainder/comparison, and eager
-logical operators. The hello executable checks stdout and prints `Hello, world!`.
-The stdin echo executable pipes test input into `readln()` and checks the printed
-line.
+Expectations: exit code `42`; walkthrough returns `30` (`sum_even_to(10)`);
+backend coverage returns `33`; hello prints `Hello, world!`; stdin tests pipe
+bytes into `readln()`.
 
-This still is not the full long-term runtime story. Files, pipes, allocation,
-formatting, and richer system interaction are intentionally left for a separate
-I/O design pass. The important post-v0 milestone is that the compiler can now
-produce useful native executables with stdout output and a first stdin foothold.
-
-The current bridge now includes explicit parse helpers and status checks:
-
-- `parse_i32(str) -> i32`
-- `parse_u64(str) -> u64`
-- `parse_bool(str) -> bool`
-- `input_ok() -> bool`
-
-This keeps fallible text input visible in user code while Result types are still
-pending.
-
-### 13.1 Bootstrap Runtime vs Nex-Owned Runtime
-
-The current runtime archive (`libnexrt.a`) is a bootstrap boundary, not an
-ideological endpoint.
-
-Today:
-
-- Nex source uses language-level built-ins (`print`, `println`, `readln`,
-  `parse_i32`, `parse_u64`, `parse_bool`, `input_ok`).
-- Lowering maps those built-ins to stable runtime symbols.
-- The native driver links that runtime archive through `clang`.
-- Runtime internals are Linux-first syscall wrappers (`read`/`write`) rather than
-  stdio helpers, so language behavior is not anchored to `fgets`/`fwrite`.
-
-Target direction:
-
-- keep the built-in semantics owned by Nex docs/spec, not by C APIs
-- move from tiny bridge helpers toward a real Nex runtime layer with explicit
-  I/O/resource contracts
-- preserve portability by implementing runtime backends per platform while
-  keeping one language-level I/O model
-
-This is the key mental model: we are not "outsourcing I/O to C"; we are using a
-small host bridge while defining the Nex-owned behavior that future runtimes must
-implement.
-
-## 14. CLI Inspection Modes
+## 15. CLI Inspection Modes
 
 File:
 
@@ -1647,7 +1789,11 @@ build/nexc --dump-mlir examples/comparison.nexs
 build/nexc --dump-llvm examples/return_42.nexs
 build/nexc --check examples/add.nexs
 build/nexc examples/return_42.nexs -o build/return_42
+build/nexc examples/multifile_lib.nexs examples/multifile_main.nexs -o build/multifile
 ```
+
+Native compile may list multiple `.nexs` paths before `-o`; the driver reads each file,
+concatenates them with newlines, and parses the result once (no separate modules yet).
 
 All modes lex the file first. `--dump-tokens` prints the token stream and stops.
 `--dump-ast` and `--dump-ast-dot` pass the token stream into the parser and print
@@ -1661,7 +1807,7 @@ nex-owned typed IR; `--dump-mlir` lowers that IR into the current MLIR slice;
 These modes are intentionally early because they let us inspect every compiler
 stage while building it.
 
-## 15. Tests, Golden Files, and CI
+## 16. Tests, Golden Files, and CI
 
 CTest is the local test runner:
 
@@ -1681,9 +1827,10 @@ dumps
 - golden output checks for LLVM IR dumps
 - conditional LLVM IR assembler checks for selected `--dump-llvm` outputs when
 `llvm-as` is available
-- native executable compile/run checks for selected programs when `clang` is
-available, including stdout checks for `hello.nexs` and stdin/stdout checks for
-`stdin_echo.nexs`
+- native executable compile/run checks for selected programs when `llc` and
+  `ld.lld` were discovered at CMake configure time, including stdout checks for
+  `hello.nexs`, stdin/stdout checks for `stdin_echo.nexs`, and a two-file merge
+  compile/run using `examples/multifile_lib.nexs` + `examples/multifile_main.nexs`
 - parser-negative fixtures
 - semantic success checks for valid examples
 - semantic-negative fixtures for type errors, undefined names, mutability,
@@ -1778,7 +1925,7 @@ The goal is one local command and one CI command path. As more frontend and
 semantic tests appear, they should become CTest entries so CI picks them up
 automatically.
 
-## 16. Current Limitations
+## 17. Current Limitations
 
 The current compiler does not yet implement:
 
@@ -1788,24 +1935,49 @@ The current compiler does not yet implement:
 - short-circuit `&&` / `||` (Core v0 currently documents eager boolean logic)
 - general I/O beyond stdout `print` / `println` and the tiny `readln()` slice
 - nested returning control flow beyond the currently tested shapes
-- inter-file/module resolution
-- direct object-file emission without delegating to `clang`
+- array parameters, array returns, and array module constants (locals support
+  `[T; N]`; see language reference)
+- inter-file/module resolution beyond source concatenation for `nexc … -o`
+- embedding LLVM codegen inside `nexc` so object files are emitted without running the external `llc` subprocess (possible future refinement)
 
 Those are later stages. The current project state is a checked Core v0 compiler
 path with typed IR, MLIR, LLVM IR dumps, and native executable generation,
 including runtime-backed stdout printing and one-line stdin input.
 
-## 17. Recommended Next Steps
+## 18. Recommended Next Steps
 
-The safest next steps are:
+This section is the **handoff list** when switching machines or opening a new
+chat: it tracks intent and ordering, not every open bug.
 
-1. Continue the proper Nex I/O surface design before adding file/pipe syntax.
-2. Decide whether `&&` / `||` should become short-circuiting in v1 and update the
-   typed IR shape if so.
-3. Keep typed IR, MLIR, LLVM IR, runtime, and executable tests growing as new
-   language forms are added.
-4. Start the next feature slice only after its user-facing reference text is
-   clear.
+**Recently landed (keep docs/tests aligned when you touch nearby code):**
+
+- Multi-file **compile** driver form: `nexc a.nexs b.nexs -o out` concatenates
+  sources and parses once (no separate `.nexh` / modules yet). See
+  [§15 CLI Inspection Modes](#15-cli-inspection-modes) and
+  `docs/reference/toolchain/compiler_cli.md`.
+
+**Fixed arrays (`[T; N]`) — locals landed:**
+
+- Compiler accepts `[T; N]` types, array literals, `expr[i]` loads, and `arr[i] =`
+  for `let mut` locals. Parameters, returns, and `const` arrays are still
+  rejected with diagnostics.
+- Example: `examples/array_fixed.nexs`; language reference:
+  `docs/reference/language/types.md`, `docs/reference/language/expressions.md`.
+
+**Still intentionally later:**
+
+1. `.nexh` interface files and real **module/import** resolution (named in
+   `nex.md`; not implemented).
+2. Formatting/interpolation and the full **Nex I/O** surface (see I/O design
+   notes under `docs/design/`).
+3. **`&&` / `||` short-circuit** semantics vs today’s eager lowering — decide in
+   a dedicated language-design pass.
+4. **In-process LLVM object emission** instead of shelling out to `llc` (nice to
+   have, not required for language features).
+
+**Standing rule:** keep typed IR, MLIR, LLVM IR, runtime, and executable tests
+growing with each language feature; update `docs/reference/language/` when user-
+visible behavior stabilizes.
 
 Lowering should stay boring at first. The goal is to prove the frontend can feed
 a backend with checked Core v0 programs before adding richer language features.

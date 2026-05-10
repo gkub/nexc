@@ -173,6 +173,28 @@ private:
             line("StoreLocal " + localName(operation.local) + " = " +
                  valueName(requiredValue(operation.value)));
             return;
+        case Operation::Kind::ArrayLiteral: {
+            dumpResultPrefix(operation);
+            out_ << "ArrayLiteral";
+            for (std::size_t i = 0; i < operation.arguments.size(); ++i) {
+                if (i != 0) {
+                    out_ << ", ";
+                }
+                out_ << valueName(operation.arguments[i]);
+            }
+            out_ << '\n';
+            return;
+        }
+        case Operation::Kind::IndexLoad:
+            dumpResultPrefix(operation);
+            out_ << "IndexLoad " << valueName(requiredValue(operation.left)) << "["
+                 << valueName(requiredValue(operation.right)) << "]\n";
+            return;
+        case Operation::Kind::IndexStore:
+            line("IndexStore " + valueName(requiredValue(operation.left)) + "[" +
+                 valueName(requiredValue(operation.right)) + "] = " +
+                 valueName(requiredValue(operation.value)));
+            return;
         case Operation::Kind::If:
             dumpIf(operation);
             return;

@@ -48,6 +48,8 @@ enum class TokenKind {
 
     LeftParen,
     RightParen,
+    LeftBracket,
+    RightBracket,
     LeftBrace,
     RightBrace,
     Comma,

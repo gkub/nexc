@@ -33,7 +33,13 @@ struct ValueSymbol {
 // still useful as a named boundary: if IR types later grow layout/ABI details,
 // this becomes the one place where AST type syntax starts becoming IR type data.
 Type typeFromSyntax(TypeSyntax syntax) {
-    return Type{.kind = syntax.kind};
+    using TS = ::nexc::TypeSyntaxKind;
+    if (syntax.form == TS::FixedArray) {
+        return Type{.shape = Type::Shape::FixedArray,
+                    .elementKind = syntax.arrayElementKind,
+                    .arrayLength = syntax.arrayLength};
+    }
+    return Type{.shape = Type::Shape::Scalar, .kind = syntax.kind};
 }
 
 // TypedIrBuilder owns the stateful AST walk that emits one IR module.
@@ -274,18 +280,40 @@ private:
         }
 
         if (const auto* assign = dynamic_cast<const AssignStmt*>(&stmt)) {
-            const ValueSymbol symbol = lookupValue(assign->name);
-            const ValueRef value = buildExpr(*assign->value, symbol.type);
-            // Assignment stores into an existing local slot. It is not a
-            // value-producing operation.
-            Operation op{
-                .kind = Operation::Kind::StoreLocal,
-                .span = assign->span,
-            };
-            op.local = symbol.local;
-            op.value = value;
-            append(std::move(op));
-            return;
+            if (const auto* nameExpr = dynamic_cast<const NameExpr*>(assign->target.get())) {
+                const ValueSymbol symbol = lookupValue(nameExpr->name);
+                const ValueRef value = buildExpr(*assign->value, symbol.type);
+                Operation op{
+                    .kind = Operation::Kind::StoreLocal,
+                    .span = assign->span,
+                };
+                op.local = symbol.local;
+                op.value = value;
+                append(std::move(op));
+                return;
+            }
+
+            if (const auto* indexExpr = dynamic_cast<const IndexExpr*>(assign->target.get())) {
+                const ValueRef baseAddr =
+                    buildExpr(*indexExpr->base, std::nullopt);
+                const ValueRef indexVal =
+                    buildExpr(*indexExpr->index,
+                              Type{.shape = Type::Shape::Scalar,
+                                   .kind = BuiltinTypeKind::I32});
+                const ValueRef stored =
+                    buildExpr(*assign->value, baseAddr.type.elementType());
+                Operation op{
+                    .kind = Operation::Kind::IndexStore,
+                    .span = assign->span,
+                };
+                op.left = baseAddr;
+                op.right = indexVal;
+                op.value = stored;
+                append(std::move(op));
+                return;
+            }
+
+            throw std::logic_error("unsupported assignment target in typed IR builder");
         }
 
         if (const auto* ret = dynamic_cast<const ReturnStmt*>(&stmt)) {
@@ -495,6 +523,48 @@ private:
 
         if (const auto* binary = dynamic_cast<const BinaryExpr*>(&expr)) {
             return buildBinary(*binary, expected);
+        }
+
+        if (const auto* arrayLit = dynamic_cast<const ArrayLiteralExpr*>(&expr)) {
+            if (!expected || !expected->isFixedArray()) {
+                throw std::logic_error(
+                    "array literal lowering requires a contextual fixed-array type");
+            }
+            const Type arrType = *expected;
+            Operation op{
+                .kind = Operation::Kind::ArrayLiteral,
+                .span = expr.span,
+                .result = makeValue(arrType),
+            };
+            const Type elemType = arrType.elementType();
+            for (const std::unique_ptr<Expr>& el : arrayLit->elements) {
+                op.arguments.push_back(buildExpr(*el, elemType));
+            }
+            const ValueRef result = *op.result;
+            append(std::move(op));
+            return result;
+        }
+
+        if (const auto* indexExpr = dynamic_cast<const IndexExpr*>(&expr)) {
+            const ValueRef baseVal = buildExpr(*indexExpr->base, std::nullopt);
+            const ValueRef indexVal =
+                buildExpr(*indexExpr->index,
+                          Type{.shape = Type::Shape::Scalar,
+                               .kind = BuiltinTypeKind::I32});
+            if (!baseVal.type.isFixedArray()) {
+                throw std::logic_error("indexed load base must be a fixed array");
+            }
+            const Type elemType = baseVal.type.elementType();
+            Operation op{
+                .kind = Operation::Kind::IndexLoad,
+                .span = expr.span,
+                .result = makeValue(elemType),
+            };
+            op.left = baseVal;
+            op.right = indexVal;
+            const ValueRef result = *op.result;
+            append(std::move(op));
+            return result;
         }
 
         if (const auto* paren = dynamic_cast<const ParenExpr*>(&expr)) {

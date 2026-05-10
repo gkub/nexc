@@ -235,6 +235,10 @@ Token Lexer::lexToken() {
         return single(TokenKind::LeftParen, start);
     case ')':
         return single(TokenKind::RightParen, start);
+    case '[':
+        return single(TokenKind::LeftBracket, start);
+    case ']':
+        return single(TokenKind::RightBracket, start);
     case '{':
         return single(TokenKind::LeftBrace, start);
     case '}':

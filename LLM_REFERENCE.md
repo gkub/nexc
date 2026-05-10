@@ -31,13 +31,23 @@ Current frontend capabilities:
 - typed IR dumping: `./nexc.sh ir <file.nexs>`
 - first MLIR dumping: `./nexc.sh mlir <file.nexs>`
 - LLVM IR dumping: `./nexc.sh llvm <file.nexs>`
-- direct executable compilation: `build/nexc <file.nexs> -o <output>`
+- direct executable compilation: `build/nexc <file.nexs>... -o <output>` (sources are
+  concatenated in order and parsed as one translation unit)
 
-Still outside Core v0:
+Still outside (or only partially implemented):
 
-- arrays, imports/modules, user-defined types, allocation, channels, tasks
+- **Fixed arrays** — implemented for **locals** (`let` / `let mut`): types `[T; N]`,
+  literals, indexing, `mut` element assignment. Not implemented for function
+  parameters, returns, or module `const` (see [types reference](./docs/reference/language/types.md)).
+- Imports/modules, `.nexh` headers (see [nex.md](./nex.md)), user-defined types,
+  allocation, channels, tasks
 - formatting/interpolation and general I/O APIs beyond stdout printing
-- direct object-file emission without delegating final codegen/linking to `clang`
+- in-process object/codegen emission without spawning `llc` (today `nexc` shells out to `llc` + `ld.lld`)
+
+**Swapping computers / losing chat context:** read [NEXC_HOLY_BOOK.md §18
+Recommended Next Steps](./NEXC_HOLY_BOOK.md#18-recommended-next-steps) first, then
+the arrays note above for spelling and an implementation checklist. Multi-file
+compile is documented in [docs/reference/toolchain/compiler_cli.md](./docs/reference/toolchain/compiler_cli.md).
 
 `print(str)` and `println(str)` are semantic built-ins that now lower to the tiny
 bootstrap runtime in `runtime/nex_runtime.c`. Runtime internals are Linux-first
@@ -165,8 +175,8 @@ Current categories:
 - golden output tests for typed IR, MLIR, and LLVM dumps
 - conditional `mlir-opt` validation tests for generated MLIR when MLIR tools are
   available
-- conditional `llvm-as` validation and native executable tests when LLVM/clang
-  are available
+- conditional `llvm-as` validation and native executable tests when LLVM tools,
+  `llc`, and `ld.lld` are available
 - parser-negative fixtures
 - semantic success fixtures
 - semantic-negative fixtures
@@ -205,6 +215,8 @@ Before or during that, keep docs updated:
 
 ## Style Guidance For Future Agents
 
+### Implementation and tests
+
 - Do not jump to MLIR/LLVM before checking current frontend assumptions.
 - Keep parser syntax checks separate from semantic meaning checks.
 - Prefer small, well-documented compiler stages.
@@ -216,3 +228,25 @@ Before or during that, keep docs updated:
 - Add tests with every behavior change.
 - Keep `NEXC_HOLY_BOOK.md` educational, not just a changelog.
 - Keep user docs free of compiler-internal jargon unless it helps explain an error.
+
+### Documentation tone (avoid worthless editorializing)
+
+Readers include newcomers who were not in the chat where a decision was made.
+
+- **Describe what is true**, not how we compare to some bogeyman toolchain.
+  Phrases like “not Clang,” “we don’t use X,” “unlike Y,” or defensive apologies for
+  implementation choices **add almost no value** unless the contrast is **the**
+  teaching point (for example: “IR vs machine code” needs both sides named).
+
+- **Do not** litter docs with **post-hoc rationalizations** (“we avoided Z because…”)
+  unless that reasoning is **stable project policy** and **useful to a future
+  maintainer**. Prefer a short **factual** sentence: what runs, what it consumes,
+  where paths come from.
+
+- **Teach concepts on first mention**: spell abbreviations, give one crisp
+  definition, then use the short form. Example pattern: “**CRT** — **C Run-Time**
+  (often ‘C runtime’); here we mean …”
+
+- If a paragraph exists only to reassure the author about a past choice, **delete
+  it** or replace it with a checklist future readers need (inputs, outputs,
+  failure modes).

@@ -1,6 +1,7 @@
 #include "nexc/frontend/ast.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 namespace nexc {
@@ -61,20 +62,17 @@ private:
             line("Parameters");
             indent_ += 2;
             for (const ParameterSyntax& parameter : function->parameters) {
-                line("Parameter " + parameter.name + ": " +
-                     std::string(builtinTypeName(parameter.type.kind)));
+                line("Parameter " + parameter.name + ": " + formatTypeSyntax(parameter.type));
             }
             indent_ -= 2;
-            line("ReturnType " +
-                 std::string(builtinTypeName(function->returnType.kind)));
+            line("ReturnType " + formatTypeSyntax(function->returnType));
             dumpStmt(*function->body);
             indent_ -= 2;
             return;
         }
 
         if (const auto* constant = dynamic_cast<const ConstDecl*>(&item)) {
-            line("ConstDecl " + constant->name + ": " +
-                 std::string(builtinTypeName(constant->type.kind)));
+            line("ConstDecl " + constant->name + ": " + formatTypeSyntax(constant->type));
             indent_ += 2;
             dumpExpr(*constant->init);
             indent_ -= 2;
@@ -98,7 +96,7 @@ private:
 
         if (const auto* let = dynamic_cast<const LetStmt*>(&stmt)) {
             line(std::string(let->isMutable ? "LetStmt mut " : "LetStmt ") +
-                 let->name + ": " + std::string(builtinTypeName(let->type.kind)));
+                 let->name + ": " + formatTypeSyntax(let->type));
             indent_ += 2;
             dumpExpr(*let->init);
             indent_ -= 2;
@@ -106,9 +104,16 @@ private:
         }
 
         if (const auto* assign = dynamic_cast<const AssignStmt*>(&stmt)) {
-            line("AssignStmt " + assign->name);
+            line("AssignStmt");
+            indent_ += 2;
+            line("Target");
+            indent_ += 2;
+            dumpExpr(*assign->target);
+            indent_ -= 2;
+            line("Value");
             indent_ += 2;
             dumpExpr(*assign->value);
+            indent_ -= 2;
             indent_ -= 2;
             return;
         }
@@ -235,6 +240,32 @@ private:
             indent_ += 2;
             dumpExpr(*paren->inner);
             indent_ -= 2;
+            return;
+        }
+
+        if (const auto* arrayLit = dynamic_cast<const ArrayLiteralExpr*>(&expr)) {
+            line("ArrayLiteralExpr");
+            indent_ += 2;
+            for (const std::unique_ptr<Expr>& el : arrayLit->elements) {
+                dumpExpr(*el);
+            }
+            indent_ -= 2;
+            return;
+        }
+
+        if (const auto* indexExpr = dynamic_cast<const IndexExpr*>(&expr)) {
+            line("IndexExpr");
+            indent_ += 2;
+            line("Base");
+            indent_ += 2;
+            dumpExpr(*indexExpr->base);
+            indent_ -= 2;
+            line("Index");
+            indent_ += 2;
+            dumpExpr(*indexExpr->index);
+            indent_ -= 2;
+            indent_ -= 2;
+            return;
         }
     }
 
@@ -335,17 +366,16 @@ private:
             edge(id, params);
             for (const ParameterSyntax& parameter : function->parameters) {
                 edge(params, node("Parameter\n" + parameter.name + ": " +
-                                  std::string(builtinTypeName(parameter.type.kind))));
+                                  formatTypeSyntax(parameter.type)));
             }
-            edge(id, node("ReturnType\n" +
-                          std::string(builtinTypeName(function->returnType.kind))));
+            edge(id, node("ReturnType\n" + formatTypeSyntax(function->returnType)));
             edge(id, dumpStmt(*function->body), "body");
             return id;
         }
 
         if (const auto* constant = dynamic_cast<const ConstDecl*>(&item)) {
-            const std::size_t id = node("ConstDecl\n" + constant->name + ": " +
-                                        std::string(builtinTypeName(constant->type.kind)));
+            const std::size_t id =
+                node("ConstDecl\n" + constant->name + ": " + formatTypeSyntax(constant->type));
             edge(id, dumpExpr(*constant->init), "init");
             return id;
         }
@@ -366,13 +396,14 @@ private:
         if (const auto* let = dynamic_cast<const LetStmt*>(&stmt)) {
             const std::size_t id =
                 node(std::string(let->isMutable ? "LetStmt mut\n" : "LetStmt\n") +
-                     let->name + ": " + std::string(builtinTypeName(let->type.kind)));
+                     let->name + ": " + formatTypeSyntax(let->type));
             edge(id, dumpExpr(*let->init), "init");
             return id;
         }
 
         if (const auto* assign = dynamic_cast<const AssignStmt*>(&stmt)) {
-            const std::size_t id = node("AssignStmt\n" + assign->name);
+            const std::size_t id = node("AssignStmt");
+            edge(id, dumpExpr(*assign->target), "target");
             edge(id, dumpExpr(*assign->value), "value");
             return id;
         }
@@ -460,6 +491,21 @@ private:
             return id;
         }
 
+        if (const auto* arrayLit = dynamic_cast<const ArrayLiteralExpr*>(&expr)) {
+            const std::size_t id = node("ArrayLiteralExpr");
+            for (const std::unique_ptr<Expr>& el : arrayLit->elements) {
+                edge(id, dumpExpr(*el), "elem");
+            }
+            return id;
+        }
+
+        if (const auto* indexExpr = dynamic_cast<const IndexExpr*>(&expr)) {
+            const std::size_t id = node("IndexExpr");
+            edge(id, dumpExpr(*indexExpr->base), "base");
+            edge(id, dumpExpr(*indexExpr->index), "index");
+            return id;
+        }
+
         return node("<unknown expr>");
     }
 
@@ -473,6 +519,14 @@ private:
 //
 // This helper is shared by AST dumps, diagnostics, and IR dumps so the project
 // does not accidentally print the same type in multiple inconsistent ways.
+std::string formatTypeSyntax(TypeSyntax syntax) {
+    if (syntax.form == TypeSyntaxKind::Builtin) {
+        return std::string(builtinTypeName(syntax.kind));
+    }
+    return "[" + std::string(builtinTypeName(syntax.arrayElementKind)) + "; " +
+           std::to_string(syntax.arrayLength) + "]";
+}
+
 std::string_view builtinTypeName(BuiltinTypeKind kind) {
     // This spelling is shared by AST dumps, diagnostics, and IR dumps. Keeping
     // it centralized prevents drift between compiler stages.

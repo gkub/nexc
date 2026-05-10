@@ -1,0 +1,6 @@
+// Part of the multi-file example: call a function from the other translation
+// unit slice that was merged into the same parse.
+
+fn main() -> i32 {
+    return get_five();
+}

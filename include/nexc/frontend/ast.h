@@ -3,6 +3,7 @@
 #include "nexc/frontend/source.h"
 #include "nexc/frontend/token.h"
 
+#include <cstdint>
 #include <memory>
 #include <ostream>
 #include <string>
@@ -29,10 +30,22 @@ enum class BuiltinTypeKind {
     Invalid,
 };
 
+enum class TypeSyntaxKind {
+    Builtin,
+    FixedArray,
+};
+
 struct TypeSyntax {
+    TypeSyntaxKind form = TypeSyntaxKind::Builtin;
+
+    // Builtin scalar / void / str: uses `kind`.
     BuiltinTypeKind kind = BuiltinTypeKind::Invalid;
 
-    // The source span covers the type spelling, such as `i32` or `void`.
+    // Fixed-size array `[T; N]`: uses `arrayElementKind`, `arrayLength`.
+    BuiltinTypeKind arrayElementKind = BuiltinTypeKind::Invalid;
+    std::uint64_t arrayLength = 0;
+
+    // The source span covers the full type spelling (`i32`, `[i32; 4]`, ...).
     SourceSpan span;
 };
 
@@ -132,6 +145,24 @@ struct ParenExpr final : Expr {
     std::unique_ptr<Expr> inner;
 };
 
+// `[expr0, expr1, ...]` builds a fixed-size array value when its length matches
+// the contextual `[T; N]` type.
+struct ArrayLiteralExpr final : Expr {
+    ArrayLiteralExpr(SourceSpan span, std::vector<std::unique_ptr<Expr>> elements)
+        : Expr(span), elements(std::move(elements)) {}
+
+    std::vector<std::unique_ptr<Expr>> elements;
+};
+
+// `base[index]` loads one element. Index must have integer type.
+struct IndexExpr final : Expr {
+    IndexExpr(SourceSpan span, std::unique_ptr<Expr> base, std::unique_ptr<Expr> index)
+        : Expr(span), base(std::move(base)), index(std::move(index)) {}
+
+    std::unique_ptr<Expr> base;
+    std::unique_ptr<Expr> index;
+};
+
 struct Stmt {
     explicit Stmt(SourceSpan span) : span(span) {}
     virtual ~Stmt() = default;
@@ -166,13 +197,12 @@ struct LetStmt final : Stmt {
 };
 
 struct AssignStmt final : Stmt {
-    AssignStmt(SourceSpan span, std::string name, SourceSpan nameSpan,
+    AssignStmt(SourceSpan span, std::unique_ptr<Expr> target,
                std::unique_ptr<Expr> value)
-        : Stmt(span), name(std::move(name)), nameSpan(nameSpan),
-          value(std::move(value)) {}
+        : Stmt(span), target(std::move(target)), value(std::move(value)) {}
 
-    std::string name;
-    SourceSpan nameSpan;
+    // Target must be a `NameExpr` or `IndexExpr` naming a mutable place.
+    std::unique_ptr<Expr> target;
     std::unique_ptr<Expr> value;
 };
 
@@ -263,6 +293,7 @@ struct TranslationUnit {
 // serialization formats. Their text output is still tested with golden files so
 // accidental AST shape changes are caught.
 std::string_view builtinTypeName(BuiltinTypeKind kind);
+std::string formatTypeSyntax(TypeSyntax syntax);
 void dumpAst(std::ostream& out, const TranslationUnit& unit);
 void dumpAstDot(std::ostream& out, const TranslationUnit& unit);
 

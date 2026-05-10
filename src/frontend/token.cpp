@@ -77,6 +77,10 @@ std::string_view tokenKindName(TokenKind kind) {
         return "LeftParen";
     case TokenKind::RightParen:
         return "RightParen";
+    case TokenKind::LeftBracket:
+        return "LeftBracket";
+    case TokenKind::RightBracket:
+        return "RightBracket";
     case TokenKind::LeftBrace:
         return "LeftBrace";
     case TokenKind::RightBrace:

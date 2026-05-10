@@ -82,7 +82,7 @@ CI should run:
 2. build
 3. full CTest suite
 
-When MLIR/LLVM/clang tools are available in CI image, MLIR and LLVM validation
+When MLIR/LLVM tools (including `llc` and `ld.lld`) are available in the CI image, MLIR and LLVM validation
 tests plus native executable tests should run as part of normal CI coverage.
 
 ## Examples

@@ -24,6 +24,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "nexc_link_config.h"
+
 namespace {
 
 enum class Mode {
@@ -39,14 +41,14 @@ enum class Mode {
 
 struct Options {
     Mode mode = Mode::Check;
-    std::string inputPath;
+    std::vector<std::string> inputPaths;
     std::string outputPath;
 };
 
 void printUsage(std::ostream& out) {
     out << "usage:\n"
         << "  nexc (--dump-tokens | --dump-ast | --dump-ast-dot | --dump-ir | --dump-mlir | --dump-llvm | --check) <file.nexs>\n"
-        << "  nexc <file.nexs> -o <output>\n";
+        << "  nexc <file.nexs>... -o <output>\n";
 }
 
 std::string readFile(const std::string& path) {
@@ -59,10 +61,29 @@ std::string readFile(const std::string& path) {
                        std::istreambuf_iterator<char>());
 }
 
+// Merge several nex sources into one buffer for a single parse and analysis pass.
+//
+// Spans refer to the concatenated text (lines still map correctly for caret
+// diagnostics). The synthetic label lists inputs joined with \"+\" so messages
+// show which files were combined.
+std::pair<std::string, std::string> mergeSourceFiles(const std::vector<std::string>& paths) {
+    std::string merged;
+    std::string label;
+    for (std::size_t i = 0; i < paths.size(); ++i) {
+        if (i > 0) {
+            merged += '\n';
+            label += '+';
+        }
+        merged += readFile(paths[i]);
+        label += paths[i];
+    }
+    return {std::move(label), std::move(merged)};
+}
+
 Options parseArgs(int argc, char** argv) {
     // Keep inspection modes deliberately simple: one mode flag plus one input.
-    // The native compile form is also intentionally small for v0:
-    // `nexc input.nexs -o output`.
+    // Native compile concatenates one or more inputs then parses once:
+    // `nexc a.nexs b.nexs -o out`.
     if (argc == 3) {
         Options options;
         const std::string modeArg = argv[1];
@@ -83,25 +104,32 @@ Options parseArgs(int argc, char** argv) {
         } else {
             throw std::invalid_argument("unknown compiler mode: " + modeArg);
         }
-        options.inputPath = argv[2];
+        options.inputPaths = {argv[2]};
         return options;
     }
 
-    if (argc == 4 && std::string(argv[2]) == "-o") {
+    // Native compile: nexc <file>... -o <output>
+    if (argc >= 4 && std::string(argv[argc - 2]) == "-o") {
         Options options;
         options.mode = Mode::CompileExecutable;
-        options.inputPath = argv[1];
-        options.outputPath = argv[3];
+        options.outputPath = argv[argc - 1];
+        for (int i = 1; i < argc - 2; ++i) {
+            options.inputPaths.push_back(argv[i]);
+        }
+        if (options.inputPaths.empty()) {
+            throw std::invalid_argument("compile mode requires at least one input file");
+        }
         return options;
     }
 
     throw std::invalid_argument("invalid command line");
 }
 
+#if NEXC_CONFIGURED_LINUX_LINK
+
 std::filesystem::path writeTemporaryLlvmIr(const nexc::ir::Module& module) {
-    // Native v0 compilation uses LLVM IR as a handoff file to clang. We create a
-    // real temporary file instead of piping so error messages can include a path
-    // and so the implementation stays easy to inspect while the driver is young.
+    // Native compilation writes LLVM IR to a temp file, then runs `llc` and
+    // `ld.lld`. Using a real file keeps failures debuggable (paths in errors).
     std::filesystem::path pattern =
         std::filesystem::temp_directory_path() / "nexc-llvm-XXXXXX.ll";
     std::string path = pattern.string();
@@ -172,42 +200,23 @@ std::filesystem::path resolveRuntimeLibrary() {
         "failed to find nex runtime library; set NEXC_RUNTIME_LIBRARY to libnexrt.a");
 }
 
-int runClang(const std::string& clangName,
-             const std::filesystem::path& llvmIrPath,
-             const std::filesystem::path& runtimeLibraryPath,
-             const std::string& outputPath) {
-    // The compiler driver delegates final code generation and linking to clang.
-    // That is normal for an early compiler: clang already knows the platform C
-    // runtime startup files, linker flags, target defaults, and object format.
+// Run a subprocess given a NULL-terminated argv. argv[0] must be the executable
+// path as execvp expects (absolute paths are fine).
+int runChildProcess(char* const argv[]) {
     const pid_t child = ::fork();
     if (child == -1) {
-        throw std::runtime_error(std::string("failed to fork clang: ") +
+        throw std::runtime_error(std::string("failed to fork subprocess: ") +
                                  std::strerror(errno));
     }
 
     if (child == 0) {
-        std::string llvmIr = llvmIrPath.string();
-        std::string runtimeLibrary = runtimeLibraryPath.string();
-        char* const args[] = {
-            const_cast<char*>(clangName.c_str()),
-            const_cast<char*>("-Wno-override-module"),
-            const_cast<char*>("-x"),
-            const_cast<char*>("ir"),
-            llvmIr.data(),
-            const_cast<char*>("-x"),
-            const_cast<char*>("none"),
-            runtimeLibrary.data(),
-            const_cast<char*>("-o"),
-            const_cast<char*>(outputPath.c_str()),
-            nullptr,
-        };
-        ::execvp(clangName.c_str(), args);
+        ::execvp(argv[0], argv);
         ::_exit(127);
     }
 
     int status = 0;
     if (::waitpid(child, &status, 0) == -1) {
-        throw std::runtime_error(std::string("failed to wait for clang: ") +
+        throw std::runtime_error(std::string("failed to wait for subprocess: ") +
                                  std::strerror(errno));
     }
 
@@ -220,9 +229,38 @@ int runClang(const std::string& clangName,
     return 1;
 }
 
+std::filesystem::path writeTemporaryObjectFilePath() {
+    std::filesystem::path pattern =
+        std::filesystem::temp_directory_path() / "nexc-obj-XXXXXX.o";
+    std::string path = pattern.string();
+    std::vector<char> writablePath(path.begin(), path.end());
+    writablePath.push_back('\0');
+
+    const int fd = ::mkstemps(writablePath.data(), 2);
+    if (fd == -1) {
+        throw std::runtime_error(std::string("failed to create temporary object path: ") +
+                                 std::strerror(errno));
+    }
+    ::close(fd);
+    std::error_code ignored;
+    std::filesystem::remove(writablePath.data(), ignored);
+
+    return writablePath.data();
+}
+
+#endif // NEXC_CONFIGURED_LINUX_LINK
+
 void compileExecutable(const nexc::ir::Module& module,
                        const std::string& outputPath) {
+#if !NEXC_CONFIGURED_LINUX_LINK
+    (void)module;
+    (void)outputPath;
+    throw std::runtime_error(
+        "native compilation requires Linux with llc and ld.lld discovered at CMake "
+        "configure time (install llvm lld tools and re-run cmake)");
+#else
     const std::filesystem::path llvmIrPath = writeTemporaryLlvmIr(module);
+    const std::filesystem::path objectPath = writeTemporaryObjectFilePath();
     const std::filesystem::path runtimeLibraryPath = resolveRuntimeLibrary();
     if (!std::filesystem::exists(runtimeLibraryPath)) {
         throw std::runtime_error("nex runtime library does not exist: " +
@@ -235,18 +273,74 @@ void compileExecutable(const nexc::ir::Module& module,
             std::error_code ignored;
             std::filesystem::remove(path, ignored);
         }
-    } cleanup{llvmIrPath};
+    } cleanupLl{llvmIrPath};
+    TemporaryCleanup cleanupObj{objectPath};
 
-    // Prefer `clang`, but try the version-suffixed binary used by Ubuntu's LLVM
-    // packages too. A 127 exit from our child means exec failed, not that clang
-    // rejected the input.
-    int exitCode = runClang("clang", llvmIrPath, runtimeLibraryPath, outputPath);
-    if (exitCode == 127) {
-        exitCode = runClang("clang-18", llvmIrPath, runtimeLibraryPath, outputPath);
+    // 1) LLVM IR -> relocatable object with llc (machine code for this host).
+    std::string llvmIrString = llvmIrPath.string();
+    std::string objectString = objectPath.string();
+    std::vector<std::string> llcStorage = {
+        std::string(NEXC_LLC_PATH),
+        "-filetype=obj",
+        "-relocation-model=pic",
+        std::move(llvmIrString),
+        "-o",
+        std::move(objectString),
+    };
+    std::vector<char*> llcArgv;
+    llcArgv.reserve(llcStorage.size() + 1);
+    for (std::string& piece : llcStorage) {
+        llcArgv.push_back(piece.data());
     }
-    if (exitCode != 0) {
-        throw std::runtime_error("clang failed while creating executable");
+    llcArgv.push_back(nullptr);
+
+    int llcExit = runChildProcess(llcArgv.data());
+    if (llcExit == 127) {
+        throw std::runtime_error(std::string("failed to execute llc at ") + NEXC_LLC_PATH);
     }
+    if (llcExit != 0) {
+        throw std::runtime_error("llc failed while compiling LLVM IR to an object file");
+    }
+
+    // 2) Link object + nex runtime archive into a PIE executable using ld.lld.
+    //
+    // We pass the same glibc startup objects and -lc that a normal C toolchain
+    // would use for a hosted program. Nex-generated LLVM IR provides `main`; the
+    // CRT hands control from the dynamic linker to libc startup, then to `main`.
+    std::string objPath = objectPath.string();
+    std::string rtPath = runtimeLibraryPath.string();
+    std::string outPath = outputPath;
+    std::vector<std::string> linkStorage = {
+        std::string(NEXC_LD_LLD_PATH),
+        "-pie",
+        "-dynamic-linker",
+        std::string(NEXC_LINUX_DYNAMIC_LINKER),
+        std::string(NEXC_SCRT1_PATH),
+        std::string(NEXC_CRTI_PATH),
+        std::move(objPath),
+        std::move(rtPath),
+        "-L",
+        std::string(NEXC_LIBDIR_FOR_LC),
+        "-lc",
+        std::string(NEXC_CRTN_PATH),
+        "-o",
+        std::move(outPath),
+    };
+    std::vector<char*> linkArgv;
+    linkArgv.reserve(linkStorage.size() + 1);
+    for (std::string& piece : linkStorage) {
+        linkArgv.push_back(piece.data());
+    }
+    linkArgv.push_back(nullptr);
+
+    int linkExit = runChildProcess(linkArgv.data());
+    if (linkExit == 127) {
+        throw std::runtime_error(std::string("failed to execute ld.lld at ") + NEXC_LD_LLD_PATH);
+    }
+    if (linkExit != 0) {
+        throw std::runtime_error("ld.lld failed while linking executable");
+    }
+#endif // !NEXC_CONFIGURED_LINUX_LINK
 }
 
 } // namespace
@@ -254,7 +348,8 @@ void compileExecutable(const nexc::ir::Module& module,
 int main(int argc, char** argv) {
     try {
         const Options options = parseArgs(argc, argv);
-        nexc::SourceFile source(options.inputPath, readFile(options.inputPath));
+        const auto [mergedLabel, mergedText] = mergeSourceFiles(options.inputPaths);
+        nexc::SourceFile source(mergedLabel, mergedText);
         nexc::DiagnosticBag diagnostics;
 
         // The CLI always lexes first because both frontend inspection modes need

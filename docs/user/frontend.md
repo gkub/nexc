@@ -243,11 +243,12 @@ build/nexc examples/return_42.nexs -o build/return_42
 
 That path works for Core v0 programs, including runtime-backed stdout printing
 and the first `readln()` stdin slice.
-Internally the compiler emits LLVM IR to a temporary file and asks `clang` to
-produce the host executable while also linking the tiny bootstrap runtime:
+Internally the compiler emits LLVM IR to temporary files, runs `llc` to emit a
+relocatable object, then runs `ld.lld` with the usual Linux CRT objects, `-lc`,
+and `libnexrt.a`:
 
 ```text
-nex source -> typed IR -> MLIR -> LLVM IR + runtime -> clang -> executable
+nex source -> typed IR -> MLIR -> LLVM IR -> llc -> .o -> ld.lld -> executable
 ```
 
 The pipeline walkthrough is also supported:

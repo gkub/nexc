@@ -2,7 +2,9 @@
 
 This document is the **normative specification** for the first implementable subset of nex: what the reference compiler (`nexc`) should accept, reject, and mean for programs that use only Core v0 features.
 
-Later phases (arrays, concurrency, realtime regions, rich math types, and so on) extend this core. They are described at a high level in [nex.md](../../nex.md); when they land, they get their own spec sections or versioned addenda.
+Later phases (full slice types, growable containers, concurrency, realtime regions, rich math types, and so on) extend this core. They are described at a high level in [nex.md](../../nex.md); when they land, they get their own spec sections or versioned addenda.
+
+The reference compiler also implements **fixed-size local arrays** (`[T; N]`, array literals, indexing). That surface is specified in the language reference ([types](../reference/language/types.md), [expressions](../reference/language/expressions.md)) rather than in the historical Core v0 subsections below, which still describe the original scalar-first subset.
 
 ---
 
@@ -15,7 +17,7 @@ Core v0 exists to support:
 - **predictable integer behavior** (no silent undefined overflow)
 - **C-like surface syntax**: semicolons, parentheses on `if`/`while`, familiar declaration forms
 
-Core v0 intentionally does **not** specify arrays, references, generics, macros, headers/modules linking, or concurrency. Those appear in later documents.
+Core v0 **as originally scoped in the subsections below** does not specify general arrays, references, generics, macros, headers/modules linking, or concurrency. Those appear in later documents. Local fixed arrays are an **implemented extension** (see language reference and [arrays_vectors_linalg.md](../design/arrays_vectors_linalg.md)).
 
 ---
 

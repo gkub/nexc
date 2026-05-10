@@ -5,7 +5,7 @@ can dump verifier-valid MLIR.
 
 The goal was not to build a full optimizing native compiler in one jump. The goal
 was to prove one boring path from checked nex source to LLVM IR that LLVM's own
-tools accept, then use `clang` to produce a first host executable.
+tools accept, then use `llc` + `ld.lld` to produce a first host executable.
 
 ## Starting Point
 
@@ -38,7 +38,8 @@ nex typed IR
   -> lower scf/memref toward cf/llvm-compatible forms
   -> MLIR LLVM dialect
   -> LLVM IR
-  -> clang
+  -> llc -> `.o`
+  -> ld.lld + CRT + `-lc` + libnexrt.a
   -> host executable
 ```
 
@@ -57,9 +58,9 @@ The direct executable form is now:
 build/nexc examples/pipeline_walkthrough.nexs -o build/pipeline_walkthrough
 ```
 
-The driver writes LLVM IR to a temporary file and delegates object generation and
-linking to `clang`. That keeps platform linker details out of `nexc` while the
-language runtime is still tiny.
+The driver writes LLVM IR to a temporary file, runs `llc` for the object file,
+then runs `ld.lld` with CMake-discovered CRT paths and `libnexrt.a`. That avoids
+using `clang` as the linker driver while still producing normal Linux executables.
 
 ## First Implementation Target
 
@@ -108,7 +109,7 @@ The first LLVM milestone still does not include:
 - strings
 - module constants
 - unsigned integer polish
-- direct object emission without delegating to `clang`
+- in-process object emission via LLVM MC instead of spawning `llc`
 - optimization passes beyond what MLIR/LLVM require structurally
 - RISC-V-specific output
 

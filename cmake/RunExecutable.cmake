@@ -6,7 +6,7 @@
 #   ./output
 #
 # Earlier tests inspect intermediate text. This one proves the compiler driver
-# can hand LLVM IR to clang, produce a host executable, and run that executable.
+# can compile LLVM IR with llc, link with ld.lld + libnexrt.a, run that executable.
 # Most early tests only need an exit code, but stdout is now observable too, so
 # EXPECTED_STDOUT can be supplied when a program should print exact bytes.
 foreach(required_var NEXC_EXECUTABLE INPUT OUTPUT EXPECTED_RUN_EXIT_CODE)

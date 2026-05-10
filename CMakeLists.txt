@@ -43,19 +43,85 @@ if(MLIR_FOUND)
         message(STATUS "llvm-as not found; LLVM IR validation tests will be skipped")
     endif()
 
-    find_program(NEXC_CLANG_EXECUTABLE
-        NAMES clang clang-18
-        HINTS
-            ${LLVM_TOOLS_BINARY_DIR}
-            /usr/lib/llvm-18/bin
+endif()
+
+# Native executable pipeline uses llc + ld.lld (no clang as linker driver).
+set(NEXC_LLVM_TOOL_HINTS /usr/lib/llvm-18/bin)
+if(DEFINED LLVM_TOOLS_BINARY_DIR)
+    list(APPEND NEXC_LLVM_TOOL_HINTS "${LLVM_TOOLS_BINARY_DIR}")
+endif()
+
+set(NEXC_NATIVE_LINK_READY FALSE)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_program(NEXC_LLC_EXECUTABLE
+        NAMES llc llc-18
+        HINTS ${NEXC_LLVM_TOOL_HINTS}
+    )
+    find_program(NEXC_LD_LLD_EXECUTABLE
+        NAMES ld.lld ld.lld-18
+        HINTS ${NEXC_LLVM_TOOL_HINTS}
     )
 
-    if(NEXC_CLANG_EXECUTABLE)
-        message(STATUS "Found clang: ${NEXC_CLANG_EXECUTABLE}")
+    if(NEXC_LLC_EXECUTABLE AND NEXC_LD_LLD_EXECUTABLE)
+        message(STATUS "Found llc: ${NEXC_LLC_EXECUTABLE}")
+        message(STATUS "Found ld.lld: ${NEXC_LD_LLD_EXECUTABLE}")
+
+        execute_process(
+            COMMAND ${CMAKE_C_COMPILER} -print-file-name=Scrt1.o
+            OUTPUT_VARIABLE NEXC_SCRT1_PATH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        execute_process(
+            COMMAND ${CMAKE_C_COMPILER} -print-file-name=crti.o
+            OUTPUT_VARIABLE NEXC_CRTI_PATH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        execute_process(
+            COMMAND ${CMAKE_C_COMPILER} -print-file-name=crtn.o
+            OUTPUT_VARIABLE NEXC_CRTN_PATH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        execute_process(
+            COMMAND ${CMAKE_C_COMPILER} -print-file-name=libc.so.6
+            OUTPUT_VARIABLE NEXC_LIBC_SO_PATH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        get_filename_component(NEXC_LIBDIR_FOR_LC "${NEXC_LIBC_SO_PATH}" DIRECTORY)
+
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+            set(NEXC_LINUX_DYNAMIC_LINKER "/lib64/ld-linux-x86-64.so.2")
+            set(NEXC_NATIVE_LINK_READY TRUE)
+        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|AArch64|ARM64)$")
+            set(NEXC_LINUX_DYNAMIC_LINKER "/lib/ld-linux-aarch64.so.1")
+            set(NEXC_NATIVE_LINK_READY TRUE)
+        else()
+            message(STATUS "Unsupported CMAKE_SYSTEM_PROCESSOR for lld link; native link disabled")
+        endif()
     else()
-        message(STATUS "clang not found; native executable tests will be skipped")
+        message(STATUS "llc and/or ld.lld not found; native executable tests will be skipped")
     endif()
 endif()
+
+if(NEXC_NATIVE_LINK_READY)
+    set(NEXC_CONFIGURED_LINUX_LINK 1)
+    set(NEXC_LLC_PATH "${NEXC_LLC_EXECUTABLE}")
+    set(NEXC_LD_LLD_PATH "${NEXC_LD_LLD_EXECUTABLE}")
+else()
+    set(NEXC_CONFIGURED_LINUX_LINK 0)
+    set(NEXC_LLC_PATH "")
+    set(NEXC_LD_LLD_PATH "")
+    set(NEXC_LINUX_DYNAMIC_LINKER "")
+    set(NEXC_SCRT1_PATH "")
+    set(NEXC_CRTI_PATH "")
+    set(NEXC_CRTN_PATH "")
+    set(NEXC_LIBDIR_FOR_LC "")
+endif()
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/link_config.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/nexc_link_config.h
+    @ONLY
+)
 
 function(nexc_target_warnings target)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -179,6 +245,7 @@ set_target_properties(nexc_runtime
 nexc_target_warnings(nexc_runtime)
 
 add_executable(nexc src/tools/nexc/main.cpp)
+target_include_directories(nexc PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(nexc PRIVATE nexc_llvm)
 add_dependencies(nexc nexc_runtime)
 target_compile_definitions(nexc
@@ -252,7 +319,7 @@ function(add_nexc_llvm_validation_test name input)
 endfunction()
 
 function(add_nexc_executable_test name input expected_exit_code)
-    if(NOT NEXC_CLANG_EXECUTABLE)
+    if(NOT NEXC_NATIVE_LINK_READY)
         return()
     endif()
 
@@ -269,7 +336,7 @@ function(add_nexc_executable_test name input expected_exit_code)
 endfunction()
 
 function(add_nexc_executable_stdout_test name input expected_exit_code expected_stdout)
-    if(NOT NEXC_CLANG_EXECUTABLE)
+    if(NOT NEXC_NATIVE_LINK_READY)
         return()
     endif()
 
@@ -287,7 +354,7 @@ function(add_nexc_executable_stdout_test name input expected_exit_code expected_
 endfunction()
 
 function(add_nexc_executable_stdin_stdout_test name input stdin expected_exit_code expected_stdout)
-    if(NOT NEXC_CLANG_EXECUTABLE)
+    if(NOT NEXC_NATIVE_LINK_READY)
         return()
     endif()
 
@@ -307,7 +374,7 @@ endfunction()
 
 
 function(add_nexc_compile_failure_test name input expected_stderr_contains)
-    if(NOT NEXC_CLANG_EXECUTABLE)
+    if(NOT NEXC_NATIVE_LINK_READY)
         return()
     endif()
 
@@ -570,6 +637,23 @@ add_nexc_executable_test(
     33
 )
 
+add_test(
+    NAME run_executable_multifile_merge
+    COMMAND ${CMAKE_COMMAND}
+        -DNEXC_EXECUTABLE=$<TARGET_FILE:nexc>
+        -DINPUT_FIRST=${CMAKE_CURRENT_SOURCE_DIR}/examples/multifile_lib.nexs
+        -DINPUT_SECOND=${CMAKE_CURRENT_SOURCE_DIR}/examples/multifile_main.nexs
+        -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/multifile_merge_test.bin
+        -DEXPECTED_RUN_EXIT_CODE=5
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunExecutableMerge.cmake
+)
+
+add_nexc_executable_test(
+    run_executable_array_fixed
+    examples/array_fixed.nexs
+    60
+)
+
 add_nexc_executable_stdout_test(
     run_executable_hello_stdout
     examples/hello.nexs
@@ -591,6 +675,11 @@ add_nexc_executable_stdin_stdout_test(
     "42\n"
     42
     ""
+)
+
+add_test(
+    NAME semantic_check_array_fixed
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/array_fixed.nexs
 )
 
 add_test(

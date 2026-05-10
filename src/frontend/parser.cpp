@@ -1,5 +1,7 @@
 #include "nexc/frontend/parser.h"
 
+#include <cstdint>
+#include <string>
 #include <utility>
 
 namespace nexc {
@@ -226,6 +228,36 @@ ParameterSyntax Parser::parseParameter() {
 // BuiltinTypeKind. Invalid type syntax still produces a TypeSyntax placeholder so
 // parsing can continue.
 TypeSyntax Parser::parseType() {
+    if (check(TokenKind::LeftBracket)) {
+        const Token lb = advance();
+        const Token elemTok = advance();
+        const BuiltinTypeKind elemKind = builtinTypeKind(elemTok);
+        if (elemKind == BuiltinTypeKind::Invalid || elemKind == BuiltinTypeKind::Void) {
+            diagnostics_.error(elemTok.span,
+                               "expected scalar element type in `[T; N]` array type");
+        }
+
+        expect(TokenKind::Semicolon, "expected `;` in `[T; N]`");
+        const Token lenTok =
+            expect(TokenKind::IntegerLiteral, "expected compile-time array length");
+        expect(TokenKind::RightBracket, "expected `]` after array length");
+
+        const std::string lenText = tokenText(lenTok);
+        std::size_t consumed = 0;
+        const unsigned long long lenVal = std::stoull(lenText, &consumed, 0);
+        if (consumed != lenText.size() || lenVal == 0ULL) {
+            diagnostics_.error(lenTok.span,
+                               "array length must be a positive integer literal");
+        }
+
+        const SourceSpan span{.start = lb.span.start, .end = previous().span.end};
+        return TypeSyntax{.form = TypeSyntaxKind::FixedArray,
+                          .kind = BuiltinTypeKind::Invalid,
+                          .arrayElementKind = elemKind,
+                          .arrayLength = static_cast<std::uint64_t>(lenVal),
+                          .span = span};
+    }
+
     const Token token = advance();
     const BuiltinTypeKind kind = builtinTypeKind(token);
 
@@ -236,7 +268,7 @@ TypeSyntax Parser::parseType() {
         diagnostics_.error(token.span, "expected Core v0 scalar type");
     }
 
-    return TypeSyntax{.kind = kind, .span = token.span};
+    return TypeSyntax{.form = TypeSyntaxKind::Builtin, .kind = kind, .span = token.span};
 }
 
 // Parse a `{ ... }` statement block.
@@ -292,7 +324,8 @@ std::unique_ptr<Stmt> Parser::parseStmt() {
     }
     if (check(TokenKind::Identifier) || check(TokenKind::IntegerLiteral) ||
         check(TokenKind::StringLiteral) || check(TokenKind::KwTrue) ||
-        check(TokenKind::KwFalse) || check(TokenKind::LeftParen) || check(TokenKind::Minus) ||
+        check(TokenKind::KwFalse) || check(TokenKind::LeftParen) ||
+        check(TokenKind::LeftBracket) || check(TokenKind::Minus) ||
         check(TokenKind::Bang)) {
         return parseAssignmentOrCallStmt();
     }
@@ -396,40 +429,40 @@ std::unique_ptr<Stmt> Parser::parseWhileStmt() {
 // call expression as a statement. This function exists because both forms begin
 // with expression-looking tokens.
 std::unique_ptr<Stmt> Parser::parseAssignmentOrCallStmt() {
-    if (peek(1).kind == TokenKind::Equal) {
-        // A single token of lookahead is enough for Core v0 assignment:
-        // identifier followed by `=`. More complex "place" syntax, such as
-        // indexing or field access, will require revisiting this function.
-        const Token name = advance();
-        advance();
-        std::unique_ptr<Expr> value = parseExpr();
+    const std::size_t stmtStart = peek().span.start;
+    std::unique_ptr<Expr> lhs = parsePostfixExpr();
+
+    if (match(TokenKind::Equal)) {
+        if (!dynamic_cast<const NameExpr*>(lhs.get()) &&
+            !dynamic_cast<const IndexExpr*>(lhs.get())) {
+            diagnostics_.error(lhs->span,
+                               "assignment target must be a local name or indexed place");
+            parseExpr();
+            expect(TokenKind::Semicolon, "expected `;` after assignment");
+            return nullptr;
+        }
+
+        std::unique_ptr<Expr> rhs = parseExpr();
         const Token semicolon =
             expect(TokenKind::Semicolon, "expected `;` after assignment");
         return std::make_unique<AssignStmt>(
-            SourceSpan{.start = name.span.start, .end = semicolon.span.end},
-            tokenText(name), name.span, std::move(value));
+            SourceSpan{.start = stmtStart, .end = semicolon.span.end}, std::move(lhs),
+            std::move(rhs));
     }
 
-    std::unique_ptr<Expr> expr = parseExpr();
     const Token semicolon =
-        expect(TokenKind::Semicolon, "expected `;` after call statement");
+        expect(TokenKind::Semicolon, "expected `;` after expression statement");
 
-    auto* call = dynamic_cast<CallExpr*>(expr.get());
+    auto* call = dynamic_cast<CallExpr*>(lhs.get());
     if (!call) {
-        // This is a syntactic restriction from the frontend contract. The parser
-        // allows `foo();` but rejects `1 + 2;`. Whether `foo` returns void is a
-        // semantic question because it requires symbol lookup.
-        diagnostics_.error(expr->span,
+        diagnostics_.error(lhs->span,
                            "only call expressions may be used as expression statements in Core v0");
         return nullptr;
     }
 
-    // The expression parser produced ownership as unique_ptr<Expr>. Once this is
-    // known to be a CallExpr, ownership is transferred into the more precise
-    // CallStmt node.
-    expr.release();
+    lhs.release();
     return std::make_unique<CallStmt>(
-        SourceSpan{.start = call->span.start, .end = semicolon.span.end},
+        SourceSpan{.start = stmtStart, .end = semicolon.span.end},
         std::unique_ptr<CallExpr>(call));
 }
 
@@ -487,16 +520,27 @@ std::unique_ptr<Expr> Parser::parseUnaryExpr() {
 std::unique_ptr<Expr> Parser::parsePostfixExpr() {
     std::unique_ptr<Expr> expr = parsePrimaryExpr();
 
-    while (match(TokenKind::LeftParen)) {
-        // Calls are postfix operators: first parse the callee expression, then
-        // attach argument lists that follow it. This gives calls the highest
-        // precedence in Core v0.
-        std::vector<std::unique_ptr<Expr>> arguments = parseArgumentList();
-        const Token rightParen =
-            expect(TokenKind::RightParen, "expected `)` after argument list");
-        const SourceSpan span{.start = expr->span.start, .end = rightParen.span.end};
-        expr = std::make_unique<CallExpr>(span, std::move(expr),
-                                          std::move(arguments));
+    while (true) {
+        if (match(TokenKind::LeftParen)) {
+            std::vector<std::unique_ptr<Expr>> arguments = parseArgumentList();
+            const Token rightParen =
+                expect(TokenKind::RightParen, "expected `)` after argument list");
+            const SourceSpan span{.start = expr->span.start, .end = rightParen.span.end};
+            expr = std::make_unique<CallExpr>(span, std::move(expr),
+                                              std::move(arguments));
+            continue;
+        }
+
+        if (match(TokenKind::LeftBracket)) {
+            std::unique_ptr<Expr> index = parseExpr();
+            const Token rb =
+                expect(TokenKind::RightBracket, "expected `]` after index expression");
+            const SourceSpan span{.start = expr->span.start, .end = rb.span.end};
+            expr = std::make_unique<IndexExpr>(span, std::move(expr), std::move(index));
+            continue;
+        }
+
+        break;
     }
 
     return expr;
@@ -530,6 +574,30 @@ std::unique_ptr<Expr> Parser::parsePrimaryExpr() {
     if (match(TokenKind::Identifier)) {
         const Token token = previous();
         return std::make_unique<NameExpr>(token.span, tokenText(token));
+    }
+
+    if (match(TokenKind::LeftBracket)) {
+        const Token lb = previous();
+        std::vector<std::unique_ptr<Expr>> elements;
+
+        if (!check(TokenKind::RightBracket)) {
+            while (true) {
+                elements.push_back(parseExpr());
+                if (!match(TokenKind::Comma)) {
+                    break;
+                }
+                if (check(TokenKind::RightBracket)) {
+                    diagnostics_.error(peek().span,
+                                       "trailing commas are not allowed in array literals");
+                    break;
+                }
+            }
+        }
+
+        const Token rb =
+            expect(TokenKind::RightBracket, "expected `]` to close array literal");
+        return std::make_unique<ArrayLiteralExpr>(
+            SourceSpan{.start = lb.span.start, .end = rb.span.end}, std::move(elements));
     }
 
     if (match(TokenKind::LeftParen)) {

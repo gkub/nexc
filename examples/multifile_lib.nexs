@@ -1,0 +1,6 @@
+// Part of the multi-file example: linked conceptually with multifile_main.nexs
+// (concatenated by the driver before parse). Exports a small helper for `main`.
+
+fn get_five() -> i32 {
+    return 5;
+}

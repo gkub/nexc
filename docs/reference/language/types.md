@@ -9,6 +9,7 @@
 - [Boolean Type](#boolean-type)
 - [String Type](#string-type)
 - [Void Type](#void-type)
+- [Fixed-Size Arrays `[T; N]`](#fixed-size-arrays-t-n)
 - [Type Rules (Current)](#type-rules-current)
 - [Examples](#examples)
 - [Cross References](#cross-references)
@@ -58,12 +59,37 @@ Current built-in types:
 - `void` is valid as a function return type.
 - `void` is not a first-class value expression type.
 
+## Fixed-Size Arrays `[T; N]`
+
+Fixed arrays are implemented for **locals** (`let` / `let mut`): element types are
+the usual scalar built-ins (`i8`–`u64`, `bool`). **`void`**, **`str`**, and nested
+`[…]` element types are rejected. **`N`** must be a positive decimal or hex integer
+literal in the type.
+
+**Meaning:** `[T; N]` is **exactly `N` elements** of type `T`. Storage is inline
+(stack slots lowered as ranked `memref`s). This is not a growable vector and not a
+slice; see [arrays_vectors_linalg.md](../../design/arrays_vectors_linalg.md).
+
+**Not supported yet:** array-typed **function parameters**, **returns**, and
+**module `const`** initializers (diagnosed in semantic analysis).
+
+```nex
+let xs: [i32; 4] = [1, 2, 3, 4];
+let mut ys: [i32; 2] = [10, 20];
+ys[0] = 5;
+return xs[0] + ys[1];
+```
+
 ## Type Rules (Current)
 
 - Arithmetic operators require integer operands.
 - Comparison/equality produce `bool`.
 - Function call arguments must match declared parameter types.
 - `main` currently must return `void` or `i32`.
+- Array literals must match a contextual `[T; N]` type (from a `let` binding), or
+  every element must agree so the compiler can infer one `[T; N]` type.
+- Indexing requires an integer index; constant indices are checked against `N` when
+  the index is compile-time known.
 
 ## Examples
 
@@ -82,6 +108,7 @@ fn main() -> i32 {
 
 ## Cross References
 
+- `docs/design/arrays_vectors_linalg.md` (fixed arrays vs slices vs vectors)
 - `docs/reference/language/expressions.md`
 - `docs/reference/language/statements.md`
 - `docs/language/core_v0.md`

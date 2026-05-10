@@ -8,7 +8,7 @@
  *
  * Nex owns the source-level meaning of print/println. This file is only the
  * current binary bridge used by the native driver: generated LLVM IR calls these
- * stable symbols, and clang links this C implementation into the executable.
+ * stable symbols, and the link step (`ld.lld`) pulls this archive into the executable.
  * Later, once Nex can express enough low-level operations itself, this runtime
  * can move toward being implemented in Nex.
  */

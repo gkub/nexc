@@ -5,6 +5,7 @@
 #include "nexc/frontend/token.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -14,17 +15,29 @@ namespace nexc::ir {
 
 // IR Type is the backend-facing version of a Core v0 type.
 //
-// It deliberately wraps the frontend's BuiltinTypeKind for now. That keeps the
-// first IR slice small while still making an important compiler idea explicit:
-// once we are in IR, every produced value has a known type.
+// Scalar types wrap BuiltinTypeKind. Fixed arrays `[T; N]` store element kind and
+// length for layout and lowering.
 struct Type {
+    enum class Shape { Scalar, FixedArray };
+
+    Shape shape = Shape::Scalar;
     BuiltinTypeKind kind = BuiltinTypeKind::Invalid;
+
+    BuiltinTypeKind elementKind = BuiltinTypeKind::Invalid;
+    std::uint64_t arrayLength = 0;
 
     // Return true for the special "no value" type used by void functions.
     //
     // Lowering frequently needs this check because void functions have no MLIR
     // result type and void calls have no ValueRef result.
-    bool isVoid() const { return kind == BuiltinTypeKind::Void; }
+    bool isVoid() const {
+        return shape == Shape::Scalar && kind == BuiltinTypeKind::Void;
+    }
+
+    bool isFixedArray() const { return shape == Shape::FixedArray; }
+
+    // Element scalar type for `[T; N]` (for loads/stores and diagnostics).
+    Type elementType() const;
 
     // Return true for fixed-width integer types.
     //
@@ -84,6 +97,15 @@ struct Operation {
         // Side-effecting local storage operations.
         DeclareLocal,
         StoreLocal,
+
+        // Fixed-size array value: element temporaries are listed in `arguments`.
+        ArrayLiteral,
+
+        // `base[index]` for array-typed SSA values (memref handles).
+        IndexLoad,
+
+        // `base[index] = value` for mutating an element.
+        IndexStore,
 
         // Structured control flow. These remain structured on purpose so the
         // first IR dump is easy to understand and can later lower naturally to

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <string>
@@ -20,27 +21,40 @@ namespace {
 // meaning-level view: it answers questions such as "is this an integer?" and
 // "is this void?" without exposing parser details to every check.
 struct Type {
+    enum class Form { Builtin, FixedArray };
+
+    Form form = Form::Builtin;
     BuiltinTypeKind kind = BuiltinTypeKind::Invalid;
 
-    // Invalid is an error-recovery type. Treating it specially prevents one bad
-    // expression from causing a flood of follow-up type errors.
-    bool isInvalid() const { return kind == BuiltinTypeKind::Invalid; }
+    BuiltinTypeKind arrayElement = BuiltinTypeKind::Invalid;
+    std::uint64_t arrayLength = 0;
 
-    // Void is allowed as a function return type, but not as a first-class value.
-    bool isVoid() const { return kind == BuiltinTypeKind::Void; }
+    bool isInvalid() const {
+        return form == Form::Builtin && kind == BuiltinTypeKind::Invalid;
+    }
 
-    // Bool is a distinct Core v0 scalar type, even though lowering later maps it
-    // to MLIR i1.
-    bool isBool() const { return kind == BuiltinTypeKind::Bool; }
+    bool isVoid() const {
+        return form == Form::Builtin && kind == BuiltinTypeKind::Void;
+    }
 
-    // String literals currently have type str for semantic built-in printing.
-    bool isString() const { return kind == BuiltinTypeKind::Str; }
+    bool isBool() const {
+        return form == Form::Builtin && kind == BuiltinTypeKind::Bool;
+    }
 
-    // Return true for fixed-width signed/unsigned integer types.
-    //
-    // Bool is intentionally not treated as an integer here. Conditions accept
-    // bool and integers, but arithmetic requires real integer types.
+    bool isString() const {
+        return form == Form::Builtin && kind == BuiltinTypeKind::Str;
+    }
+
+    bool isFixedArray() const { return form == Form::FixedArray; }
+
+    Type elementScalarType() const {
+        return Type{.form = Form::Builtin, .kind = arrayElement};
+    }
+
     bool isInteger() const {
+        if (form != Form::Builtin) {
+            return false;
+        }
         switch (kind) {
         case BuiltinTypeKind::I8:
         case BuiltinTypeKind::I16:
@@ -62,16 +76,31 @@ struct Type {
     }
 };
 
+Type builtinScalar(BuiltinTypeKind k) {
+    return Type{.form = Type::Form::Builtin, .kind = k};
+}
+
 // Compare two semantic types for exact equality, with invalid acting as a
 // recovery wildcard.
 bool sameType(Type left, Type right) {
-    // Invalid types are treated as compatible so one earlier error does not
-    // cascade into many redundant "type mismatch" diagnostics.
-    return left.kind == right.kind || left.isInvalid() || right.isInvalid();
+    if (left.isInvalid() || right.isInvalid()) {
+        return true;
+    }
+    if (left.form != right.form) {
+        return false;
+    }
+    if (left.form == Type::Form::Builtin) {
+        return left.kind == right.kind;
+    }
+    return left.arrayElement == right.arrayElement && left.arrayLength == right.arrayLength;
 }
 
 // Convert a semantic type to the spelling used in diagnostics.
 std::string typeName(Type type) {
+    if (type.form == Type::Form::FixedArray) {
+        return "[" + std::string(builtinTypeName(type.arrayElement)) + "; " +
+               std::to_string(type.arrayLength) + "]";
+    }
     return std::string(builtinTypeName(type.kind));
 }
 
@@ -80,7 +109,13 @@ std::string typeName(Type type) {
 // This is tiny today because Core v0 only has built-in scalar types. Keeping the
 // conversion explicit gives future user-defined types a clear expansion point.
 Type typeFromSyntax(TypeSyntax syntax) {
-    return Type{.kind = syntax.kind};
+    if (syntax.form == TypeSyntaxKind::FixedArray) {
+        return Type{.form = Type::Form::FixedArray,
+                    .kind = BuiltinTypeKind::Invalid,
+                    .arrayElement = syntax.arrayElementKind,
+                    .arrayLength = syntax.arrayLength};
+    }
+    return builtinScalar(syntax.kind);
 }
 
 // Return true if a type is allowed in `if`, `while`, and `!` condition contexts.
@@ -152,6 +187,9 @@ std::optional<unsigned long long> parseUnsignedInteger(std::string_view raw) {
 // Non-integer types return 0 so callers can use that as "not applicable" after
 // checking type.isInteger().
 unsigned bitWidth(Type type) {
+    if (type.form == Type::Form::FixedArray) {
+        return bitWidth(type.elementScalarType());
+    }
     // Integer widths are needed for literal range checks and constant overflow
     // diagnostics. Non-integer types return 0 because they have no integer range.
     switch (type.kind) {
@@ -182,6 +220,9 @@ unsigned bitWidth(Type type) {
 // Signedness is needed for literal range and overflow checks because i8 and u8
 // have the same bit width but different maximum positive literal values.
 bool isSigned(Type type) {
+    if (type.form == Type::Form::FixedArray) {
+        return isSigned(type.elementScalarType());
+    }
     // Signedness only matters for integer types. Returning false for non-integers
     // keeps helper code simple after callers have already checked isInteger().
     switch (type.kind) {
@@ -269,11 +310,11 @@ private:
     // Built-ins participate in normal call checking but cannot be redefined by
     // source code.
     void installBuiltins() {
-        const Type str{.kind = BuiltinTypeKind::Str};
-        const Type i32{.kind = BuiltinTypeKind::I32};
-        const Type u64{.kind = BuiltinTypeKind::U64};
-        const Type boolType{.kind = BuiltinTypeKind::Bool};
-        const Type voidType{.kind = BuiltinTypeKind::Void};
+        const Type str = builtinScalar(BuiltinTypeKind::Str);
+        const Type i32 = builtinScalar(BuiltinTypeKind::I32);
+        const Type u64 = builtinScalar(BuiltinTypeKind::U64);
+        const Type boolType = builtinScalar(BuiltinTypeKind::Bool);
+        const Type voidType = builtinScalar(BuiltinTypeKind::Void);
         const SourceSpan builtinSpan{};
 
         // Built-ins enter the same function table as user functions so call
@@ -345,21 +386,38 @@ private:
                 std::vector<Type> parameterTypes;
                 parameterTypes.reserve(function->parameters.size());
                 for (const ParameterSyntax& parameter : function->parameters) {
-                    parameterTypes.push_back(typeFromSyntax(parameter.type));
+                    const Type pt = typeFromSyntax(parameter.type);
+                    if (pt.isFixedArray()) {
+                        diagnostics_.error(
+                            parameter.type.span,
+                            "array-typed parameters are not supported in Core v0 yet");
+                    }
+                    parameterTypes.push_back(pt);
+                }
+
+                const Type returnType = typeFromSyntax(function->returnType);
+                if (returnType.isFixedArray()) {
+                    diagnostics_.error(function->returnType.span,
+                                       "array return types are not supported in Core v0 yet");
                 }
 
                 functions_[function->name] = FunctionSymbol{
                     .nameSpan = function->nameSpan,
                     .parameterTypes = std::move(parameterTypes),
-                    .returnType = typeFromSyntax(function->returnType),
+                    .returnType = returnType,
                 };
                 continue;
             }
 
             if (const auto* constant = dynamic_cast<const ConstDecl*>(item.get())) {
                 declareTopLevel(constant->name, constant->nameSpan);
+                const Type constTy = typeFromSyntax(constant->type);
+                if (constTy.isFixedArray()) {
+                    diagnostics_.error(constant->type.span,
+                                       "module constants cannot have array type yet");
+                }
                 globals_[constant->name] = ValueSymbol{
-                    .type = typeFromSyntax(constant->type),
+                    .type = constTy,
                     .isMutable = false,
                     .isConst = true,
                     .nameSpan = constant->nameSpan,
@@ -401,8 +459,9 @@ private:
             diagnostics_.error(main.nameSpan, "`main` must not have parameters in Core v0");
         }
 
-        if (main.returnType.kind != BuiltinTypeKind::Void &&
-            main.returnType.kind != BuiltinTypeKind::I32) {
+        if (!main.returnType.isVoid() &&
+            !(main.returnType.form == Type::Form::Builtin &&
+              main.returnType.kind == BuiltinTypeKind::I32)) {
             diagnostics_.error(main.nameSpan,
                                "`main` must return `void` or `i32` in Core v0");
         }
@@ -518,6 +577,21 @@ private:
         return nullptr;
     }
 
+    void validateFixedArrayDecl(Type type, SourceSpan span) {
+        if (!type.isFixedArray()) {
+            return;
+        }
+        if (type.arrayLength == 0) {
+            diagnostics_.error(span, "fixed array length must be greater than zero");
+        }
+        const BuiltinTypeKind elem = type.arrayElement;
+        if (elem == BuiltinTypeKind::Void || elem == BuiltinTypeKind::Str ||
+            elem == BuiltinTypeKind::Invalid) {
+            diagnostics_.error(span,
+                               "fixed array element cannot be `void`, `str`, or invalid");
+        }
+    }
+
     // Analyze one statement and report whether it definitely returns.
     //
     // The bool return is for return-path analysis only. It does not mean the
@@ -540,6 +614,7 @@ private:
             // Analyze the initializer before declaring the local, so `let x: i32
             // = x;` does not accidentally refer to the binding being declared.
             const Type declared = typeFromSyntax(let->type);
+            validateFixedArrayDecl(declared, let->type.span);
             ExprInfo init = analyzeExpr(*let->init, declared);
             if (!sameType(declared, init.type)) {
                 diagnostics_.error(let->init->span,
@@ -553,27 +628,80 @@ private:
         }
 
         if (const auto* assign = dynamic_cast<const AssignStmt*>(&stmt)) {
-            // Assignment checks three separate semantic facts: the name exists,
-            // the binding is mutable, and the assigned value has the right type.
-            const ValueSymbol* symbol = lookupValue(assign->name);
-            if (!symbol) {
-                diagnostics_.error(assign->nameSpan,
-                                   "undefined local `" + assign->name + "`");
-                analyzeExpr(*assign->value, std::nullopt);
+            if (const auto* nameExpr = dynamic_cast<const NameExpr*>(assign->target.get())) {
+                const ValueSymbol* symbol = lookupValue(nameExpr->name);
+                if (!symbol) {
+                    diagnostics_.error(nameExpr->span,
+                                       "undefined local `" + nameExpr->name + "`");
+                    analyzeExpr(*assign->value, std::nullopt);
+                    return false;
+                }
+                if (!symbol->isMutable) {
+                    diagnostics_.error(nameExpr->span,
+                                       "cannot assign to immutable binding `" +
+                                           nameExpr->name + "`");
+                }
+                ExprInfo value = analyzeExpr(*assign->value, symbol->type);
+                if (!sameType(symbol->type, value.type)) {
+                    diagnostics_.error(assign->value->span,
+                                       "cannot assign value of type `" +
+                                           typeName(value.type) + "` to `" + nameExpr->name +
+                                           "` of type `" + typeName(symbol->type) + "`");
+                }
                 return false;
             }
-            if (!symbol->isMutable) {
-                diagnostics_.error(assign->nameSpan,
-                                   "cannot assign to immutable binding `" +
-                                       assign->name + "`");
+
+            if (const auto* indexExpr = dynamic_cast<const IndexExpr*>(assign->target.get())) {
+                const auto* baseName =
+                    dynamic_cast<const NameExpr*>(indexExpr->base.get());
+                if (!baseName) {
+                    diagnostics_.error(indexExpr->base->span,
+                                       "indexed assignment requires a local array name");
+                    analyzeExpr(*assign->value, std::nullopt);
+                    return false;
+                }
+
+                const ValueSymbol* symbol = lookupValue(baseName->name);
+                if (!symbol) {
+                    diagnostics_.error(baseName->span,
+                                       "undefined local `" + baseName->name + "`");
+                    analyzeExpr(*assign->value, std::nullopt);
+                    return false;
+                }
+                if (!symbol->isMutable) {
+                    diagnostics_.error(baseName->span,
+                                       "cannot assign through immutable array binding `" +
+                                           baseName->name + "`");
+                    analyzeExpr(*assign->value, std::nullopt);
+                    return false;
+                }
+                if (!symbol->type.isFixedArray()) {
+                    diagnostics_.error(baseName->span,
+                                       "indexed assignment requires an array local");
+                    analyzeExpr(*assign->value, std::nullopt);
+                    return false;
+                }
+
+                ExprInfo idx = analyzeExpr(*indexExpr->index, builtinScalar(BuiltinTypeKind::I32));
+                if (!idx.type.isInteger()) {
+                    diagnostics_.error(indexExpr->index->span,
+                                       "array index must be an integer type");
+                }
+
+                const Type elem = symbol->type.elementScalarType();
+                ExprInfo value = analyzeExpr(*assign->value, elem);
+                if (!sameType(elem, value.type)) {
+                    diagnostics_.error(assign->value->span,
+                                       "cannot assign value of type `" +
+                                           typeName(value.type) + "` to element type `" +
+                                           typeName(elem) + "`");
+                }
+                return false;
             }
-            ExprInfo value = analyzeExpr(*assign->value, symbol->type);
-            if (!sameType(symbol->type, value.type)) {
-                diagnostics_.error(assign->value->span,
-                                   "cannot assign value of type `" +
-                                       typeName(value.type) + "` to `" + assign->name +
-                                       "` of type `" + typeName(symbol->type) + "`");
-            }
+
+            diagnostics_.error(assign->target->span,
+                               "assignment target must be a local name or indexed place");
+            analyzeExpr(*assign->value, std::nullopt);
             return false;
         }
 
@@ -677,7 +805,7 @@ private:
         if (const auto* integer = dynamic_cast<const IntegerLiteralExpr*>(&expr)) {
             // Unsuffixed integer literals get their type from context when there
             // is one, otherwise they default to i32 for Core v0.
-            Type type = expected.value_or(Type{.kind = BuiltinTypeKind::I32});
+            Type type = expected.value_or(builtinScalar(BuiltinTypeKind::I32));
             if (!type.isInteger()) {
                 diagnostics_.error(expr.span,
                                    "integer literal cannot be used as `" +
@@ -695,7 +823,7 @@ private:
         if (const auto* boolean = dynamic_cast<const BoolLiteralExpr*>(&expr)) {
             (void)boolean;
             return ExprInfo{
-                .type = Type{.kind = BuiltinTypeKind::Bool},
+                .type = builtinScalar(BuiltinTypeKind::Bool),
                 .isConstant = true,
                 .integerValue = boolean->value ? 1ULL : 0ULL,
             };
@@ -704,7 +832,7 @@ private:
         if (const auto* string = dynamic_cast<const StringLiteralExpr*>(&expr)) {
             (void)string;
             return ExprInfo{
-                .type = Type{.kind = BuiltinTypeKind::Str},
+                .type = builtinScalar(BuiltinTypeKind::Str),
                 .isConstant = true,
             };
         }
@@ -738,6 +866,89 @@ private:
 
         if (const auto* binary = dynamic_cast<const BinaryExpr*>(&expr)) {
             return analyzeBinaryExpr(*binary, expected);
+        }
+
+        if (const auto* arrayLit = dynamic_cast<const ArrayLiteralExpr*>(&expr)) {
+            if (expected && expected->isFixedArray()) {
+                const Type arr = *expected;
+                if (arrayLit->elements.size() != arr.arrayLength) {
+                    diagnostics_.error(expr.span,
+                                       "array literal length " +
+                                           std::to_string(arrayLit->elements.size()) +
+                                           " does not match type `" + typeName(arr) + "`");
+                }
+                const Type elemType = arr.elementScalarType();
+                bool allConst = true;
+                for (const std::unique_ptr<Expr>& el : arrayLit->elements) {
+                    ExprInfo ei = analyzeExpr(*el, elemType);
+                    if (!sameType(elemType, ei.type)) {
+                        diagnostics_.error(el->span,
+                                           "array element type `" + typeName(ei.type) +
+                                               "` does not match `" + typeName(elemType) +
+                                               "`");
+                    }
+                    allConst = allConst && ei.isConstant;
+                }
+                return ExprInfo{.type = arr, .isConstant = allConst};
+            }
+
+            if (arrayLit->elements.empty()) {
+                diagnostics_.error(expr.span,
+                                   "empty array literal requires a contextual `[T; N]` type");
+                return ExprInfo{.type = Type{}, .isConstant = false};
+            }
+
+            ExprInfo first = analyzeExpr(*arrayLit->elements[0], std::nullopt);
+            bool allConst = first.isConstant;
+            for (std::size_t i = 1; i < arrayLit->elements.size(); ++i) {
+                ExprInfo ei =
+                    analyzeExpr(*arrayLit->elements[i], first.type);
+                if (!sameType(first.type, ei.type)) {
+                    diagnostics_.error(arrayLit->elements[i]->span,
+                                       "array literal elements must have the same type");
+                }
+                allConst = allConst && ei.isConstant;
+            }
+
+            if (first.type.form != Type::Form::Builtin) {
+                diagnostics_.error(expr.span,
+                                   "cannot infer array type from non-scalar elements");
+                return ExprInfo{.type = Type{}, .isConstant = false};
+            }
+
+            const Type inferred{.form = Type::Form::FixedArray,
+                                .kind = BuiltinTypeKind::Invalid,
+                                .arrayElement = first.type.kind,
+                                .arrayLength = arrayLit->elements.size()};
+            return ExprInfo{.type = inferred, .isConstant = allConst};
+        }
+
+        if (const auto* indexExpr = dynamic_cast<const IndexExpr*>(&expr)) {
+            ExprInfo base = analyzeExpr(*indexExpr->base, std::nullopt);
+            ExprInfo index =
+                analyzeExpr(*indexExpr->index, builtinScalar(BuiltinTypeKind::I32));
+
+            if (!base.type.isFixedArray()) {
+                diagnostics_.error(indexExpr->base->span,
+                                   "indexed access requires an array value");
+                return ExprInfo{.type = Type{}, .isConstant = false};
+            }
+
+            if (!index.type.isInteger()) {
+                diagnostics_.error(indexExpr->index->span,
+                                   "array index must be an integer type");
+            }
+
+            if (index.isConstant && index.integerValue) {
+                const unsigned long long idxVal = *index.integerValue;
+                if (idxVal >= base.type.arrayLength) {
+                    diagnostics_.error(indexExpr->index->span,
+                                       "array index out of bounds for `" +
+                                           typeName(base.type) + "`");
+                }
+            }
+
+            return ExprInfo{.type = base.type.elementScalarType(), .isConstant = false};
         }
 
         if (const auto* paren = dynamic_cast<const ParenExpr*>(&expr)) {
@@ -825,14 +1036,14 @@ private:
                                    "`!` operand must be `bool` or integer, not `" +
                                        typeName(operand.type) + "`");
             }
-            return ExprInfo{.type = Type{.kind = BuiltinTypeKind::Bool},
+            return ExprInfo{.type = builtinScalar(BuiltinTypeKind::Bool),
                             .isConstant = operand.isConstant};
         }
 
         if (unary.op == TokenKind::Minus) {
             // Unary minus defaults integer literals to i32 unless an outer
             // expression or declaration provides a more specific expected type.
-            Type expectedInteger = expected.value_or(Type{.kind = BuiltinTypeKind::I32});
+            Type expectedInteger = expected.value_or(builtinScalar(BuiltinTypeKind::I32));
             ExprInfo operand = analyzeExpr(*unary.operand, expectedInteger);
             if (!operand.type.isInteger()) {
                 diagnostics_.error(unary.operand->span,
@@ -864,7 +1075,7 @@ private:
                 diagnostics_.error(binary.right->span,
                                    "right operand must be `bool` or integer");
             }
-            return ExprInfo{.type = Type{.kind = BuiltinTypeKind::Bool},
+            return ExprInfo{.type = builtinScalar(BuiltinTypeKind::Bool),
                             .isConstant = left.isConstant && right.isConstant};
         }
 
@@ -912,7 +1123,7 @@ private:
         if (comparison || equality) {
             // Comparisons and equality produce bool even when their operands are
             // integers.
-            return ExprInfo{.type = Type{.kind = BuiltinTypeKind::Bool},
+            return ExprInfo{.type = builtinScalar(BuiltinTypeKind::Bool),
                             .isConstant = left.isConstant && right.isConstant};
         }
 

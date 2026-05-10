@@ -30,7 +30,7 @@ Current statement forms:
 
 - block: `{ ... }`
 - local declaration: `let` / `let mut`
-- assignment: `name = expr;`
+- assignment: `name = expr;` or `name[index] = expr;` (array element update)
 - return: `return;` or `return expr;`
 - conditional: `if (...) stmt [else stmt]`
 - loop: `while (...) stmt`
@@ -49,8 +49,10 @@ Current statement forms:
 
 ## Assignment Statements
 
-- Assignment targets currently resolve to mutable local bindings.
-- Assigning to immutable `let` is a diagnostic error.
+- Assignment targets are either a **mutable local name** or an **indexed mutable
+  array** (`arr[i] = …`) where `arr` was declared with `let mut`.
+- Assigning to immutable `let` or through an immutable array binding is a diagnostic
+  error.
 
 ## Return Statements
 

@@ -12,8 +12,11 @@ TranslationUnit
             IntegerLiteral 10
         Body
           BlockStmt
-            AssignStmt x
-              BinaryExpr Plus
+            AssignStmt
+              Target
                 NameExpr x
-                IntegerLiteral 1
+              Value
+                BinaryExpr Plus
+                  NameExpr x
+                  IntegerLiteral 1
       ReturnStmt

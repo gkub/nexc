@@ -36,7 +36,7 @@ interface.
 
 ```text
 nexc (--dump-tokens | --dump-ast | --dump-ast-dot | --dump-ir | --dump-mlir | --dump-llvm | --check) <file.nexs>
-nexc <file.nexs> -o <output>
+nexc <file.nexs>... -o <output>
 ```
 
 ## Modes
@@ -48,7 +48,11 @@ nexc <file.nexs> -o <output>
 - `--dump-mlir`: lower typed IR and print MLIR
 - `--dump-llvm`: lower through MLIR LLVM dialect and print LLVM IR
 - `--check`: semantic analysis without IR/MLIR/LLVM dumps
-- `<input> -o <output>`: compile to native executable via LLVM IR + host toolchain
+- `<file>... -o <output>`: concatenate the listed sources in order (newline between
+  files), parse as one translation unit, then compile to a native Linux executable
+  (LLVM IR -> `llc` ->
+  object file -> `ld.lld` with CRT + `libc` + `libnexrt.a`; requires `llc` and
+  `ld.lld` at CMake configure time, see [build_and_test.md](./build_and_test.md))
 
 ## Exit Codes
 
@@ -64,6 +68,8 @@ build/nexc --dump-mlir examples/pipeline_walkthrough.nexs
 build/nexc --dump-llvm examples/return_42.nexs
 build/nexc examples/hello.nexs -o build/hello
 ./build/hello
+build/nexc examples/multifile_lib.nexs examples/multifile_main.nexs -o build/multifile
+./build/multifile
 ```
 
 ## Environment Variables

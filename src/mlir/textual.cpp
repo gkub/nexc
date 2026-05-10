@@ -120,6 +120,9 @@ struct StringValue {
 };
 
 unsigned integerBitWidth(ir::Type type) {
+    if (type.isFixedArray()) {
+        return integerBitWidth(type.elementType());
+    }
     switch (type.kind) {
     case BuiltinTypeKind::I8:
     case BuiltinTypeKind::U8:
@@ -143,6 +146,9 @@ unsigned integerBitWidth(ir::Type type) {
 }
 
 bool isUnsignedInteger(ir::Type type) {
+    if (type.isFixedArray()) {
+        return isUnsignedInteger(type.elementType());
+    }
     switch (type.kind) {
     case BuiltinTypeKind::U8:
     case BuiltinTypeKind::U16:
@@ -168,6 +174,10 @@ bool isUnsignedInteger(ir::Type type) {
 // `void` returns an empty Type because MLIR function types represent "no result"
 // by omitting the result type entirely, not by using a first-class void value.
 ::mlir::Type mlirType(::mlir::OpBuilder& builder, ir::Type type) {
+    if (type.isFixedArray()) {
+        (void)builder;
+        throw std::logic_error("mlirType does not map fixed array types to a single scalar");
+    }
     switch (type.kind) {
     case BuiltinTypeKind::Bool:
         return builder.getI1Type();
@@ -185,6 +195,38 @@ bool isUnsignedInteger(ir::Type type) {
     default:
         throw std::logic_error("MLIR lowering does not use this type as a single MLIR value");
     }
+}
+
+::mlir::MemRefType rankedArrayMemRefType(::mlir::OpBuilder& builder, ir::Type arrayType) {
+    if (!arrayType.isFixedArray()) {
+        throw std::logic_error("rankedArrayMemRefType expects a fixed array IR type");
+    }
+    llvm::SmallVector<int64_t, 1> shape;
+    shape.push_back(static_cast<int64_t>(arrayType.arrayLength));
+    const ::mlir::Type elemTy = mlirType(builder, arrayType.elementType());
+    return ::mlir::MemRefType::get(shape, elemTy);
+}
+
+void copyRankedMemRef(::mlir::OpBuilder& builder, ::mlir::Location loc,
+                      ::mlir::Value from, ::mlir::Value to, ir::Type arrayType) {
+    const int64_t n = static_cast<int64_t>(arrayType.arrayLength);
+    for (int64_t i = 0; i < n; ++i) {
+        auto idx = builder.create<::mlir::arith::ConstantIndexOp>(loc, i);
+        auto loaded =
+            builder.create<::mlir::memref::LoadOp>(loc, from, idx.getResult());
+        builder.create<::mlir::memref::StoreOp>(loc, loaded.getResult(), to,
+                                                idx.getResult());
+    }
+}
+
+::mlir::Value memrefIndexFromValue(::mlir::OpBuilder& builder, ::mlir::Location loc,
+                                   ::mlir::Value rawIndex) {
+    if (rawIndex.getType().isIndex()) {
+        return rawIndex;
+    }
+    return builder.create<::mlir::arith::IndexCastOp>(loc, builder.getIndexType(),
+                                                      rawIndex)
+        .getResult();
 }
 
 // Map a nex comparison token to MLIR's integer comparison predicate enum.
@@ -317,6 +359,15 @@ private:
             return false;
         case ir::Operation::Kind::StoreLocal:
             lowerStoreLocal(operation);
+            return false;
+        case ir::Operation::Kind::ArrayLiteral:
+            lowerArrayLiteral(operation);
+            return false;
+        case ir::Operation::Kind::IndexLoad:
+            lowerIndexLoad(operation);
+            return false;
+        case ir::Operation::Kind::IndexStore:
+            lowerIndexStore(operation);
             return false;
         case ir::Operation::Kind::Unary:
             lowerUnary(operation);
@@ -578,6 +629,11 @@ private:
             throw std::logic_error("MLIR lowering loaded an unknown local slot");
         }
 
+        if (result.type.isFixedArray()) {
+            bindValue(result, slot->second);
+            return;
+        }
+
         auto load = builder_.create<::mlir::memref::LoadOp>(loc_, slot->second);
         bindValue(result, load.getResult());
     }
@@ -590,17 +646,76 @@ private:
     void lowerDeclareLocal(const ir::Operation& operation) {
         const ir::ValueRef init = requiredValue(operation.value, "local initializer");
         const ::mlir::Value initValue = lookupValue(init);
+
+        if (init.type.isFixedArray()) {
+            const ::mlir::MemRefType slotType = rankedArrayMemRefType(builder_, init.type);
+            auto slot = builder_.create<::mlir::memref::AllocaOp>(loc_, slotType);
+
+            const auto [_, inserted] =
+                localSlots_.emplace(operation.local.id, slot.getResult());
+            if (!inserted) {
+                throw std::logic_error("MLIR lowering declared a local slot twice");
+            }
+
+            copyRankedMemRef(builder_, loc_, initValue, slot.getResult(), init.type);
+            return;
+        }
+
         const ::mlir::MemRefType slotType =
             ::mlir::MemRefType::get({}, mlirType(builder_, init.type));
         auto slot = builder_.create<::mlir::memref::AllocaOp>(loc_, slotType);
 
-        const auto [_, inserted] =
+        const auto [__, insertedScalar] =
             localSlots_.emplace(operation.local.id, slot.getResult());
-        if (!inserted) {
+        if (!insertedScalar) {
             throw std::logic_error("MLIR lowering declared a local slot twice");
         }
 
         builder_.create<::mlir::memref::StoreOp>(loc_, initValue, slot.getResult());
+    }
+
+    void lowerArrayLiteral(const ir::Operation& operation) {
+        const ir::ValueRef result = requiredValue(operation.result, "array literal");
+        auto slot = builder_.create<::mlir::memref::AllocaOp>(
+            loc_, rankedArrayMemRefType(builder_, result.type));
+
+        for (std::size_t i = 0; i < operation.arguments.size(); ++i) {
+            auto idx =
+                builder_.create<::mlir::arith::ConstantIndexOp>(loc_, static_cast<int64_t>(i));
+            const ::mlir::Value elem = lookupValue(operation.arguments[i]);
+            builder_.create<::mlir::memref::StoreOp>(loc_, elem, slot.getResult(),
+                                                       idx.getResult());
+        }
+
+        bindValue(result, slot.getResult());
+    }
+
+    void lowerIndexLoad(const ir::Operation& operation) {
+        const ir::ValueRef result = requiredValue(operation.result, "index load");
+        const ir::ValueRef base =
+            requiredValue(operation.left, "indexed load base");
+        const ir::ValueRef index =
+            requiredValue(operation.right, "indexed load index");
+
+        const ::mlir::Value idx =
+            memrefIndexFromValue(builder_, loc_, lookupValue(index));
+        auto loaded = builder_.create<::mlir::memref::LoadOp>(
+            loc_, lookupValue(base), idx);
+        bindValue(result, loaded.getResult());
+    }
+
+    void lowerIndexStore(const ir::Operation& operation) {
+        const ir::ValueRef stored =
+            requiredValue(operation.value, "indexed store value");
+        const ir::ValueRef base =
+            requiredValue(operation.left, "indexed store base");
+        const ir::ValueRef index =
+            requiredValue(operation.right, "indexed store index");
+
+        const ::mlir::Value idx =
+            memrefIndexFromValue(builder_, loc_, lookupValue(index));
+        builder_.create<::mlir::memref::StoreOp>(loc_, lookupValue(stored),
+                                                  lookupValue(base), idx);
     }
 
     // Lower assignment to an existing local slot.
