@@ -8,6 +8,24 @@ nex is currently in an early compiler implementation stage. The project remains
 docs-first: syntax, semantics, examples, and design constraints should be defined
 before or alongside implementation.
 
+## Table of Contents
+
+- [Core Principles](#core-principles)
+- [Project Goals](#project-goals)
+- [Current Focus](#current-focus)
+- [Current Status](#current-status)
+- [Development Setup](#development-setup)
+- [Quick Start](#quick-start)
+- [Planned Compiler Pipeline](#planned-compiler-pipeline)
+- [Repository Layout](#repository-layout)
+- [Key Documents](#key-documents)
+- [Language Direction](#language-direction)
+- [Implementation Language](#implementation-language)
+- [Status](#status)
+- [Next Documentation Step](#next-documentation-step)
+- [Forward Priorities](#forward-priorities)
+- [License](#license)
+
 ## Core Principles
 
 - Explicit costs over hidden work
@@ -222,33 +240,46 @@ nex.md      Living project overview and AI/context document
 
 ## Key Documents
 
-- [LLM_REFERENCE.md](./LLM_REFERENCE.md) - compact index for future chats/LLMs
-- [docs/IMPLEMENTATION_BACKLOG.md](./docs/IMPLEMENTATION_BACKLOG.md) - ordered next milestones (for, def-assign, arrays, pointers, …)
-- [docs/reference/README.md](./docs/reference/README.md) - long-lived user reference spine (language/toolchain/runtime)
-- [docs/reference/toolchain/compiler_cli.md](./docs/reference/toolchain/compiler_cli.md) - formal `build/nexc` CLI reference
-- [docs/reference/toolchain/build_and_test.md](./docs/reference/toolchain/build_and_test.md) - canonical build and test workflows
-- [docs/reference/toolchain/inspection_modes.md](./docs/reference/toolchain/inspection_modes.md) - `--dump-*`, `--check`, and compile mode behavior
-- [docs/reference/toolchain/diagnostics.md](./docs/reference/toolchain/diagnostics.md) - diagnostic format and error categories
-- [docs/reference/toolchain/artifacts.md](./docs/reference/toolchain/artifacts.md) - build/runtime/inspection artifact expectations
-- [docs/reference/language/builtins_and_io.md](./docs/reference/language/builtins_and_io.md) - built-ins and current I/O behavior
-- [docs/reference/language/expressions.md](./docs/reference/language/expressions.md) - expression forms and operator behavior
-- [docs/reference/language/types.md](./docs/reference/language/types.md) - current type system surface
-- [docs/reference/language/statements.md](./docs/reference/language/statements.md) - current statement forms and rules
-- [docs/reference/language/declarations_and_modules.md](./docs/reference/language/declarations_and_modules.md) - translation-unit and top-level declaration rules
-- [docs/reference/language/functions_and_calls.md](./docs/reference/language/functions_and_calls.md) - function signatures, calls, and built-ins
-- [docs/language/core_v0.md](./docs/language/core_v0.md) - frozen **early language** snapshot (historical baseline)
-- [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md) - beginner guide for writing current nex programs
-- [examples/pipeline_walkthrough.nexs](./examples/pipeline_walkthrough.nexs) - nontrivial frontend pipeline walkthrough input
-- [examples/for_loop.nexs](./examples/for_loop.nexs) - C-style `for` loop (sums 0..9)
-- [docs/design/frontend_contract.md](./docs/design/frontend_contract.md) - lexer/parser/AST contract for the first frontend implementation
-- [docs/design/core_v0_typed_ir.md](./docs/design/core_v0_typed_ir.md) - design note for the first backend-facing typed IR
-- [docs/design/llvm_native_first_slice.md](./docs/design/llvm_native_first_slice.md) - first LLVM/native lowering milestone plan
-- [docs/design/io_v1_spitball.md](./docs/design/io_v1_spitball.md) - stdin/files/pipes design notes
-- [docs/design/arrays_vectors_linalg.md](./docs/design/arrays_vectors_linalg.md) - arrays/vectors design notes for future linear algebra
-- [NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md) - educational guide to the compiler as it grows
-- [docs/user/frontend.md](./docs/user/frontend.md) - practical guide for frontend inspection and semantic checking
-- [nex.md](./nex.md) - living project overview and language-planning context
-- [docs/design/optimization_goals.md](./docs/design/optimization_goals.md) - optimization and static-analysis goals
+### Compiler walkthrough
+
+- [NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md) — end-to-end tour of the pipeline and implementation (lex → native link)
+- [LLM_REFERENCE.md](./LLM_REFERENCE.md) — compact index for tooling / assistants
+
+### Normative reference (`docs/reference/`)
+
+Each section’s **README** lists its topic files (types, statements, CLI, build/test, …).
+
+- [docs/reference/README.md](./docs/reference/README.md) — how this tree relates to tutorials, design drafts, and the Holy Book
+- [docs/reference/language/README.md](./docs/reference/language/README.md) — language rules by topic
+- [docs/reference/toolchain/README.md](./docs/reference/toolchain/README.md) — `nexc` CLI, build, test, dumps, diagnostics
+- [docs/reference/runtime/README.md](./docs/reference/runtime/README.md) — runtime / stdlib direction and bootstrap notes
+
+### Milestones and project narrative
+
+- [docs/IMPLEMENTATION_BACKLOG.md](./docs/IMPLEMENTATION_BACKLOG.md) — ordered next implementation milestones
+- [nex.md](./nex.md) — living language and project overview
+
+### Tutorials and frozen snapshots
+
+- [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md) — writing small programs today
+- [docs/user/frontend.md](./docs/user/frontend.md) — inspection modes and semantic checking from the user side
+- [docs/language/core_v0.md](./docs/language/core_v0.md) — frozen early language snapshot (historical baseline)
+
+### Example programs
+
+- [examples/pipeline_walkthrough.nexs](./examples/pipeline_walkthrough.nexs) — multi-stage pipeline walkthrough input
+- [examples/for_loop.nexs](./examples/for_loop.nexs) — C-style `for` loop (sums 0..9)
+
+### Design drafts (`docs/design/`)
+
+Architecture and future-work notes (not the live spec; see `docs/reference/` for current behavior). Starting points:
+
+- [docs/design/frontend_contract.md](./docs/design/frontend_contract.md)
+- [docs/design/core_v0_typed_ir.md](./docs/design/core_v0_typed_ir.md)
+- [docs/design/llvm_native_first_slice.md](./docs/design/llvm_native_first_slice.md)
+- [docs/design/io_v1_spitball.md](./docs/design/io_v1_spitball.md)
+- [docs/design/arrays_vectors_linalg.md](./docs/design/arrays_vectors_linalg.md)
+- [docs/design/optimization_goals.md](./docs/design/optimization_goals.md)
 
 ## Language Direction
 
@@ -318,4 +349,4 @@ explicitly updated.
 
 ## License
 
-TBD.
+Released under the [MIT License](./LICENSE).
