@@ -1,0 +1,3 @@
+tests/semantic_break_outside.nexs:2:5: error: `break` is only valid inside `while` or `for`
+  |     break;
+  |     ^~~~~~

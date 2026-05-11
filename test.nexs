@@ -1,4 +1,9 @@
+fn square(x: i32) -> i32 {
+    return x*x;
+}
+
 fn main() -> void {
-    print("test{}\nlol\n", 400-53);
+    let a: i32 = 12;
+    print("{}^2 = {}\n", a, square(a));
     return;
 }

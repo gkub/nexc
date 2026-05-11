@@ -17,9 +17,12 @@ enum class TokenKind {
     StringLiteral,
 
     KwBool,
+    KwBreak,
     KwConst,
+    KwContinue,
     KwElse,
     KwFalse,
+    KwFor,
     KwFn,
     KwIf,
     KwLet,

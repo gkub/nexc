@@ -21,7 +21,7 @@ Define the currently implemented type system surface for nex.
 ## Status
 
 - Stability: provisional
-- Applies to: Core v0 + post-v0 experimental stdin slice
+- Applies to: current implemented language + experimental stdin helpers
 
 ## Builtin Scalar Types
 
@@ -73,6 +73,12 @@ slice; see [arrays_vectors_linalg.md](../../design/arrays_vectors_linalg.md).
 **Not supported yet:** array-typed **function parameters**, **returns**, and
 **module `const`** initializers (diagnosed in semantic analysis).
 
+**Initialization today:** a `let` / `let mut` array binding **must** provide a
+**full** array literal of length `N` on the declaration. There is no
+“uninitialized `[T; N]` then fill in a loop” form yet; that work is scheduled
+after **`for`** loops and **definite assignment** for scalars—see
+[`docs/IMPLEMENTATION_BACKLOG.md`](../../IMPLEMENTATION_BACKLOG.md).
+
 ```nex
 let xs: [i32; 4] = [1, 2, 3, 4];
 let mut ys: [i32; 2] = [10, 20];
@@ -108,6 +114,7 @@ fn main() -> i32 {
 
 ## Cross References
 
+- `docs/IMPLEMENTATION_BACKLOG.md` (near-term array / loop / assignment work)
 - `docs/design/arrays_vectors_linalg.md` (fixed arrays vs slices vs vectors)
 - `docs/reference/language/expressions.md`
 - `docs/reference/language/statements.md`

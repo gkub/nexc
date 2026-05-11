@@ -19,12 +19,18 @@ std::string_view tokenKindName(TokenKind kind) {
         return "StringLiteral";
     case TokenKind::KwBool:
         return "KwBool";
+    case TokenKind::KwBreak:
+        return "KwBreak";
     case TokenKind::KwConst:
         return "KwConst";
+    case TokenKind::KwContinue:
+        return "KwContinue";
     case TokenKind::KwElse:
         return "KwElse";
     case TokenKind::KwFalse:
         return "KwFalse";
+    case TokenKind::KwFor:
+        return "KwFor";
     case TokenKind::KwFn:
         return "KwFn";
     case TokenKind::KwIf:
@@ -102,14 +108,23 @@ TokenKind keywordKind(std::string_view text) {
     if (text == "bool") {
         return TokenKind::KwBool;
     }
+    if (text == "break") {
+        return TokenKind::KwBreak;
+    }
     if (text == "const") {
         return TokenKind::KwConst;
+    }
+    if (text == "continue") {
+        return TokenKind::KwContinue;
     }
     if (text == "else") {
         return TokenKind::KwElse;
     }
     if (text == "false") {
         return TokenKind::KwFalse;
+    }
+    if (text == "for") {
+        return TokenKind::KwFor;
     }
     if (text == "fn") {
         return TokenKind::KwFn;

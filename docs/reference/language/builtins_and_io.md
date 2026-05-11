@@ -20,7 +20,7 @@ Define current language-level built-ins for observable I/O behavior.
 ## Status
 
 - Stability: provisional
-- Applies to: Core v0 + post-v0 experimental stdin slice
+- Applies to: current language + experimental stdin slice
 
 ## Built-ins
 
@@ -71,7 +71,7 @@ Legacy convenience when there are **no** placeholders:
 
 - `print(x)` / `println(x)` with a **single** `str` expression (not necessarily a literal), e.g. `println(readln())`, writes that string; `println` still appends one trailing newline.
 
-Escape sequences in string literals follow the usual Core v0 rules (`\n`, `\t`, `\"`, `\\`, `\r`).
+Escape sequences in string literals follow the usual rules (`\n`, `\t`, `\"`, `\\`, `\r`).
 
 ## Input
 

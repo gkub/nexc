@@ -245,6 +245,10 @@ private:
                 // whether return paths are valid.
                 break;
             }
+            if (dynamic_cast<const BreakStmt*>(statement.get()) ||
+                dynamic_cast<const ContinueStmt*>(statement.get())) {
+                break;
+            }
         }
         popScope();
     }
@@ -363,8 +367,23 @@ private:
             return;
         }
 
+        if (const auto* forStmt = dynamic_cast<const ForStmt*>(&stmt)) {
+            buildForStmt(*forStmt);
+            return;
+        }
+
         if (const auto* callStmt = dynamic_cast<const CallStmt*>(&stmt)) {
             buildCall(*callStmt->call);
+            return;
+        }
+
+        if (const auto* br = dynamic_cast<const BreakStmt*>(&stmt)) {
+            append(Operation{.kind = Operation::Kind::Break, .span = br->span});
+            return;
+        }
+
+        if (const auto* co = dynamic_cast<const ContinueStmt*>(&stmt)) {
+            append(Operation{.kind = Operation::Kind::Continue, .span = co->span});
             return;
         }
 
@@ -411,6 +430,69 @@ private:
         currentBlock_ = outerBlock;
 
         return block;
+    }
+
+    // `for (;;)` omits the middle clause; lowering treats that as an infinite loop
+    // by testing a constant `true` condition each iteration.
+    std::unique_ptr<Block> buildConditionBlockAlwaysTrue(SourceSpan span) {
+        auto block = std::make_unique<Block>(Block{.span = span});
+        Block* outerBlock = currentBlock_;
+        currentBlock_ = block.get();
+        Operation op{
+            .kind = Operation::Kind::BoolLiteral,
+            .span = span,
+            .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+            .boolValue = true,
+        };
+        const ValueRef value = *op.result;
+        append(std::move(op));
+        block->terminator = Terminator{
+            .kind = Terminator::Kind::ConditionValue,
+            .span = span,
+            .value = value,
+        };
+        currentBlock_ = outerBlock;
+        return block;
+    }
+
+    // Lower `for` to `init; while (cond) { body; step; }` using structured `While`
+    // IR so MLIR lowering stays unchanged.
+    //
+    // Rationale: `scf.while` lowering and return-path habits already understand
+    // `While`; duplicating that for a distinct `For` IR node would not teach much
+    // more at this stage. The dump will show `While` even when the source said
+    // `for`—see `docs/reference/language/statements.md`.
+    void buildForStmt(const ForStmt& forStmt) {
+        if (forStmt.init) {
+            buildStmt(*forStmt.init);
+        }
+
+        Operation whileOp{
+            .kind = Operation::Kind::While,
+            .span = forStmt.span,
+        };
+        if (forStmt.condition) {
+            whileOp.conditionBlock = buildConditionBlock(*forStmt.condition);
+        } else {
+            whileOp.conditionBlock = buildConditionBlockAlwaysTrue(forStmt.span);
+        }
+
+        auto bodyBlock = std::make_unique<Block>(Block{.span = forStmt.body->span});
+        Block* outerBlock = currentBlock_;
+        currentBlock_ = bodyBlock.get();
+        buildStmt(*forStmt.body);
+        currentBlock_ = outerBlock;
+        whileOp.bodyBlock = std::move(bodyBlock);
+
+        if (forStmt.step) {
+            auto stepBlock = std::make_unique<Block>(Block{.span = forStmt.step->span});
+            currentBlock_ = stepBlock.get();
+            buildStmt(*forStmt.step);
+            currentBlock_ = outerBlock;
+            whileOp.stepBlock = std::move(stepBlock);
+        }
+
+        append(std::move(whileOp));
     }
 
     // Lower one expression and return the IR temporary value it produces.

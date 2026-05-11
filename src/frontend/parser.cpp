@@ -311,11 +311,28 @@ std::unique_ptr<Stmt> Parser::parseStmt() {
     if (check(TokenKind::KwReturn)) {
         return parseReturnStmt();
     }
+    if (check(TokenKind::KwBreak)) {
+        const Token keyword = expect(TokenKind::KwBreak, "expected `break`");
+        const Token semicolon =
+            expect(TokenKind::Semicolon, "expected `;` after `break`");
+        return std::make_unique<BreakStmt>(
+            SourceSpan{.start = keyword.span.start, .end = semicolon.span.end});
+    }
+    if (check(TokenKind::KwContinue)) {
+        const Token keyword = expect(TokenKind::KwContinue, "expected `continue`");
+        const Token semicolon =
+            expect(TokenKind::Semicolon, "expected `;` after `continue`");
+        return std::make_unique<ContinueStmt>(
+            SourceSpan{.start = keyword.span.start, .end = semicolon.span.end});
+    }
     if (check(TokenKind::KwIf)) {
         return parseIfStmt();
     }
     if (check(TokenKind::KwWhile)) {
         return parseWhileStmt();
+    }
+    if (check(TokenKind::KwFor)) {
+        return parseForStmt();
     }
     if (check(TokenKind::KwConst)) {
         diagnostics_.error(peek().span,
@@ -421,6 +438,106 @@ std::unique_ptr<Stmt> Parser::parseWhileStmt() {
     return std::make_unique<WhileStmt>(
         SourceSpan{.start = keyword.span.start, .end = end}, std::move(condition),
         std::move(body));
+}
+
+// Parse `for (init; condition; step) body`.
+//
+// Each `;` separates clauses. Omitted `init` / `condition` / `step` are
+// represented as null fields on `ForStmt`. The step clause ends at `)` without a
+// trailing semicolon, matching C-family syntax.
+std::unique_ptr<Stmt> Parser::parseForStmt() {
+    const Token keyword = expect(TokenKind::KwFor, "expected `for`");
+    expect(TokenKind::LeftParen, "expected `(` after `for`");
+
+    std::unique_ptr<Stmt> init;
+    if (check(TokenKind::Semicolon)) {
+        advance();
+    } else if (check(TokenKind::KwLet)) {
+        init = parseLetStmt();
+    } else {
+        init = parseAssignmentOrCallStmt();
+        if (!init) {
+            while (!isAtEnd() && !check(TokenKind::Semicolon)) {
+                advance();
+            }
+            if (check(TokenKind::Semicolon)) {
+                advance();
+            }
+        }
+    }
+
+    std::unique_ptr<Expr> condition;
+    if (check(TokenKind::Semicolon)) {
+        advance();
+    } else {
+        condition = parseExpr();
+        expect(TokenKind::Semicolon, "expected `;` after for condition");
+    }
+
+    std::unique_ptr<Stmt> step = parseForStepClause();
+    if (!step) {
+        expect(TokenKind::RightParen, "expected `)` after for clauses");
+    }
+
+    std::unique_ptr<Stmt> body = parseStmt();
+    const std::size_t end = body ? body->span.end : keyword.span.end;
+    return std::make_unique<ForStmt>(
+        SourceSpan{.start = keyword.span.start, .end = end}, std::move(init),
+        std::move(condition), std::move(step), std::move(body));
+}
+
+// Parse the third clause of a `for` header: assignment, void call, or empty.
+//
+// When empty, the parser leaves the closing `)` unconsumed for `parseForStmt` to
+// match uniformly.
+std::unique_ptr<Stmt> Parser::parseForStepClause() {
+    if (check(TokenKind::RightParen)) {
+        return nullptr;
+    }
+
+    const std::size_t stmtStart = peek().span.start;
+    std::unique_ptr<Expr> lhs = parsePostfixExpr();
+
+    if (match(TokenKind::Equal)) {
+        if (!dynamic_cast<const NameExpr*>(lhs.get()) &&
+            !dynamic_cast<const IndexExpr*>(lhs.get())) {
+            diagnostics_.error(lhs->span,
+                               "for step assignment target must be a local name or "
+                               "indexed place");
+            parseExpr();
+            if (!check(TokenKind::RightParen)) {
+                expect(TokenKind::RightParen, "expected `)` after for step");
+            } else {
+                advance();
+            }
+            return nullptr;
+        }
+
+        std::unique_ptr<Expr> rhs = parseExpr();
+        const Token closing =
+            expect(TokenKind::RightParen, "expected `)` after for step");
+        return std::make_unique<AssignStmt>(
+            SourceSpan{.start = stmtStart, .end = closing.span.end}, std::move(lhs),
+            std::move(rhs));
+    }
+
+    auto* call = dynamic_cast<CallExpr*>(lhs.get());
+    if (!call) {
+        diagnostics_.error(lhs->span,
+                           "for step must be an assignment or a void call expression");
+        if (!check(TokenKind::RightParen)) {
+            expect(TokenKind::RightParen, "expected `)` after for step");
+        } else {
+            advance();
+        }
+        return nullptr;
+    }
+
+    lhs.release();
+    const Token closing = expect(TokenKind::RightParen, "expected `)` after for step");
+    return std::make_unique<CallStmt>(
+        SourceSpan{.start = stmtStart, .end = closing.span.end},
+        std::unique_ptr<CallExpr>(call));
 }
 
 // Parse the statement forms that start like expressions.

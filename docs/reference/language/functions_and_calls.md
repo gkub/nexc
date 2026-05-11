@@ -20,7 +20,7 @@ Define current function and call behavior in implemented language semantics.
 ## Status
 
 - Stability: provisional
-- Applies to: Core v0 + current built-in slice
+- Applies to: current implemented language surface + built-ins
 
 ## Function Declaration Form
 

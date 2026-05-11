@@ -11,8 +11,11 @@
 - [Return Statements](#return-statements)
 - [If / Else Statements](#if--else-statements)
 - [While Statements](#while-statements)
+- [For Statements](#for-statements)
+- [Break and Continue](#break-and-continue)
 - [Call Statements](#call-statements)
 - [Examples](#examples)
+- [Planned statement work (roadmap)](#planned-statement-work-roadmap)
 - [Cross References](#cross-references)
 
 ## Purpose
@@ -22,7 +25,7 @@ Define function-body statement forms currently accepted and implemented.
 ## Status
 
 - Stability: provisional
-- Applies to: Core v0 language surface
+- Applies to: current implemented language surface
 
 ## Statement Forms
 
@@ -33,7 +36,8 @@ Current statement forms:
 - assignment: `name = expr;` or `name[index] = expr;` (array element update)
 - return: `return;` or `return expr;`
 - conditional: `if (...) stmt [else stmt]`
-- loop: `while (...) stmt`
+- loops: `while (...) stmt`, **`for (init; condition; step) stmt`** (C-style; see below)
+- loop control: `break;`, `continue;` (only inside a `while` or `for` body)
 - call statement: `callee(...);` when return type is `void`
 
 ## Block Statements
@@ -70,6 +74,46 @@ Current statement forms:
 - `while` condition accepts `bool` or integer conditions.
 - Current return analysis does not assume loop execution.
 
+## For Statements
+
+C-style header with three clauses separated by `;`:
+
+```text
+for ( init ; condition ; step ) body
+```
+
+- **`init`:** optional. May be empty (`;` as the first token after `(`). Otherwise
+  **`let` / `let mut`** (with required `= expr` and trailing `;`), an **assignment**
+  statement, or a **void call** statement—same forms as ordinary statements, each
+  ending with `;` except the `let` form already includes its `;`.
+- **`condition`:** optional. If omitted (`for (init;; step)` or `for (;;)`), the
+  loop is **infinite** at the language level: lowering uses a constant-`true`
+  condition in typed IR. If present, it is an expression followed by `;`; type
+  rules match **`while`** (`bool` or integer condition-like).
+- **`step`:** optional. If present, it is an **assignment** or **void call**
+  **without** a trailing semicolon; the closing **`)`** of the `for` header ends the
+  clause. If omitted, write `)` immediately after the second `;` (e.g. `for (let mut i: i32 = 0; i < 10;)`).
+- **`body`:** a single statement (often a `{ ... }` block).
+
+**Scope:** a `let` in `init` is visible in **`condition`**, **`body`**, and
+**`step`**, and **not** after the `for` statement (one inner lexical scope for the
+whole construct).
+
+**Lowering:** the typed IR builder desugars `for` to **`init` + `while`** so the
+existing `While` → `scf.while` path is reused; dumps therefore show `While`, not a
+distinct `For` operation. The `for` **update** clause is a separate child block on
+that `While` so `continue` can run it before the next condition check.
+
+## Break and Continue
+
+- **`break;`** exits the innermost enclosing `while` or `for`.
+- **`continue;`** advances the innermost enclosing `while` or `for` to its next
+  iteration. For `for`, the **update** clause runs before the condition is
+  evaluated again.
+- Either form outside any loop is a semantic error.
+- **`continue`** is not allowed in the `for` **update** clause (the third header
+  expression).
+
 ## Call Statements
 
 - Standalone call statements are valid when call result is `void`.
@@ -91,8 +135,37 @@ fn main() -> i32 {
 }
 ```
 
+Counted iteration with **`for`** (see also [`examples/for_loop.nexs`](../../../examples/for_loop.nexs)):
+
+```nex
+fn main() -> i32 {
+    let mut sum: i32 = 0;
+    for (let mut i: i32 = 0; i < 10; i = i + 1) {
+        sum = sum + i;
+    }
+    return sum;
+}
+```
+
+## Planned statement work (roadmap)
+
+Further statement-level work (**uninitialized locals + definite assignment**,
+tighter **array** initialization rules, **pointers** — see backlog) is ordered
+here:
+
+- [`docs/IMPLEMENTATION_BACKLOG.md`](../../IMPLEMENTATION_BACKLOG.md)
+
+Not implemented yet:
+
+- Every `let` / `let mut` binding **must** include `= expr` on the same
+  declaration; there is no “declare now, assign later” form yet.
+- Fixed-size array locals require a **full** array literal initializer today
+  (see [`types.md`](types.md)); you cannot declare `[T; N]` and fill elements
+  without first writing `N` values in the literal.
+
 ## Cross References
 
 - `docs/reference/language/types.md`
 - `docs/reference/language/expressions.md`
 - `docs/language/core_v0.md`
+- `docs/IMPLEMENTATION_BACKLOG.md`

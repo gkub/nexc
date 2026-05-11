@@ -730,7 +730,50 @@ private:
             // This first analyzer does not prove loops execute, so while never
             // counts as a guaranteed return path.
             analyzeCondition(*whileStmt->condition, "`while` condition");
+            ++loopDepth_;
             analyzeStmt(*whileStmt->body);
+            --loopDepth_;
+            return false;
+        }
+
+        if (const auto* forStmt = dynamic_cast<const ForStmt*>(&stmt)) {
+            // `for` introduces one scope for init, condition, body, and step so a
+            // `let` in the init clause does not leak past the loop (C-family rule).
+            pushScope();
+            if (forStmt->init) {
+                analyzeStmt(*forStmt->init);
+            }
+            if (forStmt->condition) {
+                analyzeCondition(*forStmt->condition, "`for` condition");
+            }
+            ++loopDepth_;
+            analyzeStmt(*forStmt->body);
+            if (forStmt->step) {
+                inForStepClause_ = true;
+                analyzeStmt(*forStmt->step);
+                inForStepClause_ = false;
+            }
+            --loopDepth_;
+            popScope();
+            return false;
+        }
+
+        if (dynamic_cast<const BreakStmt*>(&stmt)) {
+            if (loopDepth_ == 0) {
+                diagnostics_.error(stmt.span,
+                                   "`break` is only valid inside `while` or `for`");
+            }
+            return false;
+        }
+
+        if (dynamic_cast<const ContinueStmt*>(&stmt)) {
+            if (loopDepth_ == 0) {
+                diagnostics_.error(
+                    stmt.span, "`continue` is only valid inside `while` or `for`");
+            } else if (inForStepClause_) {
+                diagnostics_.error(stmt.span,
+                                   "`continue` cannot appear in a `for` update clause");
+            }
             return false;
         }
 
@@ -1331,6 +1374,11 @@ private:
     }
 
     DiagnosticBag& diagnostics_;
+
+    // Lexical loop nesting for `break` / `continue` (both `while` and `for` body).
+    int loopDepth_ = 0;
+    // True while analyzing the third clause of `for`; `continue` there is invalid.
+    bool inForStepClause_ = false;
 
     // Top-level namespace shared by functions and module constants.
     std::unordered_map<std::string, SourceSpan> topLevelNames_;

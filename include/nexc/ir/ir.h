@@ -112,6 +112,12 @@ struct Operation {
         // MLIR `scf` or to explicit basic blocks.
         If,
         While,
+
+        // Loop control (only valid inside `while` / `for` bodies; semantic analysis
+        // enforces that). MLIR lowering uses a per-loop memref flag for `break` and
+        // `scf.yield` for both forms.
+        Break,
+        Continue,
     };
 
     Kind kind = Kind::Invalid;
@@ -152,6 +158,10 @@ struct Operation {
     std::unique_ptr<Block> thenBlock{};
     std::unique_ptr<Block> elseBlock{};
     std::unique_ptr<Block> bodyBlock{};
+    // Present only for `While` operations produced from `for` lowering. The main
+    // body runs first; `continue` jumps to this block before yielding to the
+    // next condition evaluation. Plain `while` leaves this unset.
+    std::unique_ptr<Block> stepBlock{};
 };
 
 // A Terminator records the final meaning of a block when the block yields

@@ -3,36 +3,43 @@ module {
     %c0_i32 = arith.constant 0 : i32
     %0 = memref.alloca() : memref<i32>
     memref.store %c0_i32, %0[] : memref<i32>
-    %c0_i32 = arith.constant 0 : i32
+    %c0_i32_0 = arith.constant 0 : i32
     %1 = memref.alloca() : memref<i32>
-    memref.store %c0_i32, %1[] : memref<i32>
+    memref.store %c0_i32_0, %1[] : memref<i32>
+    %2 = memref.alloca() : memref<i1>
+    %3 = arith.constant false
+    memref.store %3, %2[] : memref<i1>
     scf.while : () -> () {
-      %2 = memref.load %0[] : memref<i32>
-      %3 = arith.cmpi sle, %2, %arg0 : i32
-      scf.condition(%3)
-    } do {
       %4 = memref.load %0[] : memref<i32>
+      %5 = arith.cmpi sle, %4, %arg0 : i32
+      %6 = arith.constant true
+      %7 = memref.load %2[] : memref<i1>
+      %8 = arith.xori %7, %6 : i1
+      %9 = arith.andi %5, %8 : i1
+      scf.condition(%9)
+    } do {
+      %10 = memref.load %0[] : memref<i32>
       %c2_i32 = arith.constant 2 : i32
-      %5 = arith.remsi %4, %c2_i32 : i32
-      %c0_i32 = arith.constant 0 : i32
-      %6 = arith.cmpi eq, %5, %c0_i32 : i32
-      scf.if %6 {
-        %7 = memref.load %1[] : memref<i32>
-        %8 = memref.load %0[] : memref<i32>
-        %9 = arith.addi %7, %8 : i32
-        memref.store %9, %1[] : memref<i32>
+      %11 = arith.remsi %10, %c2_i32 : i32
+      %c0_i32_1 = arith.constant 0 : i32
+      %12 = arith.cmpi eq, %11, %c0_i32_1 : i32
+      scf.if %12 {
+        %13 = memref.load %1[] : memref<i32>
+        %14 = memref.load %0[] : memref<i32>
+        %15 = arith.addi %13, %14 : i32
+        memref.store %15, %1[] : memref<i32>
       } else {
-        %10 = memref.load %1[] : memref<i32>
-        memref.store %10, %1[] : memref<i32>
+        %16 = memref.load %1[] : memref<i32>
+        memref.store %16, %1[] : memref<i32>
       }
-      %11 = memref.load %0[] : memref<i32>
+      %17 = memref.load %0[] : memref<i32>
       %c1_i32 = arith.constant 1 : i32
-      %12 = arith.addi %11, %c1_i32 : i32
-      memref.store %12, %0[] : memref<i32>
+      %18 = arith.addi %17, %c1_i32 : i32
+      memref.store %18, %0[] : memref<i32>
       scf.yield
     }
-    %13 = memref.load %1[] : memref<i32>
-    return %13 : i32
+    %19 = memref.load %1[] : memref<i32>
+    return %19 : i32
   }
   func.func @main() -> i32 {
     %c10_i32 = arith.constant 10 : i32

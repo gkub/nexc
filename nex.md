@@ -147,6 +147,7 @@ nexc/
   README.md
   nex.md
   docs/
+    IMPLEMENTATION_BACKLOG.md
     language/
     design/
   examples/
@@ -163,6 +164,10 @@ nexc/
 `docs/language/` is for the formal user-facing language definition.
 
 `docs/design/` is for rationale, architecture notes, optimization plans, and implementation strategy.
+
+`docs/IMPLEMENTATION_BACKLOG.md` is the **ordered near-term implementation checklist**
+(compiler milestones and documentation tasks); see the section *Ordered
+implementation backlog* above.
 
 ---
 
@@ -183,7 +188,22 @@ Features should be defined in writing before implementation. A feature should ge
 
 The language definition should not accidentally emerge from whatever the compiler happens to implement first.
 
-The first **normative** slice of the grammar and semantics is **[docs/language/core_v0.md](./docs/language/core_v0.md)** (scalar types, functions, control flow, `let` / `mut` / `const`, entry point, and tooling hooks). Phases below remain the roadmap; Core v0 is what the initial lexer, parser, and semantic pass implement.
+An early **frozen grammar snapshot** is **[docs/language/core_v0.md](./docs/language/core_v0.md)** (useful for comparing “first milestone” intent to the living
+**[`docs/reference/`](./docs/reference/README.md)** text). The compiler has since
+grown; **backlog + reference** track what ships next, not phase numbers.
+
+---
+
+# Ordered implementation backlog (near term)
+
+Long-horizon phases are listed under **Planned Language Features** below. For the
+**next few concrete milestones** (what to build first, doc checklist), maintain
+a single file:
+
+- **[docs/IMPLEMENTATION_BACKLOG.md](./docs/IMPLEMENTATION_BACKLOG.md)**
+
+Update that backlog when sequencing changes; update **`docs/reference/`** when
+user-visible behavior ships so new learners are not misled by stale pages.
 
 ---
 
@@ -353,185 +373,39 @@ Normal builds should have minimal overhead. Debug/profile builds may enable inst
 
 ---
 
-# Planned Language Features
+# Language evolution (long horizon)
 
-## Phase 1 — Minimal Scalar Language
+**Near-term sequencing** (what the team builds next, with doc checklists) lives
+only in **[docs/IMPLEMENTATION_BACKLOG.md](./docs/IMPLEMENTATION_BACKLOG.md)**.
 
-Concrete syntax, types, overflow rules, and entry-point requirements for this phase are specified in [docs/language/core_v0.md](./docs/language/core_v0.md).
+The bullets below are **capability buckets**, not versioned releases. The frozen
+**first language snapshot** for historical comparison is still
+[`docs/language/core_v0.md`](./docs/language/core_v0.md); **what the compiler
+accepts today** is described under [`docs/reference/`](./docs/reference/README.md).
 
-Features:
+**Already in active use** (non-exhaustive): functions; integer/bool/`str`/`void`;
+`let` / `let mut`; `if` / `else`; `while` and C-style **`for`**; fixed-size local
+arrays with literals and indexing; module-level `const`; formatted `print` /
+`println`; stdin helpers (`readln`, parse builtins).
 
-- functions
-- integer types
-- booleans
-- local variables
-- arithmetic
-- return statements
-- function calls
+**Concurrency (future):** task functions, channels, spawn/send/recv, bounded
+queues, blocking-effect tracking.
 
-Example:
+**Realtime / effects (future):** `realtime fn`, richer effect tracking,
+restricted operations; compiler-visible allocation, blocking, spawning, large
+copies, unknown calls, unbounded loops.
 
-```c
-fn square(x: i32) -> i32 {
-    return x * x;
-}
-```
+**Math / linalg (future):** floating-point scalars, fixed vectors/matrices,
+shape-aware checking, dot/matmul/transpose, buffer-oriented APIs, MLIR vector
+paths; longer-term research toward AD, integration, accelerators.
 
----
-
-## Phase 2 — Control Flow
-
-Specified in Core v0 ([docs/language/core_v0.md](./docs/language/core_v0.md)).
-
-Features:
-
-- if/else
-- while loops
-- scoped blocks
-- comparisons
-
-Example:
-
-```c
-if (x > 0) {
-    return x;
-}
-```
-
----
-
-## Phase 3 — Mutable Variables
-
-Specified in Core v0 ([docs/language/core_v0.md](./docs/language/core_v0.md)).
-
-Features:
-
-- `mut`
-- assignment
-- stack storage semantics
-
-Example:
-
-```c
-let mut x: i32 = 0;
-x = x + 1;
-```
-
----
-
-## Phase 4 — Arrays / Buffers
-
-Features:
-
-- fixed-size arrays
-- indexing
-- loops over arrays
-- basic bounds checking model
-- eventual bounds-check elimination
-
-Example:
-
-```c
-let mut arr: [4]i32;
-arr[0] = 10;
-```
-
----
-
-## Phase 5 — Explicit Concurrency
-
-Features:
-
-- task functions
-- channels
-- spawn/send/recv
-- bounded channels
-- blocking-effect tracking
-
-Example:
-
-```c
-task fn producer(out: channel<i32>) {
-    send(out, 42);
-}
-```
-
----
-
-## Phase 6 — Realtime Regions / Effect Tracking
-
-Features:
-
-- `realtime fn`
-- semantic effect tracking
-- restricted operations
-
-Compiler should detect:
-
-- allocation
-- blocking
-- spawning
-- large copies
-- unknown external calls
-- unbounded loops
-
----
-
-## Phase 7 — Mathematical Types and Operations
-
-Features:
-
-- primitive floating-point types
-- fixed-size vectors
-- fixed-size matrices
-- shape-aware type checking
-- dot product
-- matrix multiplication
-- transposition
-- output-buffer math APIs
-- eventual vectorization/lowering through MLIR vector facilities
-
-Initial goal:
-
-- prioritize shape-aware linear algebra before calculus-like features
-
-Long-term research direction:
-
-- automatic differentiation
-- numerical integration
-- optimization primitives
-- accelerator-aware lowering
-
----
-
-## Phase 8 — Resource Observability
-
-Features:
-
-- explicit memory regions
-- tracked regions
-- tracked tasks
-- optional runtime counters
-- optional traced allocation/blocking events
-- source-attributed reports
-- zero or near-zero cost when disabled
+**Resource observability (future):** explicit regions, tracked tasks, optional
+counters and traces, source-attributed reports, near-zero cost when disabled.
 
 Example direction:
 
 ```txt
 nexc run --track-resources examples/app.nexs
-```
-
-Potential report:
-
-```txt
-Regions:
-  scratch      used=384B peak=768B cap=2048B
-  frame_pool   used=8MiB peak=12MiB cap=16MiB
-
-Tasks:
-  camera_0     frame_pool=8MiB blocked_on=send
-  inference    scratch_peak=768B running
 ```
 
 ---

@@ -8,10 +8,18 @@ Normative behavior of the **implemented** language surface, split by topic (not 
 | -------- | ---------------- | ----- |
 | [types.md](types.md) | Builtin scalars, **fixed arrays `[T; N]`** for locals, typing rules. | Arrays are **not** accepted on function parameters, returns, or module `const` yet. |
 | [expressions.md](expressions.md) | Literals, operators, calls, array literals, indexing `a[i]`, precedence. | Logical `&&` `\|\|` are **eager** (not short-circuit) in the current lowering. |
-| [statements.md](statements.md) | Blocks, `let` / `let mut`, assignment (including `arr[i] =`), control flow, call statements. | Assignment to `arr[i]` requires **`let mut`** on the array binding. |
+| [statements.md](statements.md) | Blocks, `let` / `let mut`, assignment (including `arr[i] =`), `if` / `else`, `while`, **`for`**, call statements. | Assignment to `arr[i]` requires **`let mut`** on the array binding. **`for`** lowers to **`While`** in typed IR dumps. |
 | [functions_and_calls.md](functions_and_calls.md) | `fn` syntax, calls as expressions vs statements, builtins vs user functions. | Distinct from **module** scope rules in declarations doc. |
 | [builtins_and_io.md](builtins_and_io.md) | `print` / `println`, stdin helpers, parse builtins. | **`print` / `println`** — Rust-style `` `{}` `` placeholders from a **string literal** first argument (or legacy single **`str`** expr); typed formatting lowers through the runtime. |
 | [declarations_and_modules.md](declarations_and_modules.md) | One `.nexs` translation unit, top-level `fn` / `const`, `main`, single namespace. | **“Modules” here = file/top-level structure**, not `.nexh` imports (not implemented). |
+
+## Near-term roadmap (not reference normative text)
+
+Statement-level gaps (`for`, uninitialized locals, stricter array init) and the
+**implementation order** we follow are centralized here—update that file when
+plans change, then update reference pages when behavior ships:
+
+- [`docs/IMPLEMENTATION_BACKLOG.md`](../../IMPLEMENTATION_BACKLOG.md)
 
 ## Not Yet Separate Reference Pages
 

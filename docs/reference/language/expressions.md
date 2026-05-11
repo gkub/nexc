@@ -20,7 +20,7 @@ surface.
 ## Status
 
 - Stability: provisional
-- Applies to: Core v0 language surface
+- Applies to: current implemented language surface
 
 ## Expression Forms
 

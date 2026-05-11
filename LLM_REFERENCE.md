@@ -6,8 +6,9 @@ It is an index, not a full spec.
 ## Current Project State
 
 `nexc` is a C++ compiler project for the nex language. The current implementation
-is a **checked Core v0 compiler path** with typed IR, MLIR, LLVM IR, and native
-execution for the documented v0 feature set:
+is a **checked frontend** with typed IR, MLIR, LLVM IR, and native execution for
+the feature set described in **`docs/reference/`** (see
+[`docs/IMPLEMENTATION_BACKLOG.md`](./docs/IMPLEMENTATION_BACKLOG.md) for what ships next):
 
 ```text
 source -> lexer -> parser -> AST -> semantic analysis -> typed IR -> MLIR -> LLVM IR -> native executable
@@ -104,6 +105,7 @@ Useful one-file commands:
 | Topic | File |
 | ----- | ---- |
 | Project overview / long-term vision | [nex.md](./nex.md) |
+| Ordered near-term implementation milestones | [docs/IMPLEMENTATION_BACKLOG.md](./docs/IMPLEMENTATION_BACKLOG.md) |
 | Public README / quick start | [README.md](./README.md) |
 | Long-lived reference docs spine | [docs/reference/README.md](./docs/reference/README.md) |
 | Formal compiler CLI reference | [docs/reference/toolchain/compiler_cli.md](./docs/reference/toolchain/compiler_cli.md) |
@@ -119,7 +121,7 @@ Useful one-file commands:
 | Functions/calls reference | [docs/reference/language/functions_and_calls.md](./docs/reference/language/functions_and_calls.md) |
 | How to build/test/run frontend tools | [nexc.sh](./nexc.sh), [docs/user/frontend.md](./docs/user/frontend.md) |
 | How to write current nex code | [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md) |
-| Normative Core v0 language rules | [docs/language/core_v0.md](./docs/language/core_v0.md) |
+| Frozen early language snapshot | [docs/language/core_v0.md](./docs/language/core_v0.md) |
 | Educational compiler guide | [NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md) |
 | Frontend implementation contract | [docs/design/frontend_contract.md](./docs/design/frontend_contract.md) |
 | Core v0 typed IR design note | [docs/design/core_v0_typed_ir.md](./docs/design/core_v0_typed_ir.md) |

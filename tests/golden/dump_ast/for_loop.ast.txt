@@ -1,0 +1,34 @@
+TranslationUnit
+  FunctionDecl main
+    Parameters
+    ReturnType i32
+    BlockStmt
+      LetStmt mut sum: i32
+        IntegerLiteral 0
+      ForStmt
+        Init
+          LetStmt mut i: i32
+            IntegerLiteral 0
+        Condition
+          BinaryExpr Less
+            NameExpr i
+            IntegerLiteral 10
+        Step
+          AssignStmt
+            Target
+              NameExpr i
+            Value
+              BinaryExpr Plus
+                NameExpr i
+                IntegerLiteral 1
+        Body
+          BlockStmt
+            AssignStmt
+              Target
+                NameExpr sum
+              Value
+                BinaryExpr Plus
+                  NameExpr sum
+                  NameExpr i
+      ReturnStmt
+        NameExpr sum

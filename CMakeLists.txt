@@ -423,6 +423,13 @@ add_nexc_golden_test(
 )
 
 add_nexc_golden_test(
+    dump_ast_for_loop_golden
+    --dump-ast
+    examples/for_loop.nexs
+    tests/golden/dump_ast/for_loop.ast.txt
+)
+
+add_nexc_golden_test(
     dump_ast_dot_add_golden
     --dump-ast-dot
     examples/add.nexs
@@ -462,6 +469,13 @@ add_nexc_golden_test(
     --dump-ir
     tests/semantic_if_else_returns.nexs
     tests/golden/dump_ir/if_else_returns.ir.txt
+)
+
+add_nexc_golden_test(
+    dump_ir_for_loop_golden
+    --dump-ir
+    examples/for_loop.nexs
+    tests/golden/dump_ir/for_loop.ir.txt
 )
 
 add_nexc_golden_test(
@@ -548,6 +562,20 @@ if(MLIR_FOUND)
         examples/pipeline_walkthrough.nexs
         tests/golden/dump_llvm/pipeline_walkthrough.ll
     )
+
+    add_nexc_golden_test(
+        dump_mlir_for_loop_golden
+        --dump-mlir
+        examples/for_loop.nexs
+        tests/golden/dump_mlir/for_loop.mlir
+    )
+
+    add_nexc_golden_test(
+        dump_llvm_for_loop_golden
+        --dump-llvm
+        examples/for_loop.nexs
+        tests/golden/dump_llvm/for_loop.ll
+    )
 endif()
 
 add_nexc_mlir_validation_test(
@@ -590,6 +618,11 @@ add_nexc_mlir_validation_test(
     examples/core_v0_backend_coverage.nexs
 )
 
+add_nexc_mlir_validation_test(
+    validate_mlir_for_loop
+    examples/for_loop.nexs
+)
+
 add_nexc_llvm_validation_test(
     validate_llvm_return_42
     examples/return_42.nexs
@@ -620,10 +653,21 @@ add_nexc_llvm_validation_test(
     examples/core_v0_backend_coverage.nexs
 )
 
+add_nexc_llvm_validation_test(
+    validate_llvm_for_loop
+    examples/for_loop.nexs
+)
+
 add_nexc_executable_test(
     run_executable_return_42
     examples/return_42.nexs
     42
+)
+
+add_nexc_executable_test(
+    run_executable_for_loop
+    examples/for_loop.nexs
+    45
 )
 
 add_nexc_executable_test(
@@ -703,6 +747,11 @@ add_test(
 add_test(
     NAME semantic_check_hello
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/hello.nexs
+)
+
+add_test(
+    NAME semantic_check_for_loop
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/for_loop.nexs
 )
 
 add_test(
@@ -850,3 +899,27 @@ add_test(
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_print_wrong_type.nexs
 )
 set_tests_properties(semantic_print_wrong_type PROPERTIES WILL_FAIL TRUE)
+
+add_test(
+    NAME semantic_break_outside
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_break_outside.nexs
+)
+set_tests_properties(semantic_break_outside PROPERTIES WILL_FAIL TRUE)
+
+add_nexc_golden_diagnostic_test(
+    semantic_break_outside_golden
+    --check
+    tests/semantic_break_outside.nexs
+    tests/golden/diagnostics/semantic_break_outside.stderr.txt
+)
+
+add_test(
+    NAME semantic_check_break_continue
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/break_continue.nexs
+)
+
+add_nexc_executable_test(
+    run_executable_break_continue
+    examples/break_continue.nexs
+    13
+)

@@ -106,6 +106,12 @@ std::optional<std::string> findStringLiteralRaw(const ir::Function& fn,
                 if (op.bodyBlock) {
                     scan(*op.bodyBlock);
                 }
+                if (found) {
+                    return;
+                }
+                if (op.stepBlock) {
+                    scan(*op.stepBlock);
+                }
             }
         }
     };
@@ -389,10 +395,16 @@ private:
             lowerCall(operation);
             return false;
         case ir::Operation::Kind::If:
+            // `lowerFallthroughRegionBlock` lowers fallthrough `if` ops itself so
+            // `break`/`continue` inside a branch can end the surrounding loop region.
             return lowerIf(operation);
         case ir::Operation::Kind::While:
             lowerWhile(operation);
             return false;
+        case ir::Operation::Kind::Break:
+        case ir::Operation::Kind::Continue:
+            throw std::logic_error(
+                "`break`/`continue` must be lowered inside a loop region, not here");
         default:
             throw std::logic_error("MLIR lowering encountered an unsupported operation");
         }
@@ -1112,17 +1124,56 @@ private:
     // Returning if/else is lowered as a value-producing `scf.if` followed by a
     // function return. Fallthrough if/else is lowered as a no-result `scf.if`
     // whose regions end with `scf.yield`.
+
+    // Tracks how a fallthrough region ended so `lowerWhile` can append the right
+    // tail (`for` step + `scf.yield`, yield only, or nothing).
+    enum class FallthroughRegionEnd {
+        Complete,
+        // `break` / `continue` at this nesting level already finished the while
+        // iteration (including `continue` running the `for` step when present).
+        IterationClosed,
+        // Loop control ran inside a nested `scf.if` branch: that branch yielded,
+        // but the surrounding while body still needs the `for` step (if any) and a
+        // final `scf.yield`.
+        NestedLoopControlNeedStepAndYield,
+    };
+
+    static bool ifIsFallthroughShape(const ir::Operation& operation) {
+        if (operation.kind != ir::Operation::Kind::If || !operation.thenBlock) {
+            return false;
+        }
+        if (operation.elseBlock) {
+            return operation.thenBlock->terminator.kind == ir::Terminator::Kind::None &&
+                   operation.elseBlock->terminator.kind == ir::Terminator::Kind::None;
+        }
+        return operation.thenBlock->terminator.kind == ir::Terminator::Kind::None;
+    }
+
     bool lowerIf(const ir::Operation& operation) {
-        if (!operation.thenBlock || !operation.elseBlock) {
-            return lowerFallthroughIf(operation);
+        // Optional `else` is only lowered through the fallthrough `scf.if` path in
+        // this slice (see `lowerFallthroughIf`).
+        if (!operation.elseBlock) {
+            if (lowerFallthroughIf(operation) != FallthroughRegionEnd::Complete) {
+                throw std::logic_error(
+                    "`break`/`continue` escaped a loop body in an invalid context");
+            }
+            return false;
+        }
+
+        if (ifIsFallthroughShape(operation)) {
+            if (lowerFallthroughIf(operation) != FallthroughRegionEnd::Complete) {
+                throw std::logic_error(
+                    "`break`/`continue` escaped a loop body in an invalid context");
+            }
+            return false;
+        }
+
+        if (!operation.thenBlock) {
+            throw std::logic_error("`if` operation is missing its then branch");
         }
 
         const ir::Terminator& thenTerminator = operation.thenBlock->terminator;
         const ir::Terminator& elseTerminator = operation.elseBlock->terminator;
-        if (thenTerminator.kind == ir::Terminator::Kind::None &&
-            elseTerminator.kind == ir::Terminator::Kind::None) {
-            return lowerFallthroughIf(operation);
-        }
 
         if (thenTerminator.kind != elseTerminator.kind) {
             throw std::logic_error("MLIR lowering requires matching if/else terminators");
@@ -1163,22 +1214,56 @@ private:
     // branches do not produce a value for the surrounding expression and they do
     // not return from the function; they simply run stores/calls/etc. and then
     // yield control back to the code after the `scf.if`.
-    bool lowerFallthroughIf(const ir::Operation& operation) {
+    FallthroughRegionEnd lowerFallthroughIf(const ir::Operation& operation) {
         const ::mlir::Value condition =
             lookupValue(requiredValue(operation.condition, "if condition"));
         auto ifOp = builder_.create<::mlir::scf::IfOp>(
             loc_, ::mlir::TypeRange{}, condition, operation.elseBlock != nullptr);
 
-        builder_.setInsertionPointToStart(&ifOp.getThenRegion().front());
-        lowerFallthroughRegionBlock(*operation.thenBlock, "if then branch");
+        auto erasePlaceholderYield = [](::mlir::Block& block) {
+            if (block.empty()) {
+                return;
+            }
+            auto yield = ::llvm::dyn_cast<::mlir::scf::YieldOp>(block.getTerminator());
+            if (yield && yield.getNumOperands() == 0) {
+                yield.erase();
+            }
+        };
 
+        ::mlir::Block& thenBlock = ifOp.getThenRegion().front();
+        erasePlaceholderYield(thenBlock);
+        builder_.setInsertionPointToStart(&thenBlock);
+        const FallthroughRegionEnd thenEnd = lowerFallthroughRegionBlock(
+            *operation.thenBlock, "if then branch", /*propagateLoopExit=*/false);
+        if (thenEnd == FallthroughRegionEnd::Complete) {
+            builder_.setInsertionPointToEnd(&thenBlock);
+            builder_.create<::mlir::scf::YieldOp>(loc_);
+        }
+
+        FallthroughRegionEnd elseEnd = FallthroughRegionEnd::Complete;
         if (operation.elseBlock) {
-            builder_.setInsertionPointToStart(&ifOp.getElseRegion().front());
-            lowerFallthroughRegionBlock(*operation.elseBlock, "if else branch");
+            ::mlir::Block& elseBlock = ifOp.getElseRegion().front();
+            erasePlaceholderYield(elseBlock);
+            builder_.setInsertionPointToStart(&elseBlock);
+            elseEnd = lowerFallthroughRegionBlock(
+                *operation.elseBlock, "if else branch", /*propagateLoopExit=*/false);
+            if (elseEnd == FallthroughRegionEnd::Complete) {
+                builder_.setInsertionPointToEnd(&elseBlock);
+                builder_.create<::mlir::scf::YieldOp>(loc_);
+            }
         }
 
         builder_.setInsertionPointAfter(ifOp);
-        return false;
+        const int nonComplete = (thenEnd != FallthroughRegionEnd::Complete ? 1 : 0) +
+                                (elseEnd != FallthroughRegionEnd::Complete ? 1 : 0);
+        if (nonComplete > 1) {
+            throw std::logic_error(
+                "both branches of `if` ended with loop control in this MLIR slice");
+        }
+        if (thenEnd != FallthroughRegionEnd::Complete) {
+            return thenEnd;
+        }
+        return elseEnd;
     }
 
     // Lower a Core v0 while loop to MLIR `scf.while`.
@@ -1192,6 +1277,19 @@ private:
             throw std::logic_error("while operation is missing its condition or body block");
         }
 
+        const ::mlir::MemRefType exitTy =
+            ::mlir::MemRefType::get({}, builder_.getI1Type());
+        auto exitAlloc = builder_.create<::mlir::memref::AllocaOp>(loc_, exitTy);
+        const ::mlir::Value exitSlot = exitAlloc.getResult();
+        auto breakClear = builder_.create<::mlir::arith::ConstantIntOp>(loc_, 0, 1);
+        builder_.create<::mlir::memref::StoreOp>(loc_, breakClear.getResult(), exitSlot,
+                                                 ::mlir::ValueRange{});
+
+        activeLoops_.push_back(ActiveLoop{
+            .breakExitSlot = exitSlot,
+            .stepBlock = operation.stepBlock ? operation.stepBlock.get() : nullptr,
+        });
+
         auto whileOp = builder_.create<::mlir::scf::WhileOp>(
             loc_, ::mlir::TypeRange{}, ::mlir::ValueRange{},
             [&](::mlir::OpBuilder& nestedBuilder, ::mlir::Location,
@@ -1202,7 +1300,7 @@ private:
                 ::mlir::OpBuilder::InsertionGuard guard(builder_);
                 builder_.setInsertionPoint(nestedBuilder.getInsertionBlock(),
                                            nestedBuilder.getInsertionPoint());
-                lowerConditionBlock(*operation.conditionBlock);
+                lowerConditionBlock(*operation.conditionBlock, exitSlot);
             },
             [&](::mlir::OpBuilder& nestedBuilder, ::mlir::Location,
                 ::mlir::ValueRange) {
@@ -1210,11 +1308,34 @@ private:
                 // It must yield back to the condition even though this v0 slice
                 // has no loop-carried values to pass.
                 ::mlir::OpBuilder::InsertionGuard guard(builder_);
-                builder_.setInsertionPoint(nestedBuilder.getInsertionBlock(),
+                ::mlir::Block* const loopBodyBlock = nestedBuilder.getInsertionBlock();
+                builder_.setInsertionPoint(loopBodyBlock,
                                            nestedBuilder.getInsertionPoint());
-                lowerFallthroughRegionBlock(*operation.bodyBlock, "while body");
-                builder_.create<::mlir::scf::YieldOp>(loc_);
+                const FallthroughRegionEnd bodyEnd =
+                    lowerFallthroughRegionBlock(*operation.bodyBlock, "while body");
+                auto appendWhileBodyYield = [&]() {
+                    builder_.setInsertionPointToEnd(loopBodyBlock);
+                    builder_.create<::mlir::scf::YieldOp>(loc_);
+                };
+                switch (bodyEnd) {
+                case FallthroughRegionEnd::Complete:
+                    if (operation.stepBlock) {
+                        lowerFallthroughRegionBlock(*operation.stepBlock, "for step");
+                    }
+                    appendWhileBodyYield();
+                    break;
+                case FallthroughRegionEnd::IterationClosed:
+                    break;
+                case FallthroughRegionEnd::NestedLoopControlNeedStepAndYield:
+                    if (operation.stepBlock) {
+                        lowerFallthroughRegionBlock(*operation.stepBlock, "for step");
+                    }
+                    appendWhileBodyYield();
+                    break;
+                }
             });
+
+        activeLoops_.pop_back();
 
         builder_.setInsertionPointAfter(whileOp);
     }
@@ -1252,9 +1373,53 @@ private:
     // `scf.if` and `scf.while` regions are not the top-level function body. For
     // this first lowering, a nested block may perform operations and then fall
     // through, but it may not directly emit a function return.
-    void lowerFallthroughRegionBlock(const ir::Block& block,
-                                     std::string_view context) {
+    FallthroughRegionEnd lowerFallthroughRegionBlock(
+        const ir::Block& block,
+        std::string_view context,
+        bool propagateLoopExit = true) {
         for (const ir::Operation& operation : block.operations) {
+            if (operation.kind == ir::Operation::Kind::If &&
+                ifIsFallthroughShape(operation)) {
+                const FallthroughRegionEnd branchEnd = lowerFallthroughIf(operation);
+                if (branchEnd != FallthroughRegionEnd::Complete) {
+                    return branchEnd;
+                }
+                continue;
+            }
+            if (operation.kind == ir::Operation::Kind::Break) {
+                if (activeLoops_.empty()) {
+                    throw std::logic_error(std::string(context) +
+                                           " contains `break` outside any loop");
+                }
+                const ::mlir::Value slot = activeLoops_.back().breakExitSlot;
+                auto flag =
+                    builder_.create<::mlir::arith::ConstantIntOp>(loc_, 1, 1);
+                builder_.create<::mlir::memref::StoreOp>(loc_, flag.getResult(), slot,
+                                                         ::mlir::ValueRange{});
+                builder_.create<::mlir::scf::YieldOp>(loc_);
+                return propagateLoopExit ? FallthroughRegionEnd::IterationClosed
+                                         : FallthroughRegionEnd::NestedLoopControlNeedStepAndYield;
+            }
+            if (operation.kind == ir::Operation::Kind::Continue) {
+                if (activeLoops_.empty()) {
+                    throw std::logic_error(std::string(context) +
+                                           " contains `continue` outside any loop");
+                }
+                const ActiveLoop& loop = activeLoops_.back();
+                if (propagateLoopExit && loop.stepBlock) {
+                    if (lowerFallthroughRegionBlock(*loop.stepBlock,
+                                                    "for step on continue") !=
+                        FallthroughRegionEnd::Complete) {
+                        throw std::logic_error(
+                            "`continue` step block must complete without nested loop control");
+                    }
+                }
+                builder_.create<::mlir::scf::YieldOp>(loc_);
+                if (propagateLoopExit) {
+                    return FallthroughRegionEnd::IterationClosed;
+                }
+                return FallthroughRegionEnd::NestedLoopControlNeedStepAndYield;
+            }
             if (lowerOperation(operation)) {
                 throw std::logic_error(std::string(context) +
                                        " cannot contain a function return in this MLIR slice");
@@ -1264,6 +1429,7 @@ private:
             throw std::logic_error(std::string(context) +
                                    " must fall through in this MLIR slice");
         }
+        return FallthroughRegionEnd::Complete;
     }
 
     // Lower the condition block of a structured while loop.
@@ -1271,7 +1437,8 @@ private:
     // The typed IR condition block is ordinary expression code followed by a
     // special `ConditionValue` terminator. MLIR spells that terminator as
     // `scf.condition`, whose first operand decides whether the loop body runs.
-    void lowerConditionBlock(const ir::Block& block) {
+    void lowerConditionBlock(const ir::Block& block,
+                             std::optional<::mlir::Value> breakExitSlot = std::nullopt) {
         for (const ir::Operation& operation : block.operations) {
             if (lowerOperation(operation)) {
                 throw std::logic_error("while condition cannot return from the function");
@@ -1281,8 +1448,17 @@ private:
             throw std::logic_error("while condition block must end with ConditionValue");
         }
 
-        const ::mlir::Value condition =
+        ::mlir::Value condition =
             lookupValue(requiredValue(block.terminator.value, "while condition"));
+        if (breakExitSlot) {
+            auto one = builder_.create<::mlir::arith::ConstantIntOp>(loc_, 1, 1);
+            auto brk = builder_.create<::mlir::memref::LoadOp>(loc_, *breakExitSlot,
+                                                               ::mlir::ValueRange{});
+            auto notBrk =
+                builder_.create<::mlir::arith::XOrIOp>(loc_, brk, one.getResult());
+            condition =
+                builder_.create<::mlir::arith::AndIOp>(loc_, condition, notBrk);
+        }
         builder_.create<::mlir::scf::ConditionOp>(loc_, condition,
                                                   ::mlir::ValueRange{});
     }
@@ -1441,6 +1617,11 @@ private:
         declaration.setPrivate();
     }
 
+    struct ActiveLoop {
+        ::mlir::Value breakExitSlot{};
+        const ir::Block* stepBlock = nullptr;
+    };
+
     ::mlir::OpBuilder& builder_;
     const ir::Function& function_;
     const std::unordered_map<std::string, const ir::Const*>& constants_;
@@ -1448,6 +1629,7 @@ private:
     std::unordered_map<std::size_t, ::mlir::Value> values_;
     std::unordered_map<std::size_t, StringValue> strings_;
     std::size_t formatLiteralCounter_;
+    std::vector<ActiveLoop> activeLoops_{};
     // directLocals_ maps immutable parameter locals to existing MLIR block
     // arguments. No memory is needed for them in the current Core v0 slice.
     std::unordered_map<std::size_t, ::mlir::Value> directLocals_;
@@ -1631,6 +1813,11 @@ private:
         case ir::Operation::Kind::While:
             dumpWhile(operation);
             return false;
+        case ir::Operation::Kind::Break:
+        case ir::Operation::Kind::Continue:
+            throw std::logic_error(
+                "`break`/`continue` must be dumped inside a loop region in this textual "
+                "MLIR slice");
         default:
             throw std::logic_error("textual MLIR lowering encountered an unsupported operation");
         }
@@ -1904,12 +2091,29 @@ private:
             throw std::logic_error("while operation is missing its condition or body block");
         }
 
+        const std::string exitSlot = nextValueName();
+        out_ << indent() << exitSlot << " = memref.alloca() : memref<i1>\n";
+        const std::string cfalse = nextValueName();
+        out_ << indent() << cfalse << " = arith.constant false\n";
+        out_ << indent() << "memref.store " << cfalse << ", " << exitSlot
+             << "[] : memref<i1>\n";
+
+        activeLoops_.push_back(ActiveLoopText{
+            .exitSlotName = exitSlot,
+            .stepBlock = operation.stepBlock ? operation.stepBlock.get() : nullptr,
+        });
+
         out_ << indent() << "scf.while : () -> () {\n";
-        dumpConditionBlock(*operation.conditionBlock);
+        dumpConditionBlock(*operation.conditionBlock, &exitSlot);
         out_ << indent() << "} do {\n";
         dumpFallthroughRegionBlock(*operation.bodyBlock, "while body");
+        if (operation.stepBlock) {
+            dumpFallthroughRegionBlock(*operation.stepBlock, "for step");
+        }
         out_ << childRegionIndent() << "scf.yield\n";
         out_ << indent() << "}\n";
+
+        activeLoops_.pop_back();
     }
 
     // Dump an if/else branch body in `scf.if` region context.
@@ -1952,6 +2156,35 @@ private:
                                     std::string_view context) {
         ++regionDepth_;
         for (const ir::Operation& operation : block.operations) {
+            if (operation.kind == ir::Operation::Kind::Break) {
+                if (activeLoops_.empty()) {
+                    --regionDepth_;
+                    throw std::logic_error(std::string(context) +
+                                           " contains `break` outside any loop");
+                }
+                const std::string& slot = activeLoops_.back().exitSlotName;
+                const std::string ctrue = nextValueName();
+                out_ << regionIndent() << ctrue << " = arith.constant true\n";
+                out_ << regionIndent() << "memref.store " << ctrue << ", " << slot
+                     << "[] : memref<i1>\n";
+                out_ << regionIndent() << "scf.yield\n";
+                --regionDepth_;
+                return;
+            }
+            if (operation.kind == ir::Operation::Kind::Continue) {
+                if (activeLoops_.empty()) {
+                    --regionDepth_;
+                    throw std::logic_error(std::string(context) +
+                                           " contains `continue` outside any loop");
+                }
+                const ActiveLoopText& loop = activeLoops_.back();
+                if (loop.stepBlock) {
+                    dumpFallthroughRegionBlock(*loop.stepBlock, "for step on continue");
+                }
+                out_ << regionIndent() << "scf.yield\n";
+                --regionDepth_;
+                return;
+            }
             if (dumpOperation(operation)) {
                 --regionDepth_;
                 throw std::logic_error(std::string(context) +
@@ -1971,7 +2204,8 @@ private:
     // A typed IR while condition is a block of expression operations plus a
     // `ConditionValue` terminator. The textual MLIR equivalent is those
     // operations followed by `scf.condition(%cond)`.
-    void dumpConditionBlock(const ir::Block& block) {
+    void dumpConditionBlock(const ir::Block& block,
+                            const std::string* breakExitSlot = nullptr) {
         ++regionDepth_;
         for (const ir::Operation& operation : block.operations) {
             if (dumpOperation(operation)) {
@@ -1984,9 +2218,23 @@ private:
             throw std::logic_error("while condition block must end with ConditionValue");
         }
 
-        out_ << regionIndent() << "scf.condition("
-             << lookupValue(requiredValue(block.terminator.value, "while condition"))
-             << ")\n";
+        std::string cond = lookupValue(requiredValue(block.terminator.value, "while condition"));
+        if (breakExitSlot) {
+            const std::string loaded = nextValueName();
+            out_ << regionIndent() << loaded << " = memref.load " << *breakExitSlot
+                 << "[] : memref<i1>\n";
+            const std::string ctrue = nextValueName();
+            out_ << regionIndent() << ctrue << " = arith.constant true\n";
+            const std::string flipped = nextValueName();
+            out_ << regionIndent() << flipped << " = arith.xori " << loaded << ", "
+                 << ctrue << " : i1\n";
+            const std::string combined = nextValueName();
+            out_ << regionIndent() << combined << " = arith.andi " << cond << ", "
+                 << flipped << " : i1\n";
+            cond = combined;
+        }
+
+        out_ << regionIndent() << "scf.condition(" << cond << ")\n";
         --regionDepth_;
     }
 
@@ -2046,8 +2294,14 @@ private:
         return "%" + std::to_string(nextValueId_++);
     }
 
+    struct ActiveLoopText {
+        std::string exitSlotName;
+        const ir::Block* stepBlock = nullptr;
+    };
+
     std::ostream& out_;
     const ir::Function& function_;
+    std::vector<ActiveLoopText> activeLoops_{};
     std::unordered_map<std::size_t, std::string> values_;
     // localValues_ holds direct SSA aliases for immutable parameter locals.
     std::unordered_map<std::size_t, std::string> localValues_;

@@ -201,6 +201,12 @@ private:
         case Operation::Kind::While:
             dumpWhile(operation);
             return;
+        case Operation::Kind::Break:
+            line("Break");
+            return;
+        case Operation::Kind::Continue:
+            line("Continue");
+            return;
         }
     }
 
@@ -268,6 +274,12 @@ private:
         indent_ += 2;
         dumpBlock(requiredBlock(operation.bodyBlock));
         indent_ -= 2;
+        if (operation.stepBlock) {
+            line("Step");
+            indent_ += 2;
+            dumpBlock(*operation.stepBlock);
+            indent_ -= 2;
+        }
         indent_ -= 2;
     }
 

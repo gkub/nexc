@@ -164,6 +164,45 @@ private:
             return;
         }
 
+        if (const auto* forStmt = dynamic_cast<const ForStmt*>(&stmt)) {
+            line("ForStmt");
+            indent_ += 2;
+            if (forStmt->init) {
+                line("Init");
+                indent_ += 2;
+                dumpStmt(*forStmt->init);
+                indent_ -= 2;
+            }
+            if (forStmt->condition) {
+                line("Condition");
+                indent_ += 2;
+                dumpExpr(*forStmt->condition);
+                indent_ -= 2;
+            }
+            if (forStmt->step) {
+                line("Step");
+                indent_ += 2;
+                dumpStmt(*forStmt->step);
+                indent_ -= 2;
+            }
+            line("Body");
+            indent_ += 2;
+            dumpStmt(*forStmt->body);
+            indent_ -= 2;
+            indent_ -= 2;
+            return;
+        }
+
+        if (dynamic_cast<const BreakStmt*>(&stmt)) {
+            line("BreakStmt");
+            return;
+        }
+
+        if (dynamic_cast<const ContinueStmt*>(&stmt)) {
+            line("ContinueStmt");
+            return;
+        }
+
         if (const auto* callStmt = dynamic_cast<const CallStmt*>(&stmt)) {
             line("CallStmt");
             indent_ += 2;
@@ -431,6 +470,29 @@ private:
             edge(id, dumpExpr(*whileStmt->condition), "condition");
             edge(id, dumpStmt(*whileStmt->body), "body");
             return id;
+        }
+
+        if (const auto* forStmt = dynamic_cast<const ForStmt*>(&stmt)) {
+            const std::size_t id = node("ForStmt");
+            if (forStmt->init) {
+                edge(id, dumpStmt(*forStmt->init), "init");
+            }
+            if (forStmt->condition) {
+                edge(id, dumpExpr(*forStmt->condition), "condition");
+            }
+            if (forStmt->step) {
+                edge(id, dumpStmt(*forStmt->step), "step");
+            }
+            edge(id, dumpStmt(*forStmt->body), "body");
+            return id;
+        }
+
+        if (dynamic_cast<const BreakStmt*>(&stmt)) {
+            return node("BreakStmt");
+        }
+
+        if (dynamic_cast<const ContinueStmt*>(&stmt)) {
+            return node("ContinueStmt");
         }
 
         if (const auto* callStmt = dynamic_cast<const CallStmt*>(&stmt)) {

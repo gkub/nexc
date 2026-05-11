@@ -235,11 +235,37 @@ struct WhileStmt final : Stmt {
     std::unique_ptr<Stmt> body;
 };
 
+// C-style `for (init; condition; step) body`. Any clause may be omitted: missing
+// `condition` is treated as always-true at semantic lowering time; missing
+// `init` / `step` skips that side effect. `init` is typically `let` or assignment;
+// `step` is assignment or a void call (no trailing `;` before `)`).
+struct ForStmt final : Stmt {
+    ForStmt(SourceSpan span, std::unique_ptr<Stmt> init, std::unique_ptr<Expr> condition,
+            std::unique_ptr<Stmt> step, std::unique_ptr<Stmt> body)
+        : Stmt(span), init(std::move(init)), condition(std::move(condition)),
+          step(std::move(step)), body(std::move(body)) {}
+
+    std::unique_ptr<Stmt> init;
+    std::unique_ptr<Expr> condition;
+    std::unique_ptr<Stmt> step;
+    std::unique_ptr<Stmt> body;
+};
+
 struct CallStmt final : Stmt {
     CallStmt(SourceSpan span, std::unique_ptr<CallExpr> call)
         : Stmt(span), call(std::move(call)) {}
 
     std::unique_ptr<CallExpr> call;
+};
+
+// Exit the innermost enclosing `while` / `for` (after lowering, `for` is `while`).
+struct BreakStmt final : Stmt {
+    explicit BreakStmt(SourceSpan span) : Stmt(span) {}
+};
+
+// Skip to the next iteration of the innermost enclosing `while` / `for`.
+struct ContinueStmt final : Stmt {
+    explicit ContinueStmt(SourceSpan span) : Stmt(span) {}
 };
 
 // Items are top-level declarations in a translation unit. Core v0 only has

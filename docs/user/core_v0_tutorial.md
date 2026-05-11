@@ -1,11 +1,19 @@
-# nex Core v0 Tutorial
+# Writing nex programs (beginner tutorial)
 
-This is the beginner-facing guide for writing the nex that exists today.
+This is the beginner-facing guide for writing the nex that exists today. (The
+filename `core_v0_tutorial.md` is legacy; prefer **`docs/reference/`** for exact
+rules.)
 
-Core v0 is small on purpose. You can write scalar functions, constants,
-variables, arithmetic, `if` / `else`, `while` loops, string literals, and
-`print` / `println` calls. You cannot allocate memory, use arrays, import files,
-spawn tasks, or do general file/pipe I/O yet.
+This tutorial stays close to what the compiler accepts today. You can write scalar functions, constants,
+variables, arithmetic, `if` / `else`, `while` and **`for`** loops, **fixed-size array locals**
+(`[T; N]`) with literals and indexing, string literals, and **`print` /
+`println`** (including Rust-style `` `"x={}"`, value `` formatting—see
+[`docs/reference/language/builtins_and_io.md`](../reference/language/builtins_and_io.md)).
+You cannot declare locals **without** an initializer, import other files, spawn
+tasks, or do general file/pipe I/O yet.
+The **ordered list of what we implement next** (e.g. `for`, then uninitialized
+locals + definite assignment, then tightening array rules) is maintained in
+[`docs/IMPLEMENTATION_BACKLOG.md`](../IMPLEMENTATION_BACKLOG.md).
 
 The current compiler frontend can **check** nex programs:
 
@@ -451,14 +459,16 @@ error: integer literal `128` does not fit in type `i8`
 
 ## What Comes Later
 
-Core v0 does not yet include:
+Not everything in the long-term vision is implemented yet. Examples:
 
-- formatted strings or interpolation
-- printing values other than `str`
-- arrays or indexing
-- user-defined types
-- imports/modules
-- file reading/writing and pipe abstractions
-- allocation, buffers, channels, tasks, or realtime regions
+- C-style **`for`** loops (use `while` today)
+- Locals **without** `= initializer` and **definite-assignment** checking
+- Slices, growable vectors, and richer array initialization stories
+- User-defined types beyond builtin scalars and fixed arrays
+- Imports / `.nexh` modules
+- File reading/writing and pipe abstractions
+- Allocation, channels, tasks, or realtime regions
 
-Those belong to later language/compiler phases.
+See [`docs/IMPLEMENTATION_BACKLOG.md`](../IMPLEMENTATION_BACKLOG.md) for the
+**current sequencing** of near-term work and [`nex.md`](../../nex.md) for the
+long-horizon phased roadmap.

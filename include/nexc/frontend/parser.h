@@ -51,6 +51,10 @@ private:
     std::unique_ptr<Stmt> parseReturnStmt();
     std::unique_ptr<Stmt> parseIfStmt();
     std::unique_ptr<Stmt> parseWhileStmt();
+    std::unique_ptr<Stmt> parseForStmt();
+
+    // `for` step clause ends at `)` (no `;` after assignment or void call).
+    std::unique_ptr<Stmt> parseForStepClause();
 
     // In Core v0, statements beginning with an identifier have one-token
     // ambiguity: `x = ...` is assignment, while `f(...)` is a call statement.

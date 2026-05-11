@@ -32,12 +32,11 @@ before or alongside implementation.
 
 ## Current Focus
 
-1. Keep Core v0 syntax and semantics well documented
+1. Keep **`docs/reference/`** and [`docs/IMPLEMENTATION_BACKLOG.md`](./docs/IMPLEMENTATION_BACKLOG.md) aligned with the compiler
 2. Maintain a checked frontend: lexer, parser, AST, semantic analysis
 3. Grow the nex-owned typed IR with golden tests
-4. Lower small typed IR slices into MLIR
-5. Add LLVM/native lowering after MLIR lowering is clearer
-6. Build nex-specific analyses and optimizations incrementally
+4. Lower typed IR slices into MLIR / LLVM and ship native executables
+5. Build nex-specific analyses and optimizations incrementally
 
 ## Current Status
 
@@ -45,17 +44,17 @@ The compiler currently supports:
 
 - token dumps
 - AST text and Graphviz DOT dumps
-- semantic checking for Core v0 examples
+- semantic checking for the example corpus and tests
 - typed IR dumps
-- MLIR lowering for Core v0 scalars/control flow: fixed-width integers,
+- MLIR lowering for scalars/control flow: fixed-width integers,
 booleans, module constants, mutable local storage, assignment, function calls,
-`if`/`else`, `while`, `/`, `%`, unsigned comparisons/division/remainder, and
-eager `&&` / `||`
+`if`/`else`, `while`, **`for`** (desugared to `while` in typed IR), `/`, `%`,
+unsigned comparisons/division/remainder, and eager `&&` / `||`
 - string literal lowering to global bytes plus length
 - LLVM IR dumping with `llvm-as` validation when LLVM tools are available
 - native executable generation using `llc` (IR to object) and `ld.lld` (link),
   with Linux CRT paths discovered at CMake configure time (no `clang` linker driver)
-- runtime-backed `print(str)` and `println(str)` for observable stdout
+- runtime-backed formatted **`print` / `println`** and stdout helpers
 - an experimental `readln() -> str` stdin slice for direct input/output examples
 - explicit input parsing helpers: `parse_i32`, `parse_u64`, `parse_bool`, and
   `input_ok()`
@@ -175,8 +174,9 @@ Source code
 ## Repository Layout
 
 ```txt
-docs/       Language specification and design notes
-  language/ Normative language slices (e.g. Core v0)
+docs/       Language specification, design notes, implementation backlog
+  IMPLEMENTATION_BACKLOG.md  Ordered near-term milestones (source of truth)
+  language/ Frozen language snapshots (see also docs/reference/)
   design/   Architecture, optimization, implementation strategy
 examples/   Example nex programs
 src/        Compiler implementation
@@ -189,6 +189,7 @@ nex.md      Living project overview and AI/context document
 ## Key Documents
 
 - [LLM_REFERENCE.md](./LLM_REFERENCE.md) - compact index for future chats/LLMs
+- [docs/IMPLEMENTATION_BACKLOG.md](./docs/IMPLEMENTATION_BACKLOG.md) - ordered next milestones (for, def-assign, arrays, pointers, …)
 - [docs/reference/README.md](./docs/reference/README.md) - long-lived user reference spine (language/toolchain/runtime)
 - [docs/reference/toolchain/compiler_cli.md](./docs/reference/toolchain/compiler_cli.md) - formal `build/nexc` CLI reference
 - [docs/reference/toolchain/build_and_test.md](./docs/reference/toolchain/build_and_test.md) - canonical build and test workflows
@@ -201,9 +202,10 @@ nex.md      Living project overview and AI/context document
 - [docs/reference/language/statements.md](./docs/reference/language/statements.md) - current statement forms and rules
 - [docs/reference/language/declarations_and_modules.md](./docs/reference/language/declarations_and_modules.md) - translation-unit and top-level declaration rules
 - [docs/reference/language/functions_and_calls.md](./docs/reference/language/functions_and_calls.md) - function signatures, calls, and built-ins
-- [docs/language/core_v0.md](./docs/language/core_v0.md) - normative **Core v0** language (first compiler milestone)
+- [docs/language/core_v0.md](./docs/language/core_v0.md) - frozen **early language** snapshot (historical baseline)
 - [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md) - beginner guide for writing current nex programs
 - [examples/pipeline_walkthrough.nexs](./examples/pipeline_walkthrough.nexs) - nontrivial frontend pipeline walkthrough input
+- [examples/for_loop.nexs](./examples/for_loop.nexs) - C-style `for` loop (sums 0..9)
 - [docs/design/frontend_contract.md](./docs/design/frontend_contract.md) - lexer/parser/AST contract for the first frontend implementation
 - [docs/design/core_v0_typed_ir.md](./docs/design/core_v0_typed_ir.md) - design note for the first backend-facing typed IR
 - [docs/design/llvm_native_first_slice.md](./docs/design/llvm_native_first_slice.md) - first LLVM/native lowering milestone plan
@@ -247,7 +249,7 @@ Long term, nex may become partially or fully self-hosting once the language is m
 
 ## Status
 
-Early-stage, but Core v0 is implemented end-to-end:
+Early-stage, but the baseline pipeline is implemented end-to-end:
 
 - checked frontend (lexer/parser/semantic analysis)
 - typed IR dumps
@@ -258,13 +260,16 @@ Early-stage, but Core v0 is implemented end-to-end:
 
 ## Next Documentation Step
 
-Core v0 milestone docs are intentionally transitional. The next docs pass will
-move toward a long-lived user reference structure (language reference,
-toolchain reference, and runtime/std reference) in the style of mature language
-documentation.
+User-facing rules are migrating into **`docs/reference/`** (language, toolchain,
+runtime). Treat older milestone prose under `docs/language/` as snapshots unless
+explicitly updated.
 
 ## Forward Priorities
 
+0. **Near-term language/compiler sequencing** — single living checklist:
+   [`docs/IMPLEMENTATION_BACKLOG.md`](./docs/IMPLEMENTATION_BACKLOG.md)
+   (**`for` shipped** → uninitialized locals + definite assignment → tighten arrays;
+   **pointers** tracked as a later mega-item; doc and test expectations per wave).
 1. Build a proper long-lived user reference (language, toolchain, runtime/std),
    replacing milestone-centric docs as the main user-facing source of truth.
 2. Design and implement a real Nex-owned I/O model (stdin/stdout/stderr, files,
