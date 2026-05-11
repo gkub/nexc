@@ -245,6 +245,10 @@ nex.md      Living project overview and AI/context document
 - [NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md) — end-to-end tour of the pipeline and implementation (lex → native link)
 - [LLM_REFERENCE.md](./LLM_REFERENCE.md) — compact index for tooling / assistants
 
+### Documentation map
+
+- [docs/README.md](./docs/README.md) — what lives under `docs/` (reference, design, user, backlog)
+
 ### Normative reference (`docs/reference/`)
 
 Each section’s **README** lists its topic files (types, statements, CLI, build/test, …).
