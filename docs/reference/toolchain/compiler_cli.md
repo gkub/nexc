@@ -49,10 +49,11 @@ nexc <file.nexs>... -o <output>
 - `--dump-llvm`: lower through MLIR LLVM dialect and print LLVM IR
 - `--check`: semantic analysis without IR/MLIR/LLVM dumps
 - `<file>... -o <output>`: concatenate the listed sources in order (newline between
-  files), parse as one translation unit, then compile to a native Linux executable
-  (LLVM IR -> `llc` ->
-  object file -> `ld.lld` with CRT + `libc` + `libnexrt.a`; requires `llc` and
-  `ld.lld` at CMake configure time, see [build_and_test.md](./build_and_test.md))
+  files), parse as one translation unit, then compile to a native executable for
+  the host OS (LLVM IR -> `llc` -> object -> link). On Linux the link step is
+  `ld.lld` plus discovered CRT/`libc`/`libnexrt.a`. On macOS the link step is the
+  host `clang` plus `libnexrt.a`. CMake discovers tools at configure time; see
+  [build_and_test.md](./build_and_test.md))
 
 ## Exit Codes
 

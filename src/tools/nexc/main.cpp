@@ -24,6 +24,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#ifdef __APPLE__
+#include <limits.h>
+#include <mach-o/dyld.h>
+#endif
+
 #include "nexc_link_config.h"
 
 namespace {
@@ -125,11 +130,12 @@ Options parseArgs(int argc, char** argv) {
     throw std::invalid_argument("invalid command line");
 }
 
-#if NEXC_CONFIGURED_LINUX_LINK
+#if NEXC_CONFIGURED_NATIVE_LINK
 
 std::filesystem::path writeTemporaryLlvmIr(const nexc::ir::Module& module) {
-    // Native compilation writes LLVM IR to a temp file, then runs `llc` and
-    // `ld.lld`. Using a real file keeps failures debuggable (paths in errors).
+    // Native compilation writes LLVM IR to a temp file, then runs `llc` to an
+    // object file. The final link is OS-specific (see compileExecutable). A real
+    // temp file keeps subprocess error messages actionable.
     std::filesystem::path pattern =
         std::filesystem::temp_directory_path() / "nexc-llvm-XXXXXX.ll";
     std::string path = pattern.string();
@@ -156,10 +162,25 @@ std::filesystem::path writeTemporaryLlvmIr(const nexc::ir::Module& module) {
 }
 
 std::filesystem::path currentExecutablePath() {
-    // Linux exposes the running program through /proc/self/exe. Reading this
-    // symlink gives us the real location of `nexc`, even when the user invokes it
-    // from some unrelated working directory. That is the key to finding bundled
-    // compiler resources without baking source-tree paths into the binary.
+#ifdef __APPLE__
+    // macOS has no /proc/self/exe. dyld exposes the main executable path; it may be
+    // relative if the process was started via a relative argv[0]. Canonicalize so
+    // sibling resources (libnexrt.a next to nexc) resolve regardless of cwd.
+    std::uint32_t bufSize = PATH_MAX;
+    std::vector<char> buffer(bufSize, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &bufSize) != 0) {
+        buffer.resize(static_cast<std::size_t>(bufSize) + 1, '\0');
+        bufSize = static_cast<std::uint32_t>(buffer.size());
+        if (_NSGetExecutablePath(buffer.data(), &bufSize) != 0) {
+            throw std::runtime_error("failed to locate nexc executable (_NSGetExecutablePath)");
+        }
+    }
+    const std::filesystem::path raw(buffer.data());
+    std::error_code ec;
+    const std::filesystem::path canonical = std::filesystem::weakly_canonical(raw, ec);
+    return ec ? raw : canonical;
+#else
+    // Linux: /proc/self/exe is a symlink to the inode of the running binary.
     std::vector<char> buffer(4096, '\0');
     while (true) {
         const ssize_t size = ::readlink("/proc/self/exe", buffer.data(), buffer.size());
@@ -172,10 +193,9 @@ std::filesystem::path currentExecutablePath() {
             return std::filesystem::path(std::string(buffer.data(), static_cast<std::size_t>(size)));
         }
 
-        // If the buffer was exactly full, the path may have been truncated. Grow
-        // and retry rather than guessing.
         buffer.resize(buffer.size() * 2, '\0');
     }
+#endif
 }
 
 std::filesystem::path resolveRuntimeLibrary() {
@@ -248,16 +268,17 @@ std::filesystem::path writeTemporaryObjectFilePath() {
     return writablePath.data();
 }
 
-#endif // NEXC_CONFIGURED_LINUX_LINK
+#endif // NEXC_CONFIGURED_NATIVE_LINK
 
 void compileExecutable(const nexc::ir::Module& module,
                        const std::string& outputPath) {
-#if !NEXC_CONFIGURED_LINUX_LINK
+#if !NEXC_CONFIGURED_NATIVE_LINK
     (void)module;
     (void)outputPath;
     throw std::runtime_error(
-        "native compilation requires Linux with llc and ld.lld discovered at CMake "
-        "configure time (install llvm lld tools and re-run cmake)");
+        "native compilation was disabled at CMake configure time: on Linux install "
+        "llc and ld.lld; on macOS install LLVM (llc) and use a clang-based toolchain "
+        "for the C compiler, then re-run cmake");
 #else
     const std::filesystem::path llvmIrPath = writeTemporaryLlvmIr(module);
     const std::filesystem::path objectPath = writeTemporaryObjectFilePath();
@@ -302,15 +323,18 @@ void compileExecutable(const nexc::ir::Module& module,
         throw std::runtime_error("llc failed while compiling LLVM IR to an object file");
     }
 
-    // 2) Link object + nex runtime archive into a PIE executable using ld.lld.
+    // 2) Link the relocatable object with libnexrt.a into an executable.
     //
-    // We pass the same glibc startup objects and -lc that a normal C toolchain
-    // would use for a hosted program. Nex-generated LLVM IR provides `main`; the
-    // CRT hands control from the dynamic linker to libc startup, then to `main`.
+    // Linux uses ld.lld with explicit ELF PIE layout and glibc CRT objects (same
+    // shape as a hosted C program). Darwin uses the host clang driver so Mach-O
+    // link rules, SDK paths, and libSystem are applied consistently.
     std::string objPath = objectPath.string();
     std::string rtPath = runtimeLibraryPath.string();
     std::string outPath = outputPath;
-    std::vector<std::string> linkStorage = {
+    std::vector<std::string> linkStorage;
+
+#if NEXC_HOST_LINK_USE_LINUX_LD_LLD
+    linkStorage = {
         std::string(NEXC_LD_LLD_PATH),
         "-pie",
         "-dynamic-linker",
@@ -326,6 +350,18 @@ void compileExecutable(const nexc::ir::Module& module,
         "-o",
         std::move(outPath),
     };
+#elif NEXC_HOST_LINK_USE_DARWIN_CLANG
+    linkStorage = {
+        std::string(NEXC_DARWIN_CLANG_PATH),
+        std::move(objPath),
+        std::move(rtPath),
+        "-o",
+        std::move(outPath),
+    };
+#else
+#error "native link enabled but neither Linux nor Darwin link backend is set"
+#endif
+
     std::vector<char*> linkArgv;
     linkArgv.reserve(linkStorage.size() + 1);
     for (std::string& piece : linkStorage) {
@@ -333,14 +369,22 @@ void compileExecutable(const nexc::ir::Module& module,
     }
     linkArgv.push_back(nullptr);
 
-    int linkExit = runChildProcess(linkArgv.data());
+    const int linkExit = runChildProcess(linkArgv.data());
+#if NEXC_HOST_LINK_USE_LINUX_LD_LLD
+    const char* const linkToolPath = NEXC_LD_LLD_PATH;
+    const char* const linkFailWhat = "ld.lld";
+#elif NEXC_HOST_LINK_USE_DARWIN_CLANG
+    const char* const linkToolPath = NEXC_DARWIN_CLANG_PATH;
+    const char* const linkFailWhat = "clang (Darwin link driver)";
+#endif
     if (linkExit == 127) {
-        throw std::runtime_error(std::string("failed to execute ld.lld at ") + NEXC_LD_LLD_PATH);
+        throw std::runtime_error(std::string("failed to execute ") + linkFailWhat + " at " +
+                                 linkToolPath);
     }
     if (linkExit != 0) {
-        throw std::runtime_error("ld.lld failed while linking executable");
+        throw std::runtime_error(std::string(linkFailWhat) + " failed while linking executable");
     }
-#endif // !NEXC_CONFIGURED_LINUX_LINK
+#endif // !NEXC_CONFIGURED_NATIVE_LINK
 }
 
 } // namespace

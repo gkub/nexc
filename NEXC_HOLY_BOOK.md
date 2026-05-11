@@ -1400,7 +1400,9 @@ module, not by hand-concatenating strings.
 
 ### 11.8 Installation And Tooling
 
-On Ubuntu 24.04, install LLVM/MLIR 18 development packages:
+#### Ubuntu 24.04
+
+Install LLVM/MLIR 18 development packages:
 
 ```sh
 sudo apt-get update
@@ -1427,6 +1429,46 @@ source ~/.zshrc
 mlir-opt --version
 mlir-translate --version
 ```
+
+#### macOS (Homebrew)
+
+Apple’s Xcode Command Line Tools supply a host **`clang`** (used as the Mach-O
+link driver for `nexc … -o …`). They do **not** ship **`mlir-opt`**, **`llvm-as`**,
+or **`llc`** on a typical `PATH`; those come from a full LLVM install.
+
+1. Install the Command Line Tools if needed: `xcode-select --install`.
+2. Install [Homebrew](https://brew.sh/) if needed, then:
+
+```sh
+brew install cmake ninja llvm graphviz
+```
+
+3. Point CMake at Homebrew’s MLIR package. `brew --prefix llvm` resolves the
+   install root on both Apple silicon (`/opt/homebrew/opt/llvm` is typical) and
+   Intel (`/usr/local/opt/llvm` is typical):
+
+```sh
+export PATH="$(brew --prefix llvm)/bin:$PATH"
+cmake -S . -B build -DMLIR_DIR="$(brew --prefix llvm)/lib/cmake/mlir"
+cmake --build build
+```
+
+4. Confirm the tools **`nexc`** and tests invoke exist:
+
+```sh
+command -v mlir-opt llc llvm-as
+mlir-opt --version
+llc --version
+```
+
+Native linking on macOS uses **`llc`** from this LLVM prefix plus **`clang`** from
+the C toolchain CMake selected (Apple Clang is fine). Keeping
+`$(brew --prefix llvm)/bin` ahead of `/usr/bin` avoids picking up a different
+`llc` if multiple LLVM builds are installed.
+
+Homebrew’s **`llvm`** formula tracks upstream closely; the major version may differ
+from Ubuntu’s LLVM 18 packages. If `find_package(MLIR)` fails, install a matching
+LLVM/MLIR or build from source (next paragraph).
 
 Official setup references:
 
@@ -1636,21 +1678,22 @@ parse and semantic-check source
   -> MLIR lowerings
   -> LLVM IR (written to a temporary .ll file)
   -> llc      : LLVM IR -> relocatable object file (.o)
-  -> ld.lld   : link .o + startup objects + libc + libnexrt.a -> executable
+  -> link     : Linux: ld.lld + ELF CRT + libc + libnexrt.a; Darwin: clang + libnexrt.a -> executable
 ```
 
-At configure time, CMake asks the host C compiler where typical Linux **startup
-object files** live (`-print-file-name=Scrt1.o`, `crti.o`, `crtn.o`) and where
-**`libc`** should be resolved from (`-print-file-name=libc.so.6`), finds **`llc`**
-and **`ld.lld`** on the PATH or under the LLVM install, and writes those paths
-into `build/generated/nexc_link_config.h`. `nexc` reads that header so it can run
-the tools without hand-maintaining distribution-specific paths.
+At configure time, CMake records absolute tool paths in `build/generated/nexc_link_config.h`.
+**Linux:** the host C compiler is queried for glibc **startup objects** and **`libc`**
+(`-print-file-name=Scrt1.o`, `crti.o`, `crtn.o`, `libc.so.6`); **`llc`** and **`ld.lld`**
+are discovered under the LLVM install or common distro paths. **Darwin:** **`llc`**
+is discovered the same way (often Homebrew LLVM; Xcode may not ship `llc` on
+`PATH`); the final link uses **`clang`** from the active C toolchain so Mach-O,
+SDK, and **libSystem** match the host.
 
 The archive `build/runtime/libnexrt.a` contains small implementations for built-in
 calls (`print`, `readln`, parse helpers, …). `nexc` locates it next to itself, or
-you set **`NEXC_RUNTIME_LIBRARY`** to a full path. If Linux, `llc`, or `ld.lld`
-are missing, or CMake could not record a supported layout, **`nexc … -o …` fails
-with an error** instead of producing a half-linked binary.
+you set **`NEXC_RUNTIME_LIBRARY`** to a full path. If required tools were not found
+at configure time (Linux: `llc`/`ld.lld`; Darwin: `llc`/`clang`), **`nexc … -o …`**
+fails with an error instead of producing a half-linked binary.
 
 ### What `llc` is
 
@@ -1662,6 +1705,9 @@ references** (for example to libc or to `nex_runtime_*` functions) that the
 **linker** fills in next.
 
 ### What `ld.lld` is
+
+**`ld.lld`** is used only on **Linux** in this tree. On **macOS**, `nexc` links with
+**`clang`** instead (same role: consume `.o` plus `libnexrt.a`, produce an executable).
 
 **`ld.lld`** is LLVM's linker (GNU-compatible on Linux). It takes `.o` files and
 **static archives** (`.a`), **matches symbol names** across them (`main`,

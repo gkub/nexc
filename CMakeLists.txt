@@ -45,13 +45,33 @@ if(MLIR_FOUND)
 
 endif()
 
-# Native executable pipeline uses llc + ld.lld (no clang as linker driver).
-set(NEXC_LLVM_TOOL_HINTS /usr/lib/llvm-18/bin)
+# Search order: MLIR's LLVM tool dir first (same install as MLIR), then distro/Homebrew paths.
+set(NEXC_LLVM_TOOL_HINTS "")
 if(DEFINED LLVM_TOOLS_BINARY_DIR)
     list(APPEND NEXC_LLVM_TOOL_HINTS "${LLVM_TOOLS_BINARY_DIR}")
 endif()
+list(APPEND NEXC_LLVM_TOOL_HINTS /usr/lib/llvm-18/bin)
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    list(APPEND NEXC_LLVM_TOOL_HINTS
+        /opt/homebrew/opt/llvm/bin
+        /usr/local/opt/llvm/bin
+    )
+endif()
+
+set(NEXC_CONFIGURED_NATIVE_LINK 0)
+set(NEXC_HOST_LINK_USE_LINUX_LD_LLD 0)
+set(NEXC_HOST_LINK_USE_DARWIN_CLANG 0)
+set(NEXC_LLC_PATH "")
+set(NEXC_LD_LLD_PATH "")
+set(NEXC_LINUX_DYNAMIC_LINKER "")
+set(NEXC_SCRT1_PATH "")
+set(NEXC_CRTI_PATH "")
+set(NEXC_CRTN_PATH "")
+set(NEXC_LIBDIR_FOR_LC "")
+set(NEXC_DARWIN_CLANG_PATH "")
 
 set(NEXC_NATIVE_LINK_READY FALSE)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_program(NEXC_LLC_EXECUTABLE
         NAMES llc llc-18
@@ -97,24 +117,42 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         else()
             message(STATUS "Unsupported CMAKE_SYSTEM_PROCESSOR for lld link; native link disabled")
         endif()
+
+        if(NEXC_NATIVE_LINK_READY)
+            set(NEXC_CONFIGURED_NATIVE_LINK 1)
+            set(NEXC_HOST_LINK_USE_LINUX_LD_LLD 1)
+            set(NEXC_LLC_PATH "${NEXC_LLC_EXECUTABLE}")
+            set(NEXC_LD_LLD_PATH "${NEXC_LD_LLD_EXECUTABLE}")
+        endif()
     else()
         message(STATUS "llc and/or ld.lld not found; native executable tests will be skipped")
     endif()
-endif()
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    find_program(NEXC_LLC_EXECUTABLE
+        NAMES llc llc-18 llc-19 llc-20
+        HINTS ${NEXC_LLVM_TOOL_HINTS}
+    )
+    set(NEXC_DARWIN_LINK_CLANG "")
+    if(CMAKE_C_COMPILER_ID MATCHES "AppleClang|Clang")
+        set(NEXC_DARWIN_LINK_CLANG "${CMAKE_C_COMPILER}")
+    else()
+        find_program(NEXC_DARWIN_LINK_CLANG
+            NAMES clang clang-18 clang-19 clang-20
+            HINTS ${NEXC_LLVM_TOOL_HINTS}
+        )
+    endif()
 
-if(NEXC_NATIVE_LINK_READY)
-    set(NEXC_CONFIGURED_LINUX_LINK 1)
-    set(NEXC_LLC_PATH "${NEXC_LLC_EXECUTABLE}")
-    set(NEXC_LD_LLD_PATH "${NEXC_LD_LLD_EXECUTABLE}")
-else()
-    set(NEXC_CONFIGURED_LINUX_LINK 0)
-    set(NEXC_LLC_PATH "")
-    set(NEXC_LD_LLD_PATH "")
-    set(NEXC_LINUX_DYNAMIC_LINKER "")
-    set(NEXC_SCRT1_PATH "")
-    set(NEXC_CRTI_PATH "")
-    set(NEXC_CRTN_PATH "")
-    set(NEXC_LIBDIR_FOR_LC "")
+    if(NEXC_LLC_EXECUTABLE AND NEXC_DARWIN_LINK_CLANG)
+        set(NEXC_NATIVE_LINK_READY TRUE)
+        set(NEXC_CONFIGURED_NATIVE_LINK 1)
+        set(NEXC_HOST_LINK_USE_DARWIN_CLANG 1)
+        set(NEXC_LLC_PATH "${NEXC_LLC_EXECUTABLE}")
+        set(NEXC_DARWIN_CLANG_PATH "${NEXC_DARWIN_LINK_CLANG}")
+        message(STATUS "Found llc: ${NEXC_LLC_EXECUTABLE}")
+        message(STATUS "Darwin native link driver: ${NEXC_DARWIN_LINK_CLANG}")
+    else()
+        message(STATUS "On Darwin, native link needs llc (install LLVM; brew install llvm) and clang")
+    endif()
 endif()
 
 configure_file(

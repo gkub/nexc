@@ -52,8 +52,9 @@ booleans, module constants, mutable local storage, assignment, function calls,
 unsigned comparisons/division/remainder, and eager `&&` / `||`
 - string literal lowering to global bytes plus length
 - LLVM IR dumping with `llvm-as` validation when LLVM tools are available
-- native executable generation using `llc` (IR to object) and `ld.lld` (link),
-  with Linux CRT paths discovered at CMake configure time (no `clang` linker driver)
+- native executable generation: `llc` (IR to object), then Linux uses `ld.lld`
+  with glibc CRT paths at CMake configure time; macOS uses the host `clang` driver
+  to link Mach-O (`llc` from LLVM is still required; Xcode alone may not provide it)
 - runtime-backed formatted **`print` / `println`** and stdout helpers
 - an experimental `readln() -> str` stdin slice for direct input/output examples
 - explicit input parsing helpers: `parse_i32`, `parse_u64`, `parse_bool`, and
@@ -74,7 +75,9 @@ built-in behavior.
 
 ## Development Setup
 
-On Ubuntu 24.04, install the basic build tools plus LLVM/MLIR 18:
+### Ubuntu 24.04
+
+Install the basic build tools plus LLVM/MLIR 18:
 
 ```sh
 sudo apt-get update
@@ -92,6 +95,36 @@ source ~/.zshrc
 mlir-opt --version
 ```
 
+Configure and build (from the repository root):
+
+```sh
+cmake -S . -B build -DMLIR_DIR=/usr/lib/llvm-18/lib/cmake/mlir
+cmake --build build
+```
+
+### macOS (Homebrew)
+
+Install Xcode Command Line Tools (host **`clang`** for linking): `xcode-select --install`.
+
+Install CMake, Ninja, LLVM/MLIR tools, and Graphviz:
+
+```sh
+brew install cmake ninja llvm graphviz
+```
+
+Put Homebrew’s LLVM **`bin`** on `PATH` so `mlir-opt`, `llvm-as`, and **`llc`**
+resolve to the same install you pass as **`MLIR_DIR`**:
+
+```sh
+export PATH="$(brew --prefix llvm)/bin:$PATH"
+cmake -S . -B build -DMLIR_DIR="$(brew --prefix llvm)/lib/cmake/mlir"
+cmake --build build
+```
+
+Verify: `command -v mlir-opt llc llvm-as` and `mlir-opt --version`. CMake records
+absolute paths to `llc` and the link driver at configure time; re-run `cmake` if
+you upgrade or move the LLVM prefix.
+
 After building the compiler, you can use `build/nexc` directly to compile a nex
 program without the helper script:
 
@@ -105,10 +138,11 @@ Official setup references:
 - [LLVM Getting Started](https://llvm.org/docs/GettingStarted.html)
 - [Building LLVM with CMake](https://llvm.org/docs/CMake.html)
 
-For non-Ubuntu systems, use the official LLVM/MLIR installation or source-build
-instructions. The important requirement for this project is that CMake can find
-the MLIR package, usually via `MLIR_DIR`, and that MLIR tools such as `mlir-opt`
-are available for validation.
+On Linux distributions other than Ubuntu, or if Homebrew’s LLVM version does not
+match what `find_package(MLIR)` expects, use the official LLVM/MLIR packages or
+source-build instructions. The project requires a discoverable MLIR CMake package
+(typically `MLIR_DIR`) and tools such as `mlir-opt` and `llvm-as` on `PATH` for
+tests.
 
 ## Quick Start
 

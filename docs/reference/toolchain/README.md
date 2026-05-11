@@ -10,7 +10,7 @@ How developers and CI **invoke** the compiler, reproduce builds, read dumps, and
 | [build_and_test.md](build_and_test.md) | CMake configure/build, CTest, typical env vars. | **`./nexc.sh check`** wraps configure+build+ctest; raw commands are the portable contract. |
 | [inspection_modes.md](inspection_modes.md) | `--dump-*`, `--check`, what each stage prints. | Full `--dump-mlir` / `--dump-llvm` need the matching LLVM/MLIR tools **found at CMake configure time**. |
 | [diagnostics.md](diagnostics.md) | Diagnostic shape, severities, exit codes. | Exit code **2** is CLI misuse; **1** is compile/runtime failure of the driver. |
-| [artifacts.md](artifacts.md) | `build/nexc`, `libnexrt.a`, stdout dumps vs temp files for native compile. | Native compile writes **temporary LLVM IR** before `llc` / `ld.lld` unless you only dump text to stdout. |
+| [artifacts.md](artifacts.md) | `build/nexc`, `libnexrt.a`, stdout dumps vs temp files for native compile. | Native compile writes **temporary LLVM IR** before `llc` and a host link step (`ld.lld` on Linux, `clang` on macOS) unless you only dump text to stdout. |
 
 ## Not Yet Documented Here
 
