@@ -15,7 +15,7 @@ Implemented today:
 - selected input helpers such as `readln`, `parse_i32`, `parse_u64`,
   `parse_bool`, and `input_ok`
 
-See [`docs/reference/`](./docs/reference/README.md) if you want to learn how to write nex code, and
+See [`docs/reference/language`](./docs/reference/language/README.md) if you want to learn how to write nex code, and
 [`NEXC_HOLY_BOOK.md`](./NEXC_HOLY_BOOK.md) for an educational tour of how the nex compiler works.
 
 ## Quick Start
