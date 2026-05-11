@@ -771,10 +771,11 @@ add_nexc_executable_test(
     42
 )
 
-add_nexc_executable_test(
+add_nexc_executable_stdout_test(
     run_executable_for_loop
     examples/for_loop.nexs
-    45
+    0
+    "sum = 0\nsum = 1\nsum = 3\nsum = 6\nsum = 10\nsum = 15\nsum = 21\nsum = 28\nsum = 36\nsum = 45\n"
 )
 
 add_nexc_executable_test(

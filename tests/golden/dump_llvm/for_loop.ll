@@ -1,6 +1,14 @@
 ; ModuleID = 'nex_module'
 source_filename = "nex_module"
 
+@__nex_fmt_main_1 = private constant [1 x i8] c"\0A"
+@__nex_fmt_main_0 = private constant [6 x i8] c"sum = "
+@__nex_str_main_8 = private constant [9 x i8] c"sum = {}\0A"
+
+declare void @nex_runtime_print_i64(i64)
+
+declare void @nex_runtime_print_str(ptr, i64)
+
 define i32 @main() {
   %1 = alloca i32, i64 1, align 4
   %2 = insertvalue { ptr, ptr, i64 } undef, ptr %1, 0
@@ -25,19 +33,23 @@ define i32 @main() {
   %16 = load i1, ptr %9, align 1
   %17 = xor i1 %16, true
   %18 = and i1 %15, %17
-  br i1 %18, label %19, label %25
+  br i1 %18, label %19, label %27
 
 19:                                               ; preds = %13
   %20 = load i32, ptr %1, align 4
   %21 = load i32, ptr %5, align 4
   %22 = add i32 %20, %21
   store i32 %22, ptr %1, align 4
-  %23 = load i32, ptr %5, align 4
-  %24 = add i32 %23, 1
-  store i32 %24, ptr %5, align 4
+  %23 = load i32, ptr %1, align 4
+  call void @nex_runtime_print_str(ptr @__nex_fmt_main_0, i64 6)
+  %24 = sext i32 %23 to i64
+  call void @nex_runtime_print_i64(i64 %24)
+  call void @nex_runtime_print_str(ptr @__nex_fmt_main_1, i64 1)
+  %25 = load i32, ptr %5, align 4
+  %26 = add i32 %25, 1
+  store i32 %26, ptr %5, align 4
   br label %13
 
-25:                                               ; preds = %13
-  %26 = load i32, ptr %1, align 4
-  ret i32 %26
+27:                                               ; preds = %13
+  ret i32 0
 }

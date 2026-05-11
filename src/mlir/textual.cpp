@@ -280,10 +280,15 @@ public:
     // The OpBuilder is shared across the whole module so each FunctionLowerer
     // receives it by reference. The IR Function is also borrowed; lowering reads
     // it but does not mutate it.
+    // Borrow the module explicitly so module-scope helpers do not have to infer
+    // it from the builder's current block. That inference is fragile while MLIR
+    // is constructing nested `scf` regions.
     FunctionLowerer(::mlir::OpBuilder& builder,
+                    ::mlir::ModuleOp module,
                     const ir::Function& function,
                     const std::unordered_map<std::string, const ir::Const*>& constants)
         : builder_(builder),
+          module_(module),
           function_(function),
           constants_(constants),
           loc_(builder.getUnknownLoc()),
@@ -466,11 +471,10 @@ private:
         // while the builder is inserting inside a function. The insertion guard
         // lets us temporarily jump to the module, emit the global, and then
         // return to the function body exactly where we were.
-        ::mlir::ModuleOp module = functionModule();
         {
             ::mlir::OpBuilder::InsertionGuard guard(builder_);
-            builder_.setInsertionPointToStart(module.getBody());
-            if (!module.lookupSymbol<::mlir::LLVM::GlobalOp>(symbol)) {
+            builder_.setInsertionPointToStart(module_.getBody());
+            if (!module_.lookupSymbol<::mlir::LLVM::GlobalOp>(symbol)) {
                 builder_.create<::mlir::LLVM::GlobalOp>(
                     loc_, arrayType, true, ::mlir::LLVM::Linkage::Private,
                     symbol, builder_.getStringAttr(bytes), 0, 0);
@@ -889,11 +893,10 @@ private:
         const ::mlir::Type arrayType =
             ::mlir::LLVM::LLVMArrayType::get(i8, static_cast<unsigned>(bytes.size()));
 
-        ::mlir::ModuleOp module = functionModule();
         {
             ::mlir::OpBuilder::InsertionGuard guard(builder_);
-            builder_.setInsertionPointToStart(module.getBody());
-            if (!module.lookupSymbol<::mlir::LLVM::GlobalOp>(symbol)) {
+            builder_.setInsertionPointToStart(module_.getBody());
+            if (!module_.lookupSymbol<::mlir::LLVM::GlobalOp>(symbol)) {
                 builder_.create<::mlir::LLVM::GlobalOp>(
                     loc_, arrayType, true, ::mlir::LLVM::Linkage::Private,
                     symbol, builder_.getStringAttr(bytes), 0, 0);
@@ -1546,25 +1549,13 @@ private:
         return found->second;
     }
 
-    ::mlir::ModuleOp functionModule() const {
-        ::mlir::Operation* operation = builder_.getBlock()->getParentOp();
-        while (operation && !::llvm::isa<::mlir::ModuleOp>(operation)) {
-            operation = operation->getParentOp();
-        }
-        if (!operation) {
-            throw std::logic_error("MLIR lowering could not find parent module");
-        }
-        return ::llvm::cast<::mlir::ModuleOp>(operation);
-    }
-
     void ensureRuntimePrintDeclaration(std::string_view name) {
-        ::mlir::ModuleOp module = functionModule();
-        if (module.lookupSymbol<::mlir::func::FuncOp>(name)) {
+        if (module_.lookupSymbol<::mlir::func::FuncOp>(name)) {
             return;
         }
 
         ::mlir::OpBuilder::InsertionGuard guard(builder_);
-        builder_.setInsertionPointToStart(module.getBody());
+        builder_.setInsertionPointToStart(module_.getBody());
         const ::mlir::FunctionType runtimeType = builder_.getFunctionType(
             {::mlir::LLVM::LLVMPointerType::get(builder_.getContext()),
              builder_.getI64Type()},
@@ -1605,13 +1596,12 @@ private:
     void ensureRuntimeFunctionDeclaration(std::string_view name,
                                           ::mlir::TypeRange parameterTypes,
                                           ::mlir::TypeRange resultTypes) {
-        ::mlir::ModuleOp module = functionModule();
-        if (module.lookupSymbol<::mlir::func::FuncOp>(name)) {
+        if (module_.lookupSymbol<::mlir::func::FuncOp>(name)) {
             return;
         }
 
         ::mlir::OpBuilder::InsertionGuard guard(builder_);
-        builder_.setInsertionPointToStart(module.getBody());
+        builder_.setInsertionPointToStart(module_.getBody());
         ::mlir::func::FuncOp declaration = builder_.create<::mlir::func::FuncOp>(
             loc_, name, builder_.getFunctionType(parameterTypes, resultTypes));
         declaration.setPrivate();
@@ -1623,6 +1613,13 @@ private:
     };
 
     ::mlir::OpBuilder& builder_;
+    // Module-scope operations such as LLVM globals and runtime function
+    // declarations cannot reliably discover the module by walking upward from the
+    // current insertion point. During structured-region construction, MLIR may
+    // invoke callbacks before the in-progress `scf` operation has a complete
+    // parent chain. Holding the module explicitly keeps module-scope emission
+    // independent from where the builder is currently inserting.
+    ::mlir::ModuleOp module_;
     const ir::Function& function_;
     const std::unordered_map<std::string, const ir::Const*>& constants_;
     ::mlir::Location loc_;
@@ -2376,7 +2373,7 @@ buildMlirModule(::mlir::MLIRContext& context, const ir::Module& module) {
 
     builder.setInsertionPointToStart(mlirModule->getBody());
     for (const ir::Function& function : module.functions) {
-        FunctionLowerer(builder, function, constants).lower();
+        FunctionLowerer(builder, *mlirModule, function, constants).lower();
         builder.setInsertionPointToEnd(mlirModule->getBody());
     }
 

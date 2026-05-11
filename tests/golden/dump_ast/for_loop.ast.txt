@@ -30,5 +30,12 @@ TranslationUnit
                 BinaryExpr Plus
                   NameExpr sum
                   NameExpr i
+            CallStmt
+              CallExpr
+                Callee
+                  NameExpr print
+                Arguments
+                  StringLiteral "sum = {}\n"
+                  NameExpr sum
       ReturnStmt
-        NameExpr sum
+        IntegerLiteral 0

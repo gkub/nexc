@@ -21,11 +21,14 @@ Module
             %6: i32 = LoadLocal $1
             %7: i32 = Binary Plus %5, %6
             StoreLocal $0 = %7
+            %8: str = StringLiteral "sum = {}\n"
+            %9: i32 = LoadLocal $0
+            Call @builtin.print(%8, %9)
         Step
           Block
-            %8: i32 = LoadLocal $1
-            %9: i32 = IntegerLiteral 1
-            %10: i32 = Binary Plus %8, %9
-            StoreLocal $1 = %10
-      %11: i32 = LoadLocal $0
-      ReturnValue %11
+            %10: i32 = LoadLocal $1
+            %11: i32 = IntegerLiteral 1
+            %12: i32 = Binary Plus %10, %11
+            StoreLocal $1 = %12
+      %13: i32 = IntegerLiteral 0
+      ReturnValue %13
