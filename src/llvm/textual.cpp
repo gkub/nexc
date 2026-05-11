@@ -55,7 +55,11 @@ void loadLlvmLoweringDialects(::mlir::MLIRContext& context) {
 // while different dialects are changing types.
 void lowerToLlvmDialect(::mlir::ModuleOp module) {
     ::mlir::PassManager passes(module.getContext());
+#ifdef NEXC_MLIR_HAS_SCF_TO_CONTROL_FLOW_PASS
+    passes.addPass(::mlir::createSCFToControlFlowPass());
+#else
     passes.addPass(::mlir::createConvertSCFToCFPass());
+#endif
     passes.addPass(::mlir::createFinalizeMemRefToLLVMConversionPass());
     passes.addPass(::mlir::createConvertFuncToLLVMPass());
     passes.addPass(::mlir::createArithToLLVMConversionPass());

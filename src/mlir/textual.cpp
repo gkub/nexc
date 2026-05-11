@@ -63,7 +63,7 @@ ir::ValueRef requiredValue(const std::optional<ir::ValueRef>& value,
     return *value;
 }
 
-std::string decodeStringLiteralOrThrow(std::string_view raw) {
+[[maybe_unused]] std::string decodeStringLiteralOrThrow(std::string_view raw) {
     std::string decoded;
     std::string err;
     if (!decodeStringLiteralContent(raw, decoded, &err)) {
@@ -72,8 +72,8 @@ std::string decodeStringLiteralOrThrow(std::string_view raw) {
     return decoded;
 }
 
-std::optional<std::string> findStringLiteralRaw(const ir::Function& fn,
-                                              std::size_t valueId) {
+[[maybe_unused]] std::optional<std::string> findStringLiteralRaw(const ir::Function& fn,
+                                                                 std::size_t valueId) {
     std::optional<std::string> found;
     const std::function<void(const ir::Block&)> scan = [&](const ir::Block& block) {
         if (found) {

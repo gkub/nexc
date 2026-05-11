@@ -308,6 +308,12 @@ void compileExecutable(const nexc::ir::Module& module,
         "-o",
         std::move(objectString),
     };
+#if NEXC_HOST_LINK_USE_DARWIN_CLANG
+    if (std::strlen(NEXC_DARWIN_LLC_TARGET_TRIPLE) != 0) {
+        llcStorage.insert(llcStorage.begin() + 3,
+                          std::string("-mtriple=") + NEXC_DARWIN_LLC_TARGET_TRIPLE);
+    }
+#endif
     std::vector<char*> llcArgv;
     llcArgv.reserve(llcStorage.size() + 1);
     for (std::string& piece : llcStorage) {
@@ -358,6 +364,11 @@ void compileExecutable(const nexc::ir::Module& module,
         "-o",
         std::move(outPath),
     };
+    if (std::strlen(NEXC_DARWIN_DEPLOYMENT_TARGET) != 0) {
+        linkStorage.insert(linkStorage.begin() + 1,
+                           std::string("-mmacosx-version-min=") +
+                               NEXC_DARWIN_DEPLOYMENT_TARGET);
+    }
 #else
 #error "native link enabled but neither Linux nor Darwin link backend is set"
 #endif
