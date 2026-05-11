@@ -66,7 +66,8 @@ The compiler currently supports:
 - typed IR dumps
 - MLIR lowering for scalars/control flow: fixed-width integers,
 booleans, module constants, mutable local storage, assignment, function calls,
-`if`/`else`, `while`, **`for`** (desugared to `while` in typed IR), `/`, `%`,
+`if`/`else`, `while`, **`for`** (desugared to `while` in typed IR), **`break`** /
+  **`continue`**, `/`, `%`,
 unsigned comparisons/division/remainder, and eager `&&` / `||`
 - string literal lowering to global bytes plus length
 - LLVM IR dumping with `llvm-as` validation when LLVM tools are available
@@ -242,37 +243,37 @@ nex.md      Living project overview and AI/context document
 
 ### Compiler walkthrough
 
-- [NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md) — end-to-end tour of the pipeline and implementation (lex → native link)
-- [LLM_REFERENCE.md](./LLM_REFERENCE.md) — compact index for tooling / assistants
+- [NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md): pipeline tour from lex through native link.
+- [LLM_REFERENCE.md](./LLM_REFERENCE.md): short index for tooling and assistants.
 
 ### Documentation map
 
-- [docs/README.md](./docs/README.md) — what lives under `docs/` (reference, design, user, backlog)
+- [docs/README.md](./docs/README.md): map of this tree (reference, design, user, backlog).
 
 ### Normative reference (`docs/reference/`)
 
 Each section’s **README** lists its topic files (types, statements, CLI, build/test, …).
 
-- [docs/reference/README.md](./docs/reference/README.md) — how this tree relates to tutorials, design drafts, and the Holy Book
-- [docs/reference/language/README.md](./docs/reference/language/README.md) — language rules by topic
-- [docs/reference/toolchain/README.md](./docs/reference/toolchain/README.md) — `nexc` CLI, build, test, dumps, diagnostics
-- [docs/reference/runtime/README.md](./docs/reference/runtime/README.md) — runtime / stdlib direction and bootstrap notes
+- [docs/reference/README.md](./docs/reference/README.md): how reference docs relate to tutorials, design drafts, and the Holy Book.
+- [docs/reference/language/README.md](./docs/reference/language/README.md): language rules by topic.
+- [docs/reference/toolchain/README.md](./docs/reference/toolchain/README.md): `nexc` CLI, build, test, dumps, diagnostics.
+- [docs/reference/runtime/README.md](./docs/reference/runtime/README.md): runtime and stdlib direction, bootstrap notes.
 
 ### Milestones and project narrative
 
-- [docs/IMPLEMENTATION_BACKLOG.md](./docs/IMPLEMENTATION_BACKLOG.md) — ordered next implementation milestones
-- [nex.md](./nex.md) — living language and project overview
+- [docs/IMPLEMENTATION_BACKLOG.md](./docs/IMPLEMENTATION_BACKLOG.md): ordered implementation milestones.
+- [nex.md](./nex.md): project and language overview.
 
 ### Tutorials and frozen snapshots
 
-- [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md) — writing small programs today
-- [docs/user/frontend.md](./docs/user/frontend.md) — inspection modes and semantic checking from the user side
-- [docs/language/core_v0.md](./docs/language/core_v0.md) — frozen early language snapshot (historical baseline)
+- [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md): tutorial for small programs today.
+- [docs/user/frontend.md](./docs/user/frontend.md): inspection modes and semantic checking.
+- [docs/language/core_v0.md](./docs/language/core_v0.md): frozen early language snapshot (historical baseline).
 
 ### Example programs
 
-- [examples/pipeline_walkthrough.nexs](./examples/pipeline_walkthrough.nexs) — multi-stage pipeline walkthrough input
-- [examples/for_loop.nexs](./examples/for_loop.nexs) — C-style `for` loop (sums 0..9)
+- [examples/pipeline_walkthrough.nexs](./examples/pipeline_walkthrough.nexs): multi-stage pipeline walkthrough input.
+- [examples/for_loop.nexs](./examples/for_loop.nexs): C-style `for` loop (sums 0..9).
 
 ### Design drafts (`docs/design/`)
 
@@ -335,21 +336,19 @@ explicitly updated.
 
 ## Forward Priorities
 
-0. **Near-term language/compiler sequencing** — single living checklist:
-   [`docs/IMPLEMENTATION_BACKLOG.md`](./docs/IMPLEMENTATION_BACKLOG.md)
-   (**`for` shipped** → uninitialized locals + definite assignment → tighten arrays;
-   **pointers** tracked as a later mega-item; doc and test expectations per wave).
-1. Build a proper long-lived user reference (language, toolchain, runtime/std),
-   replacing milestone-centric docs as the main user-facing source of truth.
-2. Design and implement a real Nex-owned I/O model (stdin/stdout/stderr, files,
-   pipes) with explicit effects/costs and clear error behavior.
-3. Stabilize string/slice/resource semantics needed by practical I/O APIs.
-4. Add fixed-size arrays first, then slices/views, then growable vectors after
-   allocation/ownership are ready.
-5. Evolve toward shape-aware linear algebra as a first-class design target, not
-   an afterthought.
-6. Keep compiler/runtime portability in mind from day one (Linux-first is fine),
-   with RISC-V and embedded constraints as active design inputs.
+1. **Ordered work:** Follow [`docs/IMPLEMENTATION_BACKLOG.md`](./docs/IMPLEMENTATION_BACKLOG.md) top to bottom. Near-term compiler/language focus is **uninitialized locals and definite assignment**, then a **clearer fixed-size array** story; **pointers** stay a large later chunk. When a slice lands, update `docs/reference/`, tests, and examples together.
+
+2. **Reference as spec:** Keep normative behavior in [`docs/reference/`](./docs/reference/README.md) so newcomers are not stuck parsing old milestone prose or open-ended `docs/design/` drafts.
+
+3. **I/O model:** Move past the current experimental stdin path toward an explicit nex story for stdio, files, and pipes (effects, errors, and costs spelled out in the language model, not only in C runtime helpers).
+
+4. **`str` and resources:** Stabilize string, slice, and ownership rules so I/O and parsing APIs do not fight the type system.
+
+5. **Arrays, then generalize:** Treat fixed-size arrays as the first solid surface, add slices or views when the type system is ready, and only then growable vectors once allocation and ownership are defined.
+
+6. **Linear algebra:** Keep shape-aware numerics visible in design work so it does not arrive as a bolt-on.
+
+7. **Portability:** Linux is still the default CI and dev baseline; macOS host linking is supported. RISC-V and embedded-style profiles remain design inputs for calling conventions, runtime size, and codegen choices later.
 
 ## License
 
