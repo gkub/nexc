@@ -4,7 +4,7 @@ This guide explains the compiler as it grows. It is intentionally educational:
 when we add a compiler concept, this file should explain **what it is**, **why it
 exists**, and **where it lives in the codebase**.
 
-The language rules live in [docs/language/core_v0.md](docs/language/core_v0.md).
+The language rules live in [docs/reference/language/](docs/reference/language/README.md).
 This guide is about how the compiler implementation works.
 
 ## Table of Contents
@@ -16,8 +16,8 @@ This guide is about how the compiler implementation works.
 - [4. Diagnostics and Carets](#4-diagnostics-and-carets)
 - [5. Tokens](#5-tokens)
 - [6. Lexer](#6-lexer)
-- [7. AST](#7-ast)
-- [8. Parser](#8-parser)
+- [7. Parser](#7-parser)
+- [8. AST](#8-ast)
 - [9. Semantic Analysis](#9-semantic-analysis)
 - [10. Typed IR](#10-typed-ir)
 - [11. MLIR Lowering](#11-mlir-lowering)
@@ -126,7 +126,7 @@ or:
 you are running `build/nexc` on a `.nexs` input file. That is the compiler
 pipeline.
 
-The compiler currently implements a checked Core v0 frontend, a first typed IR
+The compiler currently implements a checked frontend, a first typed IR
 dump, and a small MLIR lowering slice:
 
 ```text
@@ -165,6 +165,12 @@ fn f() -> i32 {
 
 The parser only knows that `return expression;` is valid syntax. A later semantic
 pass must reject returning `bool` from an `i32` function.
+
+A useful compiler instinct: each stage should answer only the questions it has
+enough information to answer well. The lexer should not guess expression
+precedence. The parser should not decide whether `x` is mutable. Semantic
+analysis should not care how `scf.while` is printed. Keeping those boundaries
+boring makes compiler bugs easier to locate.
 
 ### 1.1 Dumps Are Pipeline Stop Points
 
@@ -398,7 +404,7 @@ Those are expected compiler errors, so they are collected and printed.
 Diagnostics now print both a location and a source snippet:
 
 ```text
-tests/invalid_expression_statement.nexs:2:5: error: only call expressions may be used as expression statements in Core v0
+tests/invalid_expression_statement.nexs:2:5: error: only call expressions may be used as expression statements
   |     1 + 2;
   |     ^~~~~
 ```
@@ -509,52 +515,10 @@ These helpers make multi-character tokens straightforward:
 ```
 
 Whitespace and comments are often called **trivia**. They matter for source
-positions but not for grammar, so Core v0 skips them instead of producing
+positions but not for grammar, so the parser skips them instead of producing
 parser-visible tokens.
 
-## 7. AST
-
-Files:
-
-```text
-include/nexc/frontend/ast.h
-src/frontend/ast.cpp
-```
-
-AST means **abstract syntax tree**. Tokens are flat, but programs are nested.
-
-For example:
-
-```nex
-return a + b * c;
-```
-
-has a tree shape like:
-
-```text
-ReturnStmt
-  BinaryExpr Plus
-    NameExpr a
-    BinaryExpr Star
-      NameExpr b
-      NameExpr c
-```
-
-That tree captures precedence. `b * c` is nested under `a + ...`, so later
-compiler stages know multiplication happens before addition.
-
-The current AST has four broad families:
-
-- `TranslationUnit`: the whole source file
-- `Item`: top-level declarations such as functions and constants
-- `Stmt`: statements inside function bodies
-- `Expr`: expressions that produce values
-
-The current AST uses `std::unique_ptr` for owned child nodes. This makes
-ownership explicit and easy to debug. Arena allocation can be introduced later
-if AST allocation becomes noisy or performance-sensitive.
-
-## 8. Parser
+## 7. Parser
 
 Files:
 
@@ -584,10 +548,15 @@ parseWhileStmt()
 This style is useful for an educational compiler because parser code maps
 directly to the grammar.
 
+Recursive descent is also pleasant to debug because the call stack looks like
+the grammar. If `parseIfStmt()` fails, you are already in the part of the parser
+that knows what an `if` is supposed to look like. That is one reason many small
+production compilers still use hand-written parsers instead of parser generators.
+
 ### Statement Ambiguity
 
-In Core v0, a statement beginning with an identifier can mean either assignment
-or call statement:
+In the current language, a statement beginning with an identifier can mean either
+assignment or a call statement:
 
 ```nex
 x = x + 1;
@@ -628,7 +597,12 @@ not this:
 operator's precedence against the minimum precedence required at the current
 recursion level.
 
-Core v0 binary operators are left-associative:
+This technique is called precedence climbing. It is closely related to Pratt
+parsing, another classic expression parser design. Both solve the same practical
+problem: expressions are not naturally parsed by one simple left-to-right loop
+once operators have different precedence and associativity.
+
+Current binary operators are left-associative:
 
 ```nex
 a - b - c
@@ -657,6 +631,48 @@ BinaryExpr Plus
       IntegerLiteral 7
   IntegerLiteral 1
 ```
+
+## 8. AST
+
+Files:
+
+```text
+include/nexc/frontend/ast.h
+src/frontend/ast.cpp
+```
+
+AST means **abstract syntax tree**. Tokens are flat, but programs are nested.
+
+For example:
+
+```nex
+return a + b * c;
+```
+
+has a tree shape like:
+
+```text
+ReturnStmt
+  BinaryExpr Plus
+    NameExpr a
+    BinaryExpr Star
+      NameExpr b
+      NameExpr c
+```
+
+That tree captures precedence. `b * c` is nested under `a + ...`, so later
+compiler stages know multiplication happens before addition.
+
+The current AST has four broad families:
+
+- `TranslationUnit`: the whole source file
+- `Item`: top-level declarations such as functions and constants
+- `Stmt`: statements inside function bodies
+- `Expr`: expressions that produce values
+
+The current AST uses `std::unique_ptr` for owned child nodes. This makes
+ownership explicit and easy to debug. Arena allocation can be introduced later
+if AST allocation becomes noisy or performance-sensitive.
 
 ## 9. Semantic Analysis
 
@@ -746,6 +762,11 @@ back to user code
 The typed IR starts answering those questions without committing to MLIR, LLVM
 IR, native code generation, or SSA form.
 
+This is the first "semantic compression" step. The AST keeps surface syntax so
+diagnostics and dumps can explain the user's program. Typed IR throws away some
+syntax trivia and keeps facts the backend needs: resolved names, explicit types,
+ordered effects, and structured control flow.
+
 ### 10.1 IR Modules
 
 The root IR object is `ir::Module`:
@@ -757,7 +778,7 @@ struct Module {
 };
 ```
 
-This mirrors the current Core v0 top level: a source file contains module-level
+This mirrors the current top level: a source file contains module-level
 `const` items and `fn` items. Later module/import work can expand this boundary,
 but one file to one IR module is enough for the current compiler.
 
@@ -1189,7 +1210,7 @@ middle end prematurely.
 
 ### 11.3 Boolean And Comparison Lowering
 
-Core v0 source code uses `bool`, `true`, `false`, and operators such as `<` and
+Source code uses `bool`, `true`, `false`, and operators such as `<` and
 `==`. MLIR does not have a nex-specific boolean type. In this slice:
 
 ```text
@@ -1236,7 +1257,7 @@ inspect before adding more clever canonicalization.
 
 ### 11.4 Local Storage Lowering
 
-Core v0 has named local bindings:
+The language has named local bindings:
 
 ```nex
 let x: i32 = 40;
@@ -1275,12 +1296,17 @@ later, load the current value from that slot
 ```
 
 Parameters are still different. Function parameters arrive as MLIR block
-arguments such as `%arg0`, and Core v0 parameters are immutable, so loading a
+arguments such as `%arg0`, and parameters are immutable, so loading a
 parameter can stay a direct SSA alias instead of allocating memory.
 
 This storage-first strategy is intentionally conservative. It gives every local a
 clear place to live before we implement optimization. Later passes can promote
 simple slots back into SSA values when it is safe.
+
+That later optimization is the classic "mem2reg" idea: turn stack slots that are
+only loaded and stored in simple ways into SSA values plus phi nodes. It is one
+of the first optimizations many LLVM-based compilers get almost for free after
+they produce clean IR.
 
 ### 11.5 Structured `if` Lowering
 
@@ -1365,7 +1391,7 @@ scf.while : () -> () {
 ```
 
 The current lowering does not use loop-carried SSA values yet. That is possible
-because Core v0 locals are lowered through explicit `memref` slots: the loop body
+because locals are lowered through explicit `memref` slots: the loop body
 updates the slots with `memref.store`, and the next condition evaluation reloads
 the current values with `memref.load`.
 
@@ -1398,88 +1424,17 @@ The name still says `Textual` because the user-visible mode dumps MLIR text. The
 important implementation detail is that the text is produced by a real MLIR
 module, not by hand-concatenating strings.
 
-### 11.8 Installation And Tooling
+### 11.8 Tooling and validation
 
-#### Ubuntu 24.04
+MLIR setup details live in the root [README.md](README.md) and
+[docs/reference/toolchain/build_and_test.md](docs/reference/toolchain/build_and_test.md).
+The Holy Book only needs the compiler idea:
 
-Install LLVM/MLIR 18 development packages:
-
-```sh
-sudo apt-get update
-sudo apt-get install -y cmake ninja-build build-essential clang graphviz
-sudo apt-get install -y libmlir-18-dev mlir-18-tools
-```
-
-The MLIR package installs headers, CMake config files, libraries, and tools under
-`/usr/lib/llvm-18`.
-
-Useful verification commands:
-
-```sh
-ls /usr/lib/llvm-18/include/mlir
-ls /usr/lib/llvm-18/lib/cmake/mlir
-/usr/lib/llvm-18/bin/mlir-opt --version
-```
-
-Adding LLVM tools to the shell `PATH` is convenient:
-
-```sh
-echo 'export PATH=/usr/lib/llvm-18/bin:$PATH' >> ~/.zshrc
-source ~/.zshrc
-mlir-opt --version
-mlir-translate --version
-```
-
-#### macOS (Homebrew)
-
-Apple’s Xcode Command Line Tools supply a host **`clang`** (used as the Mach-O
-link driver for `nexc … -o …`). They do **not** ship **`mlir-opt`**, **`llvm-as`**,
-or **`llc`** on a typical `PATH`; those come from a full LLVM install.
-
-1. Install the Command Line Tools if needed: `xcode-select --install`.
-2. Install [Homebrew](https://brew.sh/) if needed, then:
-
-```sh
-brew install cmake ninja llvm graphviz
-```
-
-3. Point CMake at Homebrew’s MLIR package. `brew --prefix llvm` resolves the
-   install root on both Apple silicon (`/opt/homebrew/opt/llvm` is typical) and
-   Intel (`/usr/local/opt/llvm` is typical):
-
-```sh
-export PATH="$(brew --prefix llvm)/bin:$PATH"
-cmake -S . -B build -DMLIR_DIR="$(brew --prefix llvm)/lib/cmake/mlir"
-cmake --build build
-```
-
-4. Confirm the tools **`nexc`** and tests invoke exist:
-
-```sh
-command -v mlir-opt llc llvm-as
-mlir-opt --version
-llc --version
-```
-
-Native linking on macOS uses **`llc`** from this LLVM prefix plus **`clang`** from
-the C toolchain CMake selected (Apple Clang is fine). Keeping
-`$(brew --prefix llvm)/bin` ahead of `/usr/bin` avoids picking up a different
-`llc` if multiple LLVM builds are installed.
-
-Homebrew’s **`llvm`** formula tracks upstream closely; the major version may differ
-from Ubuntu’s LLVM 18 packages. If `find_package(MLIR)` fails, install a matching
-LLVM/MLIR or build from source (next paragraph).
-
-Official setup references:
-
-- [MLIR Getting Started](https://mlir.llvm.org/getting_started/)
-- [LLVM Getting Started](https://llvm.org/docs/GettingStarted.html)
-- [Building LLVM with CMake](https://llvm.org/docs/CMake.html)
-
-On platforms without matching distro packages, building LLVM from source with
-`-DLLVM_ENABLE_PROJECTS=mlir` is the standard route documented by upstream LLVM.
-
-### 11.9 Current Command
+- `nexc` emits textual MLIR for inspection.
+- `mlir-opt` can verify that the text is structurally valid MLIR.
+- CTest runs that verification automatically when `mlir-opt` is available.
+- Missing MLIR validation tools skip those tests instead of blocking
+  frontend-only development.
 
 Current command:
 
@@ -1528,7 +1483,7 @@ available. The CMake configuration looks for the tool through the MLIR install
 metadata and the normal shell `PATH`; if it cannot find the tool, the validation
 tests are skipped rather than breaking frontend-only development machines.
 
-The current MLIR lowering now covers the Core v0 backend surface: fixed-width
+The current MLIR lowering now covers the implemented backend surface: fixed-width
 integer literals, `bool`, string literals, module constants, `+`, `-`, `*`, `/`,
 `%`, integer comparisons, eager `&&` / `||`, unary `!`, function parameters,
 direct function calls, built-in `print` / `println` calls, function returns,
@@ -1590,72 +1545,50 @@ input to later LLVM tools and code generation. **§13** documents what Nex progr
 do at the language/runtime boundary (built-ins, strings, I/O). **§14** documents the
 host toolchain driver (`llc`, `ld.lld`) that turns LLVM IR into an executable file.
 
-## 13. Runtime Library And Language I/O (Current Status)
+## 13. Runtime Library And Language I/O
 
-**Scope:** this section is about **what the language and `libnexrt.a` offer today**—not
-about how `llc` or `ld.lld` are invoked (that is **§14**).
+This section is about what the language and `libnexrt.a` offer today. The host
+toolchain driver is covered in §14.
 
-### libnexrt.a and built-ins
+### What the runtime supplies
 
-**`libnexrt.a`** is a small static archive linked into every Nex executable today.
-It exports stable symbol names that LLVM IR calls for built-ins: printing, stdin
-line reading, parse helpers, and `input_ok()` bookkeeping.
+`libnexrt.a` is a small static archive linked into native executables. LLVM IR
+calls stable runtime symbols for language built-ins:
 
-### `str`, `readln()`, and ownership
+- `print` and `println`
+- `readln()`
+- `parse_i32`, `parse_u64`, and `parse_bool`
+- `input_ok()`
 
-In the language, **`str`** is still lowered as **pointer + byte length**; there is
-no general heap string, growable buffer, or **slice** type in Core v0 yet.
-**`readln()`** stores the last line in a **process-local scratch buffer**; it is
-meant for experiments and small CLIs, not a final ownership or threading story.
+The compiler owns the source-level rules for those calls. The runtime only owns
+the low-level implementation of writing bytes, holding temporary input storage,
+and converting text to primitive values.
 
-#### Integer (and boolean) input from the user: where things stand
+### Strings and input
 
-**You can turn stdin text into typed values today**, but only through an explicit
-two-step pattern the language supports:
+The current `str` representation lowers as pointer plus byte length. There is no
+general heap string, growable buffer, or slice type yet. `readln()` stores the
+last line in process-local scratch storage, which is useful for small examples
+but not a final ownership or threading model.
 
-1. Read one line as **`str`**: **`readln()`**.
-2. Parse with **`parse_i32`**, **`parse_u64`**, or **`parse_bool`**.
-3. Check **`input_ok()`** after **`readln`** / parse when you care about failure.
+Input is deliberately explicit:
 
-There is **no** single built-in that behaves like C **`scanf`** (“read an `i32`
-directly from stdin”) yet—by design so far: parsing stays visible and composes
-with future **Result**-style APIs.
+1. Read one line as `str` with `readln()`.
+2. Parse with `parse_i32`, `parse_u64`, or `parse_bool`.
+3. Check `input_ok()` if failure matters.
 
-**Unsigned / signed coverage:** **`parse_i32`** and **`parse_u64`** exist;
-**`parse_i64`** / other widths are not implemented yet if you need them.
+That keeps parsing visible instead of hiding it inside a `scanf`-style API.
 
-#### Formatted strings (“variables in the string”): where things stand
+### Formatting
 
-**Not implemented.** Core v0 has:
+`print` and `println` accept a string-literal format with `{}` placeholders and
+typed arguments. `println` writes one newline after the formatted output. The
+older single-`str` form is still accepted for patterns such as `println(readln())`.
 
-- **string literals** and **`print` / `println` taking one `str`**, so output is
-  either static text or whatever you can assemble into a **`str`** by hand.
-
-There is **no** printf-style format API, **no** Python-style f-string or
-interpolation, and **no** standard library helper for “append an integer to a
-string” yet—because honest formatting usually implies **allocation**, conversion
-rules, and error behavior the language has not finalized.
-
-**Near-term direction** (design-first, then implementation): specify how Nex builds
-strings (concatenation, conversion `i32 -> str`, formatting with explicit cost),
-then add lexer/parser support if the syntax is not plain function calls. Until
-then, interactive programs are limited to patterns like printing literals,
-printing **`readln()`** results as-is, or printing **parse results** with separate
-`println` calls rather than one interpolated message.
-
-#### Relation to C / `gcc`
-
-**`gcc`** compiles **C** and links objects against **C’s** library and conventions.
-That gives C programmers `printf`, `sprintf`, `stdin`, etc. **automatically for C
-source**. Nex does not inherit those APIs by virtue of linking libc at the ELF
-level; Nex still needs **its own** definitions for formatting, dynamic strings, and
-I/O surfaces. Linking libc today only means the **process** can use the same OS
-machinery as other hosted binaries; it does not replace Nex language design work.
-
-Built-ins today include **`print`**, **`println`**, **`readln`**, **`parse_i32`**,
-**`parse_u64`**, **`parse_bool`**, and **`input_ok()`**; see
-[docs/reference/language/builtins_and_io.md](docs/reference/language/builtins_and_io.md)
-for behavior details.
+This gives examples enough observable output without committing the language to
+string interpolation, heap allocation, or a full standard library string builder.
+See [docs/reference/language/builtins_and_io.md](docs/reference/language/builtins_and_io.md)
+for exact rules.
 
 ## 14. Native Executable Driver
 
@@ -1665,10 +1598,10 @@ Use the compiler executable directly (not `nexc.sh`) when you want a binary:
 build/nexc examples/return_42.nexs -o build/return_42
 ```
 
-Sections **1–12** describe the compiler pipeline ending in LLVM IR as text.
-**§13** summarizes built-ins, **`str`**, and I/O behavior at the language/runtime
-layer. **This section** is strictly the **native driver**: **turn LLVM IR into
-machine code with `llc` and link** an ELF executable the Linux kernel can run.
+Sections 1–12 describe the compiler pipeline ending in LLVM IR as text.
+Section 13 summarizes built-ins, `str`, and I/O behavior at the language/runtime
+layer. This section covers the native driver: turning LLVM IR into machine code
+with `llc`, then linking an executable for the host OS.
 
 ### End-to-end steps (what actually runs)
 
@@ -1681,13 +1614,13 @@ parse and semantic-check source
   -> link     : Linux: ld.lld + ELF CRT + libc + libnexrt.a; Darwin: clang + libnexrt.a -> executable
 ```
 
-At configure time, CMake records absolute tool paths in `build/generated/nexc_link_config.h`.
-**Linux:** the host C compiler is queried for glibc **startup objects** and **`libc`**
-(`-print-file-name=Scrt1.o`, `crti.o`, `crtn.o`, `libc.so.6`); **`llc`** and **`ld.lld`**
-are discovered under the LLVM install or common distro paths. **Darwin:** **`llc`**
-is discovered the same way (often Homebrew LLVM; Xcode may not ship `llc` on
-`PATH`); the final link uses **`clang`** from the active C toolchain so Mach-O,
-SDK, and **libSystem** match the host.
+At configure time, CMake records absolute tool paths in
+`build/generated/nexc_link_config.h`.
+
+- Linux discovers `llc` and `ld.lld`, then links with the same startup objects
+  and libc family a normal hosted C toolchain would use.
+- macOS discovers `llc`, then uses `clang` as the final linker driver so Mach-O,
+  SDK, and `libSystem` selection match the active Xcode or Homebrew toolchain.
 
 The archive `build/runtime/libnexrt.a` contains small implementations for built-in
 calls (`print`, `readln`, parse helpers, …). `nexc` locates it next to itself, or
@@ -1716,77 +1649,20 @@ executable**. It also follows the link line we give it: which startup objects to
 include, which directories to search for **`-lc`**, and where to write the
 output file.
 
-### CRT, libc, and linking today
+### Hosted linking stance
 
-This subsection is reference material you can come back to when reading link
-lines, CI setup, or discussions of “why libc.”
+The current native driver targets ordinary hosted executables. On Linux, that
+means startup objects plus libc and `libnexrt.a`. On macOS, `clang` supplies the
+platform link details and `libSystem` integration.
 
-#### What “CRT” stands for
+This does not make nex a C dialect. It only means the produced executable uses
+the host's normal process startup and operating-system boundary. Language
+semantics, diagnostics, and built-ins remain nex-owned.
 
-**CRT** usually expands to **C Run-Time** (read “**C runtime**”). People use the
-term in two related ways:
-
-1. **Narrow sense:** the **startup and teardown glue** linked into a normal
-   executable—the code that runs **before and after** your `main` so the process
-   can start and shut down in a way the OS and dynamic linker expect. On Linux
-   this shows up as small **object files** such as `Scrt1.o`, `crti.o`, and
-   `crtn.o` (exact names vary by toolchain and PIE vs non-PIE). Our CMake queries
-   locate these via `-print-file-name=...` so `ld.lld` receives the same family of
-   objects a typical C toolchain would use.
-
-2. **Loose sense:** some writers say “CRT” when they mean **everything that is not
-   your program’s object code**—startup objects **plus** the C library and related
-   conventions. That overlap is why “CRT” sounds vague; when precision matters,
-   separate **startup objects**, **libc**, and **your `.o`**.
-
-Neither meaning implies that **Nex source code is C**. These are **link-time**
-artifacts for producing a normal ELF executable on Linux.
-
-#### Startup objects (`crt*.o`) vs **libc**
-
-- **`crt*.o` files** are **statically linked** snippets of machine code bundled
-  into your executable. They provide the **entry path** from the kernel/dynamic
-  linker into hosted user code (eventually reaching `main`).
-
-- **`-lc`** asks the linker to resolve symbols against the **C standard library**
-  (`libc.so.6` on typical glibc Linux). That shared library contains a huge set of
-  POSIX/C APIs: `write`, `malloc`, most of `printf`, thread helpers, locale
-  machinery, and more.
-
-**Nex today:** the native driver links **both**: crt-style startup objects **and**
-`-lc`, plus **`libnexrt.a`** (our small archive for Nex built-ins). So the final
-binary is in the same **hosted Linux / glibc ecosystem** as programs built with
-`gcc`, even though the compiler front half is entirely Nex → LLVM IR.
-
-#### Syscalls vs libc (still independent of Nex syntax)
-
-A **syscall** is a direct kernel interface (`read`, `write`, …). **libc**
-implements higher-level behavior **on top of** syscalls (including buffering for
-`stdio`, error handling, allocation). The Nex runtime can call syscalls **inside**
-`libnexrt.a` while the executable **still** links against libc for the normal
-process model—those facts do not contradict each other.
-
-#### libc and linking: stance for this project (explicit)
-
-**Through the current milestone, producing ordinary Linux executables that link
-against glibc (`-lc`) and standard startup objects is an acceptable and
-intentional baseline.** It keeps debugging, tooling, and OS interaction boringly
-familiar.
-
-That choice is about **the hosted executable boundary**, not about defining Nex’s
-semantics in terms of C. Language rules, types, and diagnostics remain Nex-owned.
-When Nex grows **real** string and I/O APIs, they should be specified in Nex terms;
-the implementation may continue to use syscalls, libc helpers, or both **under**
-that API—exactly like any systems runtime.
-
-#### Other link modes (reference only)
-
-Toolchains can instead link with **`-nostdlib`** (omit default crt/libc), use an
-alternate libc such as **musl**, or target **freestanding** environments. That
-usually means supplying your own entry (`_start`), avoiding most libc, and relying
-on syscalls or a tiny support library. **That is not the default Nex driver
-today**; it remains a future option when the project deliberately targets minimal
-or embedded link layouts.
+The important hidden word here is ABI: application binary interface. An ABI is
+the agreement about symbol names, calling conventions, object-file format,
+startup code, and how compiled pieces fit together. A language can have its own
+syntax and semantics while still choosing to interoperate with the host ABI.
 
 ### How this compares to `gcc`
 
@@ -1795,10 +1671,10 @@ preprocessor, the actual compiler (`cc1`), the assembler (`as`), and finally
 invokes the **linker** (`ld` or `ld.lld`) with hidden paths to **crt\*.o** and
 **`-lc`**. One command hides many steps.
 
-Our pipeline is analogous **after** LLVM IR exists: **`llc`** plays the role of
-“compile to object code,” and **`ld.lld`** plays the role of “link into an
-executable.” Nex owns everything **up to** LLVM IR; LLVM’s tools own the **machine
-code and link** steps in the current driver.
+Our pipeline is analogous after LLVM IR exists: `llc` plays the role of compile
+to object code, and the platform linker step produces the final executable. nex
+owns everything up to LLVM IR; LLVM and host tools own machine code and linking
+in the current driver.
 
 ### Executable tests (what CI exercises)
 
@@ -1807,7 +1683,7 @@ CTest compiles and runs selected programs. Representative commands:
 ```sh
 build/nexc examples/return_42.nexs -o <temp>
 build/nexc examples/pipeline_walkthrough.nexs -o <temp>
-build/nexc examples/core_v0_backend_coverage.nexs -o <temp>
+build/nexc examples/backend_coverage.nexs -o <temp>
 build/nexc examples/hello.nexs -o <temp>
 build/nexc examples/stdin_echo.nexs -o <temp>
 ```
@@ -1978,7 +1854,7 @@ The current compiler does not yet implement:
 - type coercions or integer promotions
 - precise signed negative constant values
 - formatting/interpolation for strings
-- short-circuit `&&` / `||` (Core v0 currently documents eager boolean logic)
+- short-circuit `&&` / `||` (the current language documents eager boolean logic)
 - general I/O beyond stdout `print` / `println` and the tiny `readln()` slice
 - nested returning control flow beyond the currently tested shapes
 - array parameters, array returns, and array module constants (locals support
@@ -1986,7 +1862,7 @@ The current compiler does not yet implement:
 - inter-file/module resolution beyond source concatenation for `nexc … -o`
 - embedding LLVM codegen inside `nexc` so object files are emitted without running the external `llc` subprocess (possible future refinement)
 
-Those are later stages. The current project state is a checked Core v0 compiler
+Those are later stages. The current project state is a checked compiler
 path with typed IR, MLIR, LLVM IR dumps, and native executable generation,
 including runtime-backed stdout printing and one-line stdin input.
 
@@ -2026,4 +1902,4 @@ growing with each language feature; update `docs/reference/language/` when user-
 visible behavior stabilizes.
 
 Lowering should stay boring at first. The goal is to prove the frontend can feed
-a backend with checked Core v0 programs before adding richer language features.
+a backend with checked nex programs before adding richer language features.

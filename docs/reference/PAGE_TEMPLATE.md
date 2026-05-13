@@ -18,7 +18,7 @@ Describe exactly what this page defines and what is out of scope.
 ## Status
 
 - Stability: draft | provisional | stable
-- Applies to: Core v0 | Core v1 | etc.
+- Applies to: current compiler | planned feature | historical note
 - Last behavior change: <date or commit>
 
 ## Definitions

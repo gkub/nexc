@@ -108,7 +108,7 @@ std::string typeName(Type type) {
 
 // Convert parser type syntax into semantic type information.
 //
-// This is tiny today because Core v0 only has built-in scalar types. Keeping the
+// This is tiny today because nex only has built-in scalar types. Keeping the
 // conversion explicit gives future user-defined types a clear expansion point.
 Type typeFromSyntax(TypeSyntax syntax) {
     if (syntax.form == TypeSyntaxKind::FixedArray) {
@@ -122,10 +122,10 @@ Type typeFromSyntax(TypeSyntax syntax) {
 
 // Return true if a type is allowed in `if`, `while`, and `!` condition contexts.
 //
-// Core v0 intentionally follows C-like integer truthiness only for integer and
+// nex intentionally follows C-like integer truthiness only for integer and
 // bool values. Strings and void are not condition-like.
 bool canBeCondition(Type type) {
-    // Core v0 allows bool and integer conditions. Invalid is accepted here only
+    // nex allows bool and integer conditions. Invalid is accepted here only
     // to avoid cascading diagnostics after an expression already failed.
     return type.isBool() || type.isInteger() || type.isInvalid();
 }
@@ -141,7 +141,7 @@ struct FunctionSymbol {
 
 // ValueSymbol is the semantic table entry for a value-like name: locals,
 // parameters, and module constants. Functions intentionally live in a separate
-// table because Core v0 does not let functions be used as first-class values.
+// table because nex does not let functions be used as first-class values.
 struct ValueSymbol {
     Type type;
     bool isMutable = false;
@@ -152,7 +152,7 @@ struct ValueSymbol {
 // ExprInfo is the result of semantically analyzing an expression.
 //
 // It carries the expression type and the tiny amount of constant-evaluation
-// state needed for current Core v0 checks. This is not yet a full constant-value
+// state needed for current checks. This is not yet a full constant-value
 // model; it only tracks unsigned integer payloads where that is enough.
 struct ExprInfo {
     Type type;
@@ -262,7 +262,7 @@ unsigned long long maxIntegerValue(Type type) {
         return std::numeric_limits<unsigned long long>::max();
     }
 
-    // Signed Core v0 integers use one sign bit, so the positive literal range is
+    // Signed nex integers use one sign bit, so the positive literal range is
     // 2^(width - 1) - 1. Unsigned integers use all bits for the value.
     const unsigned valueBits = isSigned(type) ? width - 1 : width;
     return (1ULL << valueBits) - 1;
@@ -394,7 +394,7 @@ private:
                     if (pt.isFixedArray()) {
                         diagnostics_.error(
                             parameter.type.span,
-                            "array-typed parameters are not supported in Core v0 yet");
+                            "array-typed parameters are not supported yet");
                     }
                     parameterTypes.push_back(pt);
                 }
@@ -402,7 +402,7 @@ private:
                 const Type returnType = typeFromSyntax(function->returnType);
                 if (returnType.isFixedArray()) {
                     diagnostics_.error(function->returnType.span,
-                                       "array return types are not supported in Core v0 yet");
+                                       "array return types are not supported yet");
                 }
 
                 functions_[function->name] = FunctionSymbol{
@@ -432,10 +432,10 @@ private:
 
     // Record a top-level name in the module namespace.
     //
-    // Core v0 uses one namespace for functions and module constants, so `fn foo`
+    // nex uses one namespace for functions and module constants, so `fn foo`
     // and `const foo` conflict.
     void declareTopLevel(const std::string& name, SourceSpan span) {
-        // Functions and constants share one module namespace in Core v0.
+        // Functions and constants share one module namespace.
         if (topLevelNames_.contains(name)) {
             diagnostics_.error(span, "duplicate top-level name `" + name + "`");
             diagnostics_.note(topLevelNames_[name],
@@ -448,10 +448,10 @@ private:
     // Check the special executable entry function if the file defines one.
     //
     // Files without `main` are allowed as library units. Files with `main` must
-    // use the narrow Core v0 executable signatures.
+    // use the narrow executable signatures.
     void validateMainIfPresent() {
         // `main` is optional because a source file may be a library unit. If it
-        // exists, Core v0 restricts its shape so future execution has a clear
+        // exists, nex restricts its shape so future execution has a clear
         // entry convention.
         const auto it = functions_.find("main");
         if (it == functions_.end()) {
@@ -460,14 +460,14 @@ private:
 
         const FunctionSymbol& main = it->second;
         if (!main.parameterTypes.empty()) {
-            diagnostics_.error(main.nameSpan, "`main` must not have parameters in Core v0");
+            diagnostics_.error(main.nameSpan, "`main` must not have parameters");
         }
 
         if (!main.returnType.isVoid() &&
             !(main.returnType.form == Type::Form::Builtin &&
               main.returnType.kind == BuiltinTypeKind::I32)) {
             diagnostics_.error(main.nameSpan,
-                               "`main` must return `void` or `i32` in Core v0");
+                               "`main` must return `void` or `i32`");
         }
     }
 
@@ -567,7 +567,7 @@ private:
     const ValueSymbol* lookupValue(const std::string& name) const {
         // Lexical lookup walks from innermost scope outward, then falls back to
         // module constants. Function names are handled separately by call
-        // analysis because functions are not values in Core v0.
+        // analysis because functions are not values.
         for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
             if (const auto it = scope->find(name); it != scope->end()) {
                 return &it->second;
@@ -779,7 +779,7 @@ private:
 
         if (const auto* callStmt = dynamic_cast<const CallStmt*>(&stmt)) {
             // Parser syntax allows any call expression as a statement. Semantic
-            // analysis enforces the Core v0 rule that only void call results may
+            // analysis enforces the rule that only void call results may
             // be discarded.
             ExprInfo call = analyzeCallExpr(*callStmt->call);
             if (!call.type.isVoid() && !call.type.isInvalid()) {
@@ -828,12 +828,12 @@ private:
 
     // Analyze an expression used as a condition.
     //
-    // Conditions are special because Core v0 accepts both bool and integers
+    // Conditions are special because nex accepts both bool and integers
     // there. Passing no expected type lets integer literals default before the
     // condition-kind check runs.
     void analyzeCondition(const Expr& condition, std::string_view label) {
         // Conditions deliberately do not pass an expected type. Integer and bool
-        // are both accepted in Core v0, so the expression should choose its
+        // are both accepted, so the expression should choose its
         // natural/default type before canBeCondition checks it.
         ExprInfo info = analyzeExpr(condition, std::nullopt);
         if (!canBeCondition(info.type)) {
@@ -851,7 +851,7 @@ private:
     ExprInfo analyzeExpr(const Expr& expr, std::optional<Type> expected) {
         if (const auto* integer = dynamic_cast<const IntegerLiteralExpr*>(&expr)) {
             // Unsuffixed integer literals get their type from context when there
-            // is one, otherwise they default to i32 for Core v0.
+            // is one, otherwise they default to i32.
             Type type = expected.value_or(builtinScalar(BuiltinTypeKind::I32));
             if (!type.isInteger()) {
                 diagnostics_.error(expr.span,
@@ -1102,10 +1102,10 @@ private:
     ExprInfo analyzeCallExpr(const CallExpr& call) {
         const auto* callee = dynamic_cast<const NameExpr*>(call.callee.get());
         if (!callee) {
-            // The AST can represent a general callee expression, but Core v0
+            // The AST can represent a general callee expression, but nex
             // only allows direct calls by function name.
             diagnostics_.error(call.callee->span,
-                               "callee must be a function name in Core v0");
+                               "callee must be a function name");
             for (const std::unique_ptr<Expr>& argument : call.arguments) {
                 analyzeExpr(*argument, std::nullopt);
             }
@@ -1168,7 +1168,7 @@ private:
     // and keeps the operand type.
     ExprInfo analyzeUnaryExpr(const UnaryExpr& unary, std::optional<Type> expected) {
         if (unary.op == TokenKind::Bang) {
-            // `!` always produces bool. Core v0 accepts either bool or integer
+            // `!` always produces bool. nex accepts either bool or integer
             // operands as condition-like values.
             ExprInfo operand = analyzeExpr(*unary.operand, std::nullopt);
             if (!canBeCondition(operand.type)) {
@@ -1257,7 +1257,7 @@ private:
 
         if (arithmetic) {
             // Arithmetic keeps the operand type. If both sides are constant, the
-            // helper below also performs the small Core v0 overflow checks.
+            // helper below also performs the small overflow checks.
             return analyzeConstantArithmetic(binary, left, right);
         }
         if (comparison || equality) {
@@ -1270,7 +1270,7 @@ private:
         return ExprInfo{.type = Type{}, .isConstant = false};
     }
 
-    // Evaluate enough constant arithmetic to diagnose obvious Core v0 errors.
+    // Evaluate enough constant arithmetic to diagnose obvious errors.
     //
     // This helper returns normal ExprInfo either way. Diagnostics record overflow
     // or division-by-zero; the compiler can continue analyzing the rest of the
@@ -1279,7 +1279,7 @@ private:
                                        ExprInfo right) {
         // This is intentionally not a full constant evaluator. It only evaluates
         // simple unsigned integer payloads far enough to diagnose overflow and
-        // division/remainder by zero in current Core v0 tests.
+        // division/remainder by zero in current tests.
         ExprInfo result{
             .type = left.type,
             .isConstant = left.isConstant && right.isConstant,

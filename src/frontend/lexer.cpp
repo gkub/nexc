@@ -6,7 +6,7 @@ namespace nexc {
 
 namespace {
 
-// Core v0 syntax is ASCII-only outside comments and string literals. These
+// nex syntax is ASCII-only outside comments and string literals. These
 // helpers intentionally avoid locale-sensitive <cctype> classification so the
 // lexer behaves the same on every developer machine.
 // Return true for ASCII letters only.
@@ -19,7 +19,7 @@ bool isAsciiAlpha(char c) {
 
 // Return true for the first character of an identifier.
 //
-// Core v0 keeps identifiers deliberately simple: ASCII letters and underscore.
+// nex keeps identifiers deliberately simple: ASCII letters and underscore.
 bool isIdentifierStart(char c) {
     return isAsciiAlpha(c) || c == '_';
 }
@@ -41,7 +41,7 @@ bool isHexDigit(char c) {
 }
 
 // Detect bytes outside ASCII so diagnostics can explain why the lexer rejected a
-// character in Core v0 syntax.
+// character in nex syntax.
 bool isNonAscii(char c) {
     return static_cast<unsigned char>(c) >= 0x80;
 }
@@ -152,7 +152,7 @@ void Lexer::skipWhitespaceAndComments() {
             advance();
             advance();
 
-            // Core v0 block comments do not nest. The first `*/` closes the
+            // nex block comments do not nest. The first `*/` closes the
             // comment, even if another `/*` appears inside it.
             while (!isAtEnd() && !(peek() == '*' && peek(1) == '/')) {
                 advance();
@@ -254,7 +254,7 @@ Token Lexer::lexToken() {
     }
 
     diagnostics_.error(SourceSpan{.start = start, .end = current_},
-                       isNonAscii(c) ? "unsupported non-ASCII character in Core v0 syntax"
+                       isNonAscii(c) ? "unsupported non-ASCII character in nex syntax"
                                      : "unsupported character");
 
     // Return a placeholder token so tokenization can continue far enough to
@@ -270,7 +270,7 @@ Token Lexer::lexToken() {
 //
 // The lexer does not need a separate path for `fn`, `return`, or user names:
 // maximal-munch scanning collects the spelling, then keywordKind decides whether
-// that spelling is reserved in Core v0.
+// that spelling is reserved in nex.
 Token Lexer::lexIdentifierOrKeyword() {
     const std::size_t start = current_ - 1;
 
@@ -332,7 +332,7 @@ Token Lexer::lexIntegerLiteral() {
 // into runtime string data.
 Token Lexer::lexStringLiteral(std::size_t start) {
     // String support is intentionally small: preserve the raw spelling and
-    // validate only the escape sequences Core v0 recognizes. Actual runtime
+    // validate only the escape sequences nex recognizes. Actual runtime
     // string representation is a later backend/runtime concern.
     while (!isAtEnd()) {
         const char c = advance();

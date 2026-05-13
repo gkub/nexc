@@ -1,7 +1,7 @@
 # LLVM / Native First Slice
 
-This note captures the first LLVM backend milestone after the Core v0 walkthrough
-can dump verifier-valid MLIR.
+This note captures the first LLVM backend milestone after the walkthrough can
+dump verifier-valid MLIR.
 
 The goal was not to build a full optimizing native compiler in one jump. The goal
 was to prove one boring path from checked nex source to LLVM IR that LLVM's own
@@ -59,8 +59,9 @@ build/nexc examples/pipeline_walkthrough.nexs -o build/pipeline_walkthrough
 ```
 
 The driver writes LLVM IR to a temporary file, runs `llc` for the object file,
-then runs `ld.lld` with CMake-discovered CRT paths and `libnexrt.a`. That avoids
-using `clang` as the linker driver while still producing normal Linux executables.
+then links with the configured host recipe. Linux uses `ld.lld` with
+CMake-discovered CRT paths and `libnexrt.a`; macOS uses `clang` as the final
+linker driver.
 
 ## First Implementation Target
 
@@ -114,4 +115,4 @@ The first LLVM milestone still does not include:
 - RISC-V-specific output
 
 Those are important, but they should come after the compiler can already show a
-plain LLVM IR path for scalar Core v0 programs.
+plain LLVM IR path for scalar nex programs.

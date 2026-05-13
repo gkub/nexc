@@ -1,31 +1,38 @@
-# Language Types Reference
+# Types
 
 ## Table of Contents
 
-- [Purpose](#purpose)
-- [Status](#status)
-- [Builtin Scalar Types](#builtin-scalar-types)
+- [Summary](#summary)
+- [Syntax](#syntax)
 - [Integer Types](#integer-types)
 - [Boolean Type](#boolean-type)
 - [String Type](#string-type)
 - [Void Type](#void-type)
-- [Fixed-Size Arrays `[T; N]`](#fixed-size-arrays-t-n)
-- [Type Rules (Current)](#type-rules-current)
+- [Fixed-Size Arrays](#fixed-size-arrays)
+- [Type Rules](#type-rules)
 - [Examples](#examples)
-- [Cross References](#cross-references)
+- [See Also](#see-also)
 
-## Purpose
+## Summary
 
-Define the currently implemented type system surface for nex.
+nex currently has fixed-width integers, `bool`, `str`, `void`, and fixed-size
+arrays for local bindings. Types appear in function signatures, local
+declarations, module constants, and array declarations where supported.
 
-## Status
+## Syntax
 
-- Stability: provisional
-- Applies to: current implemented language + experimental stdin helpers
+```text
+type ::= integer-type
+       | "bool"
+       | "str"
+       | "void"
+       | "[" type ";" integer-literal "]"
 
-## Builtin Scalar Types
+integer-type ::= "i8" | "i16" | "i32" | "i64"
+               | "u8" | "u16" | "u32" | "u64"
+```
 
-Current built-in types:
+Built-in scalar types:
 
 - signed integers: `i8`, `i16`, `i32`, `i64`
 - unsigned integers: `u8`, `u16`, `u32`, `u64`
@@ -59,7 +66,7 @@ Current built-in types:
 - `void` is valid as a function return type.
 - `void` is not a first-class value expression type.
 
-## Fixed-Size Arrays `[T; N]`
+## Fixed-Size Arrays
 
 Fixed arrays are implemented for **locals** (`let` / `let mut`): element types are
 the usual scalar built-ins (`i8`–`u64`, `bool`). **`void`**, **`str`**, and nested
@@ -86,7 +93,7 @@ ys[0] = 5;
 return xs[0] + ys[1];
 ```
 
-## Type Rules (Current)
+## Type Rules
 
 - Arithmetic operators require integer operands.
 - Comparison/equality produce `bool`.
@@ -112,10 +119,9 @@ fn main() -> i32 {
 }
 ```
 
-## Cross References
+## See Also
 
-- `docs/IMPLEMENTATION_BACKLOG.md` (near-term array / loop / assignment work)
-- `docs/design/arrays_vectors_linalg.md` (fixed arrays vs slices vs vectors)
-- `docs/reference/language/expressions.md`
-- `docs/reference/language/statements.md`
-- `docs/language/core_v0.md`
+- [IMPLEMENTATION_BACKLOG.md](../../IMPLEMENTATION_BACKLOG.md)
+- [arrays_vectors_linalg.md](../../design/arrays_vectors_linalg.md)
+- [expressions.md](expressions.md)
+- [statements.md](statements.md)

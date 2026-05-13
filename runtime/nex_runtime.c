@@ -4,7 +4,7 @@
 #include <unistd.h>
 
 /*
- * Tiny bootstrap runtime for Core v0.
+ * Tiny bootstrap runtime for nex.
  *
  * Nex owns the source-level meaning of print/println. This file is only the
  * current binary bridge used by the native driver: generated LLVM IR calls these
@@ -57,7 +57,7 @@ void nex_runtime_println_str(const char* data, uint64_t length) {
  * - nex_runtime_readln_len(): return the byte length from that last read
  *
  * This is not the final string ownership model. It uses one process-global
- * scratch buffer so Core v0.1 can experiment with input before the language has
+ * scratch buffer so nex can experiment with input before the language has
  * heap allocation, owned strings, slices, or arrays.
  */
 static char nex_runtime_readln_buffer[4096];

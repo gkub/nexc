@@ -5,7 +5,7 @@
 
 namespace nexc::ir {
 
-// Build typed IR from a syntactically and semantically valid Core v0 AST.
+// Build typed IR from a syntactically and semantically valid nex AST.
 //
 // This is the first boundary after semantic analysis. The AST is source-shaped:
 // it stores names, parentheses, and statement nesting exactly as the parser saw

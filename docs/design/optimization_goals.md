@@ -61,7 +61,7 @@ Before serious optimization, the compiler needs:
 - mutability checking
 - return checking
 
-**Integer semantics** for constant folding and literal handling follow the Core language definition: fixed-width two’s-complement types, **defined wrapping** at runtime for both signed and unsigned operations, and **compile-time diagnostics** for overflow in constant expressions. See [docs/language/core_v0.md](../language/core_v0.md) §5.
+**Integer semantics** for constant folding and literal handling follow the current language reference: fixed-width two’s-complement types, **defined wrapping** at runtime for both signed and unsigned operations, and **compile-time diagnostics** for overflow in constant expressions. See [types.md](../reference/language/types.md).
 
 Early optimization should not obscure correctness.
 
@@ -87,7 +87,7 @@ can be treated as:
 let x: i32 = 14;
 ```
 
-This requires type-aware literal handling; overflow rules are defined in [docs/language/core_v0.md](../language/core_v0.md) §5 (no undefined overflow; wrapping arithmetic; compile-time overflow diagnostics for constants).
+This requires type-aware literal handling; overflow rules are defined in [types.md](../reference/language/types.md): no undefined overflow, wrapping arithmetic, and compile-time overflow diagnostics for constants.
 
 ## Constant Propagation
 

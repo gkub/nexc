@@ -21,7 +21,7 @@ namespace nexc::mlir {
 // - memref: explicit local storage slots
 //
 // Keeping this helper next to the module builder means `--dump-mlir` and the new
-// LLVM lowering path agree on exactly which dialects a Core v0 module may use.
+// LLVM lowering path agree on exactly which dialects a nex module may use.
 void loadCoreMlirDialects(::mlir::MLIRContext& context);
 
 // Build and verify the high-level MLIR module for a checked typed IR module.

@@ -19,7 +19,7 @@ Define the stable user-facing command-line contract for `build/nexc`.
 ## Status
 
 - Stability: provisional
-- Applies to: post-Core v0 current compiler
+- Applies to: current compiler
 
 ## Primary Interface
 

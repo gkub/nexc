@@ -13,7 +13,7 @@
 
 namespace nexc::ir {
 
-// IR Type is the backend-facing version of a Core v0 type.
+// IR Type is the backend-facing version of a nex type.
 //
 // Scalar types wrap BuiltinTypeKind. Fixed arrays `[T; N]` store element kind and
 // length for layout and lowering.
@@ -71,7 +71,7 @@ struct Block;
 // Operation is the main instruction-like node in the typed IR.
 //
 // This is intentionally not SSA, MLIR, or LLVM IR yet. It is still a simple
-// structured representation of checked Core v0 programs. The union-like payload
+// structured representation of checked nex programs. The union-like payload
 // fields below are selected by `kind`; for example, Binary uses `op`, `left`,
 // `right`, and `result`, while If uses `condition`, `thenBlock`, and
 // optionally `elseBlock`.
@@ -240,7 +240,7 @@ struct Const {
     std::size_t nextValueId = 0;
 };
 
-// Function is the IR form of a Core v0 function declaration.
+// Function is the IR form of a nex function declaration.
 //
 // It stores parameters, all local slots discovered while building the body, the
 // structured body block, and the next temporary value ID for that function.
@@ -256,7 +256,7 @@ struct Function {
 
 // Module is the IR root for one source file in the current compiler.
 //
-// This mirrors Core v0's top level: module constants plus functions. Future
+// This mirrors nex's current top level: module constants plus functions. Future
 // import/module work can make this root represent a larger compilation unit.
 struct Module {
     std::vector<Const> constants{};

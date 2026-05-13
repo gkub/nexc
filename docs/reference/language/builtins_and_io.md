@@ -1,28 +1,23 @@
-# Language Built-ins And Input/Output
+# Built-ins and Input/Output
 
 ## Table of Contents
 
-- [Purpose](#purpose)
-- [Status](#status)
-- [Built-ins](#built-ins)
-- [For New Users](#for-new-users)
+- [Summary](#summary)
+- [Built-in Signatures](#built-in-signatures)
 - [Printing](#printing)
 - [Input](#input)
 - [Current Runtime Model](#current-runtime-model)
 - [Examples](#examples)
 - [Design Notes For Future I/O](#design-notes-for-future-io)
-- [Cross References](#cross-references)
+- [See Also](#see-also)
 
-## Purpose
+## Summary
 
-Define current language-level built-ins for observable I/O behavior.
+nex currently has language-defined built-ins for printing, reading one line from
+stdin, parsing simple values, and checking whether the last fallible input or
+parse operation succeeded.
 
-## Status
-
-- Stability: provisional
-- Applies to: current language + experimental stdin slice
-
-## Built-ins
+## Built-in Signatures
 
 Current built-ins:
 
@@ -39,41 +34,38 @@ input_ok() -> bool
 These are language built-ins recognized by semantic analysis and lowered through
 the compiler backend/runtime boundary.
 
-## For New Users
-
-If you only want "how do I print?" and "how do I read user input?", start here:
-
-- print text: `print("text");` or `println("text");`
-- read one line from user input: `readln()`
-- parse text into typed values: `parse_i32(...)`, `parse_u64(...)`, `parse_bool(...)`
-- check whether the last input/parse operation succeeded: `input_ok()`
-
-Minimal example:
-
-```nex
-fn main() -> void {
-    print("name: ");
-    println(readln());
-    return;
-}
-```
-
 ## Printing
 
-Rust-style formatting applies when the **first** argument is a **string literal**:
+### `print(fmt: str, ...) -> void`
+
+Writes formatted bytes to stdout.
+
+Formatting applies when the first argument is a string literal:
 
 - Placeholders are exactly `{}` (one pair of braces). Literal `{` / `}` escapes may be added later.
 - Each `{}` matches one following argument, in order. Supported argument types: integers (`i*`/`u*`), `bool`, and `str`.
-- `print("…{}…", …)` writes the formatted bytes only.
-- `println("…{}…", …)` writes the formatted bytes, then **one** newline (`\n`) after the whole expansion.
+- `print("...{}...", ...)` writes the formatted bytes only.
 
 Legacy convenience when there are **no** placeholders:
 
-- `print(x)` / `println(x)` with a **single** `str` expression (not necessarily a literal), e.g. `println(readln())`, writes that string; `println` still appends one trailing newline.
+- `print(x)` with a single `str` expression (not necessarily a literal), e.g.
+  `print(readln())`, writes that string.
+
+### `println(fmt: str, ...) -> void`
+
+Same formatting behavior as `print`, then writes one newline (`\n`) after the
+whole expansion.
+
+Legacy convenience when there are **no** placeholders:
+
+- `println(x)` with a single `str` expression writes that string and appends one
+  trailing newline.
 
 Escape sequences in string literals follow the usual rules (`\n`, `\t`, `\"`, `\\`, `\r`).
 
 ## Input
+
+### `readln() -> str`
 
 - `readln()` reads one line from stdin.
 - Returned value excludes trailing line ending characters.
@@ -81,13 +73,24 @@ Escape sequences in string literals follow the usual rules (`\n`, `\t`, `\"`, `\
   the value.
 - `input_ok()` reports success/failure of the last fallible input/parse operation.
 
-### Typed Parsing Helpers
+### `parse_i32(str) -> i32`
 
-- `parse_i32(str)` parses signed decimal text into `i32`.
-- `parse_u64(str)` parses unsigned decimal text into `u64`.
-- `parse_bool(str)` accepts `true`, `false`, `1`, or `0`.
-- On parse failure, helper returns a zero-ish value and sets `input_ok()` to
-  `false`.
+Parses signed decimal text into `i32`. On failure, returns `0` and sets
+`input_ok()` to `false`.
+
+### `parse_u64(str) -> u64`
+
+Parses unsigned decimal text into `u64`. On failure, returns `0` and sets
+`input_ok()` to `false`.
+
+### `parse_bool(str) -> bool`
+
+Accepts `true`, `false`, `1`, or `0`. On failure, returns `false` and sets
+`input_ok()` to `false`.
+
+### `input_ok() -> bool`
+
+Reports success or failure of the last fallible input or parse operation.
 
 ## Current Runtime Model
 
@@ -125,8 +128,8 @@ fn main() -> i32 {
 - File/stdin/stdout/stderr/pipes should be defined with explicit resource/failure
   semantics before expanding built-ins.
 
-## Cross References
+## See Also
 
-- `docs/reference/runtime/README.md`
-- `docs/design/io_v1_spitball.md`
-- `docs/language/core_v0.md`
+- [runtime/README.md](../runtime/README.md)
+- [functions_and_calls.md](functions_and_calls.md)
+- [io_v1_spitball.md](../../design/io_v1_spitball.md)

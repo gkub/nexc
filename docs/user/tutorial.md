@@ -1,8 +1,7 @@
 # Writing nex programs (beginner tutorial)
 
-This is the beginner-facing guide for writing the nex that exists today. (The
-filename `core_v0_tutorial.md` is legacy; prefer **`docs/reference/`** for exact
-rules.)
+This is the beginner-facing guide for writing the nex that exists today. Prefer
+**`docs/reference/`** for exact rules.
 
 This tutorial stays close to what the compiler accepts today. You can write scalar functions, constants,
 variables, arithmetic, `if` / `else`, `while` and **`for`** loops, **fixed-size array locals**
@@ -21,7 +20,7 @@ The current compiler frontend can **check** nex programs:
 ./nexc.sh check-file examples/add.nexs
 ```
 
-If the command exits successfully, the file has valid Core v0 syntax and passes
+If the command exits successfully, the file has valid nex syntax and passes
 the current semantic checks.
 
 ## Hello, World
@@ -104,11 +103,11 @@ fn main() -> i32 {
 }
 ```
 
-In Core v0, `main` must not have parameters.
+In the current language, `main` must not have parameters.
 
 ## Types
 
-Core v0 has fixed-width integer types:
+nex currently has fixed-width integer types:
 
 ```text
 i8   i16   i32   i64
@@ -118,7 +117,7 @@ u8   u16   u32   u64
 Signed types (`i*`) can represent negative and positive values. Unsigned types
 (`u*`) represent only zero and positive values.
 
-Core v0 also has:
+nex also has:
 
 ```text
 bool
@@ -141,7 +140,7 @@ false
 "Hello, world!"
 ```
 
-Core v0 string literals lower to immutable bytes plus an explicit byte length.
+String literals lower to immutable bytes plus an explicit byte length.
 That lets `print` and `println` write the exact bytes without relying on a
 C-style trailing `\0` terminator.
 
@@ -204,7 +203,7 @@ Every `let` currently needs an initializer.
 
 ## Arithmetic
 
-Core v0 supports:
+nex currently supports:
 
 ```text
 +  -  *  /  %
@@ -253,7 +252,7 @@ Logical operators:
 !   &&   ||
 ```
 
-Current Core v0 `&&` and `||` are eager: both operands are evaluated before the
+Current `&&` and `||` are eager: both operands are evaluated before the
 boolean result is computed. Do not rely on short-circuit behavior yet.
 
 Conditions accept `bool` or integer values. For integers, zero is false and
@@ -344,7 +343,7 @@ fn main() -> void {
 
 ## Printing
 
-Core v0 has two built-in functions:
+nex has these built-in calls:
 
 ```c
 print("text");

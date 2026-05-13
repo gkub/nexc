@@ -11,7 +11,7 @@
 
 namespace nexc {
 
-// BuiltinTypeKind represents the type names Core v0 already understands.
+// BuiltinTypeKind represents the type names nex already understands.
 //
 // This is still syntax-level information, not the final semantic type system.
 // Later semantic analysis can map these syntax nodes to richer Type objects.
@@ -111,7 +111,7 @@ struct CallExpr final : Expr {
           arguments(std::move(arguments)) {}
 
     // The callee is an expression so the AST can represent the syntax shape
-    // generically. Core v0 semantic analysis later restricts this to a function
+    // generically. Semantic analysis later restricts this to a function
     // name; future language versions might allow richer callable expressions.
     std::unique_ptr<Expr> callee;
     std::vector<std::unique_ptr<Expr>> arguments;
@@ -268,7 +268,7 @@ struct ContinueStmt final : Stmt {
     explicit ContinueStmt(SourceSpan span) : Stmt(span) {}
 };
 
-// Items are top-level declarations in a translation unit. Core v0 only has
+// Items are top-level declarations in a translation unit. nex currently has
 // functions and module-level constants.
 struct Item {
     explicit Item(SourceSpan span) : span(span) {}
@@ -307,7 +307,7 @@ struct ConstDecl final : Item {
 // TranslationUnit is the AST root for one source file.
 //
 // The name is standard compiler terminology: it means "the unit of source code
-// this compiler invocation translates." For nex Core v0, that is simply one
+// this compiler invocation translates." For nex today, that is simply one
 // `.nexs` file containing top-level declarations such as `fn` and `const`.
 struct TranslationUnit {
     // Top-level items stay in source order. That keeps dumps predictable and

@@ -1,10 +1,9 @@
-# Language Statements Reference
+# Statements
 
 ## Table of Contents
 
-- [Purpose](#purpose)
-- [Status](#status)
-- [Statement Forms](#statement-forms)
+- [Summary](#summary)
+- [Syntax Summary](#syntax-summary)
 - [Block Statements](#block-statements)
 - [Variable Declarations](#variable-declarations)
 - [Assignment Statements](#assignment-statements)
@@ -15,21 +14,17 @@
 - [Break and Continue](#break-and-continue)
 - [Call Statements](#call-statements)
 - [Examples](#examples)
-- [Planned statement work (roadmap)](#planned-statement-work-roadmap)
-- [Cross References](#cross-references)
+- [See Also](#see-also)
 
-## Purpose
+## Summary
 
-Define function-body statement forms currently accepted and implemented.
+Statements appear inside function bodies. They create scopes, declare locals,
+assign values, return from functions, branch, loop, control loops, or call
+`void` functions.
 
-## Status
+## Syntax Summary
 
-- Stability: provisional
-- Applies to: current implemented language surface
-
-## Statement Forms
-
-Current statement forms:
+Current statement forms include:
 
 - block: `{ ... }`
 - local declaration: `let` / `let mut`
@@ -47,11 +42,23 @@ Current statement forms:
 
 ## Variable Declarations
 
+```text
+let name: Type = expr;
+let mut name: Type = expr;
+```
+
 - `let x: T = expr;` creates immutable local binding.
 - `let mut x: T = expr;` creates mutable local binding.
 - Current language requires initializer on `let`.
+- There is no declare-now-assign-later form yet; definite assignment is tracked
+  in [IMPLEMENTATION_BACKLOG.md](../../IMPLEMENTATION_BACKLOG.md).
 
 ## Assignment Statements
+
+```text
+name = expr;
+name[index] = expr;
+```
 
 - Assignment targets are either a **mutable local name** or an **indexed mutable
   array** (`arr[i] = …`) where `arr` was declared with `let mut`.
@@ -60,16 +67,30 @@ Current statement forms:
 
 ## Return Statements
 
+```text
+return;
+return expr;
+```
+
 - `return;` valid only in `void`-returning functions.
 - `return expr;` must match function return type.
 - Non-`void` functions require all control paths to return.
 
 ## If / Else Statements
 
+```text
+if (condition) stmt
+if (condition) stmt else stmt
+```
+
 - `if` condition accepts `bool` or integer condition expressions.
 - `else` binds to nearest unmatched `if`.
 
 ## While Statements
+
+```text
+while (condition) stmt
+```
 
 - `while` condition accepts `bool` or integer conditions.
 - Current return analysis does not assume loop execution.
@@ -106,6 +127,11 @@ that `While` so `continue` can run it before the next condition check.
 
 ## Break and Continue
 
+```text
+break;
+continue;
+```
+
 - **`break;`** exits the innermost enclosing `while` or `for`.
 - **`continue;`** advances the innermost enclosing `while` or `for` to its next
   iteration. For `for`, the **update** clause runs before the condition is
@@ -115,6 +141,10 @@ that `While` so `continue` can run it before the next condition check.
   expression).
 
 ## Call Statements
+
+```text
+callee(...);
+```
 
 - Standalone call statements are valid when call result is `void`.
 - Discarding non-`void` call results is rejected in current semantics.
@@ -147,25 +177,9 @@ fn main() -> i32 {
 }
 ```
 
-## Planned statement work (roadmap)
+## See Also
 
-Further statement-level work (**uninitialized locals + definite assignment**,
-tighter **array** initialization rules, **pointers** — see backlog) is ordered
-here:
-
-- [`docs/IMPLEMENTATION_BACKLOG.md`](../../IMPLEMENTATION_BACKLOG.md)
-
-Not implemented yet:
-
-- Every `let` / `let mut` binding **must** include `= expr` on the same
-  declaration; there is no “declare now, assign later” form yet.
-- Fixed-size array locals require a **full** array literal initializer today
-  (see [`types.md`](types.md)); you cannot declare `[T; N]` and fill elements
-  without first writing `N` values in the literal.
-
-## Cross References
-
-- `docs/reference/language/types.md`
-- `docs/reference/language/expressions.md`
-- `docs/language/core_v0.md`
-- `docs/IMPLEMENTATION_BACKLOG.md`
+- [types.md](types.md)
+- [expressions.md](expressions.md)
+- [functions_and_calls.md](functions_and_calls.md)
+- [IMPLEMENTATION_BACKLOG.md](../../IMPLEMENTATION_BACKLOG.md)

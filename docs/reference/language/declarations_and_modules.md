@@ -1,9 +1,9 @@
-# Language Declarations And Modules
+# Declarations and Modules
 
 ## Table of Contents
 
-- [Purpose](#purpose)
-- [Status](#status)
+- [Summary](#summary)
+- [Syntax](#syntax)
 - [Translation Unit Model](#translation-unit-model)
 - [Top-Level Declarations](#top-level-declarations)
 - [Function Declarations](#function-declarations)
@@ -11,25 +11,37 @@
 - [Entry Point Rules](#entry-point-rules)
 - [Current Module Scope Limits](#current-module-scope-limits)
 - [Examples](#examples)
-- [Cross References](#cross-references)
+- [See Also](#see-also)
 
-## Purpose
+## Summary
 
-Define source-file and top-level declaration structure for currently implemented
-nex language behavior.
+This page defines the current top-level shape of a `.nexs` translation unit.
+Today, top level means function declarations and module constants. Imports,
+packages, and user-defined top-level types are not implemented yet.
 
-## Status
+## Syntax
 
-- Stability: provisional
-- Applies to: Core v0 language surface
+```text
+translation-unit ::= top-level-declaration*
+
+top-level-declaration ::= function-declaration
+                        | module-constant
+
+function-declaration ::= "fn" name "(" parameters? ")" "->" type block
+module-constant      ::= "const" name ":" type "=" expression ";"
+```
 
 ## Translation Unit Model
 
-One `.nexs` file is one translation unit in the current compiler.
+One `.nexs` file is one translation unit in inspection modes.
+
+Native compile mode also accepts multiple `.nexs` paths before `-o`. In that
+mode, `nexc` concatenates the files in command-line order and parses the result
+as one translation unit. There is no import graph yet.
 
 ## Top-Level Declarations
 
-Currently allowed at top level:
+Allowed at top level:
 
 - function declarations/definitions (`fn`)
 - module constants (`const`)
@@ -39,7 +51,7 @@ assignment, call statements).
 
 ## Function Declarations
 
-Current function declaration shape:
+Function declaration shape:
 
 ```text
 fn name(param: Type, ...) -> ReturnType {
@@ -47,9 +59,11 @@ fn name(param: Type, ...) -> ReturnType {
 }
 ```
 
+Parameter and call rules are covered in [functions_and_calls.md](functions_and_calls.md).
+
 ## Module Constants
 
-Current module constant shape:
+Module constant shape:
 
 ```text
 const NAME: Type = expression;
@@ -59,7 +73,7 @@ Constant initializers must satisfy current constant-expression rules.
 
 ## Entry Point Rules
 
-When compiling executable programs, current `main` constraints are:
+When compiling executable programs, `main` must satisfy:
 
 - name: `main`
 - no parameters
@@ -67,11 +81,12 @@ When compiling executable programs, current `main` constraints are:
 
 ## Current Module Scope Limits
 
-Not currently covered as stable language behavior:
+Not currently implemented:
 
 - imports/modules across multiple files
 - package/module namespace system
 - user-defined type declarations at top level
+- array-typed module constants
 
 ## Examples
 
@@ -87,8 +102,8 @@ fn main() -> i32 {
 }
 ```
 
-## Cross References
+## See Also
 
-- `docs/reference/language/functions_and_calls.md`
-- `docs/reference/language/statements.md`
-- `docs/language/core_v0.md`
+- [functions_and_calls.md](functions_and_calls.md)
+- [statements.md](statements.md)
+- [compiler_cli.md](../toolchain/compiler_cli.md)

@@ -1,12 +1,14 @@
 # nex Reference Documentation
 
-Long-lived, user-facing reference for the nex language and its toolchain—contrasted with tutorial prose in `docs/user/`, design drafts in `docs/design/`, and the educational compiler tour in `NEXC_HOLY_BOOK.md`.
+Long-lived, user-facing reference for the nex language and its toolchain. These
+pages describe current behavior; tutorial prose, design drafts, and compiler
+implementation notes live elsewhere.
 
 ## If you are new to nex
 
-1. **Run something:** [`docs/user/core_v0_tutorial.md`](../user/core_v0_tutorial.md) and small programs under `examples/`.
-2. **Look up exact rules:** this `reference/` tree (language → types, statements, builtins, …).
-3. **See what is intentionally not implemented yet:** [`docs/IMPLEMENTATION_BACKLOG.md`](../IMPLEMENTATION_BACKLOG.md) lists the **ordered next milestones** (e.g. `for` loops before uninitialized locals + definite assignment). [`language/statements.md`](language/statements.md) also summarizes **current gaps** at statement level so you are not surprised when `for` or “declare without `=`” do not parse.
+1. **Run something:** [`docs/user/tutorial.md`](../user/tutorial.md) and small programs under `examples/`.
+2. **Look up exact rules:** this `reference/` tree (language, toolchain, runtime).
+3. **Check planned work:** [`docs/IMPLEMENTATION_BACKLOG.md`](../IMPLEMENTATION_BACKLOG.md) lists ordered next milestones.
 
 Milestone history and long-horizon vision: [`nex.md`](../../nex.md).
 
@@ -14,14 +16,14 @@ Milestone history and long-horizon vision: [`nex.md`](../../nex.md).
 
 | Section | Role |
 | -------- | ---- |
-| [language/](language/README.md) | Normative language rules by topic (types, statements, builtins, …). |
+| [language/](language/README.md) | Normative language rules by topic (declarations, types, expressions, statements, functions, built-ins). |
 | [toolchain/](toolchain/README.md) | How to invoke `nexc`, build, test, interpret dumps and diagnostics. |
 | [runtime/](runtime/README.md) | Intended home for stable runtime/stdlib contracts; today mostly bootstrap notes. |
 
 **Which doc wins?**
 
-- **[`docs/reference/`](language/README.md)** describes **what the compiler does now** (keep it in sync with tests).
-- **[`docs/language/core_v0.md`](../language/core_v0.md)** is a **frozen early snapshot** for history and diffing—not the live checklist (see [`IMPLEMENTATION_BACKLOG.md`](../IMPLEMENTATION_BACKLOG.md)).
+- **[`docs/reference/`](language/README.md)** describes **what the compiler does now**. Keep it in sync with tests.
+- **[`docs/IMPLEMENTATION_BACKLOG.md`](../IMPLEMENTATION_BACKLOG.md)** describes implementation order, not current behavior.
 - **`nexc.sh` vs `build/nexc`:** The shell helper automates configure/build/test; **`build/nexc` is the canonical CLI** surface documented under toolchain.
 
 ## Scope Rules
@@ -29,12 +31,10 @@ Milestone history and long-horizon vision: [`nex.md`](../../nex.md).
 - Put stable user-facing behavior here.
 - Keep design brainstorming in `docs/design/`.
 - Keep implementation walkthroughs in `NEXC_HOLY_BOOK.md`.
-- Keep frozen snapshots under `docs/language/` where they already exist.
 
 ## Versioning Strategy
 
 - Prefer updating **`docs/reference/`** + tests whenever behavior changes.
-- Treat `docs/language/core_v0.md` as a historical anchor unless you intentionally revise that snapshot.
 
 ## Suggested Build Order (for doc authors)
 

@@ -1,55 +1,78 @@
-# Language Expressions Reference
+# Expressions
 
 ## Table of Contents
 
-- [Purpose](#purpose)
-- [Status](#status)
+- [Summary](#summary)
+- [Syntax](#syntax)
 - [Expression Forms](#expression-forms)
 - [Operator Precedence](#operator-precedence)
-- [Arrays And Indexing](#arrays-and-indexing)
-- [Type Rules (Current)](#type-rules-current)
 - [Logical Operators Note](#logical-operators-note)
+- [Arrays And Indexing](#arrays-and-indexing)
+- [Type Rules](#type-rules)
 - [Examples](#examples)
-- [Cross References](#cross-references)
+- [See Also](#see-also)
 
-## Purpose
+## Summary
 
-Define expression-level syntax and behavior for the currently implemented language
-surface.
+Expressions produce values. nex currently supports literals, names, calls, unary
+and binary operators, parenthesized expressions, array literals, and indexing.
 
-## Status
+## Syntax
 
-- Stability: provisional
-- Applies to: current implemented language surface
+```text
+expression ::= literal
+             | name
+             | call-expression
+             | unary-expression
+             | binary-expression
+             | "(" expression ")"
+             | array-literal
+             | index-expression
+
+call-expression  ::= name "(" arguments? ")"
+array-literal    ::= "[" expression ("," expression)* "]"
+index-expression ::= expression "[" expression "]"
+```
 
 ## Expression Forms
 
-Current expression forms:
-
-- integer literals
-- boolean literals
-- string literals
-- name references
-- function calls
-- unary operators: `-`, `!`
-- binary operators: `+`, `-`, `*`, `/`, `%`, comparisons, equality, `&&`, `||`
-- parenthesized expressions
-- array literals: `[expr, expr, …]` (length must match the contextual `[T; N]` type,
-  or types must agree for inference)
-- postfix indexing: `expr[expr]` on an array value
+| Form | Example | Notes |
+| ---- | ------- | ----- |
+| integer literal | `42`, `0xff` | Checked against the expected integer type. |
+| boolean literal | `true`, `false` | Type is `bool`. |
+| string literal | `"hello"` | Type is `str`. |
+| name reference | `count` | Resolves to a local, parameter, function, or module constant. |
+| function call | `add(a, b)` | Arguments are checked against the callee signature. |
+| unary operator | `-x`, `!ok` | `-` negates integers; `!` accepts `bool` or integer condition values. |
+| binary operator | `a + b`, `x == y` | Arithmetic, comparison, equality, and logical operators. |
+| parenthesized expression | `(a + b) * c` | Overrides default precedence. |
+| array literal | `[1, 2, 3]` | Length must match the contextual `[T; N]` type, or element types must agree for inference. |
+| indexing | `items[i]` | Base expression must have fixed array type. |
 
 ## Operator Precedence
 
 From highest to lowest:
 
-1. postfix: calls `f(args)`, then indexing `a[i]` (left-associative; e.g. `f()[0]`)
-2. unary (`-`, `!`)
-3. multiplicative (`*`, `/`, `%`)
-4. additive (`+`, `-`)
-5. relational (`<`, `>`, `<=`, `>=`)
-6. equality (`==`, `!=`)
-7. logical and (`&&`)
-8. logical or (`||`)
+| Level | Operators / forms | Associativity |
+| ----- | ----------------- | ------------- |
+| 1 | calls `f(args)`, indexing `a[i]` | left |
+| 2 | unary `-`, `!` | right |
+| 3 | `*`, `/`, `%` | left |
+| 4 | `+`, `-` | left |
+| 5 | `<`, `>`, `<=`, `>=` | left |
+| 6 | `==`, `!=` | left |
+| 7 | `&&` | left |
+| 8 | logical or | left |
+
+## Logical Operators Note
+
+Current `&&` and `||` semantics are eager:
+
+- both operands are evaluated
+- then the boolean operation is applied
+
+They do not short-circuit yet. For example, `y != 0 && x / y > 1` still evaluates
+`x / y`.
 
 ## Arrays And Indexing
 
@@ -58,22 +81,12 @@ From highest to lowest:
   the index must be an integer type (`i32` is typical).
 - Assignment to `name[index]` requires `let mut` on the array binding.
 
-## Type Rules (Current)
+## Type Rules
 
 - arithmetic operators currently require integer operands
 - comparison/equality produce `bool`
-- `!` accepts `bool` or integer-like condition values in current semantics
+- `!` accepts `bool` or integer-like condition values
 - call argument count/types are checked against resolved callee signature
-
-## Logical Operators Note
-
-Current `&&` and `||` semantics are eager in the implemented compiler path:
-
-- both operands are evaluated
-- then boolean operation is applied
-
-This is intentionally documented to match implementation behavior. It is not
-short-circuiting at this stage.
 
 ## Examples
 
@@ -89,8 +102,9 @@ fn main() -> i32 {
 }
 ```
 
-## Cross References
+## See Also
 
-- `docs/language/core_v0.md`
-- `docs/reference/language/README.md`
-- `docs/reference/language/builtins_and_io.md`
+- [types.md](types.md)
+- [statements.md](statements.md)
+- [functions_and_calls.md](functions_and_calls.md)
+- [builtins_and_io.md](builtins_and_io.md)

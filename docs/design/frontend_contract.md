@@ -5,9 +5,9 @@ nex frontend. It is intentionally smaller and more mechanical than the language
 vision in `nex.md`: the goal is to make the lexer, parser, AST, diagnostics,
 and first validation tests straightforward to build and review.
 
-`docs/language/core_v0.md` is the normative language target for this contract.
-Future features described in `nex.md` are out of scope until they receive their
-own language specification.
+The current language reference in `docs/reference/language/` is the normative
+language target for this contract. Future features described in `nex.md` are out
+of scope until they receive their own language specification.
 
 ## 1. Frontend Stages
 
@@ -34,14 +34,14 @@ This split matters because many programs are syntactically valid but
 semantically invalid. For example, `return true;` can parse inside an `i32`
 function, but semantic analysis must reject the type mismatch.
 
-## 2. Locked Core v0 Choices
+## 2. Locked Initial Choices
 
 These choices narrow the implementation without closing off obvious future
 extensions.
 
 ### 2.1 Integer Literals
 
-Core v0 supports:
+The initial frontend supports:
 
 - decimal integer literals: `0`, `42`, `1234`
 - hexadecimal integer literals with `0x` or `0X`: `0x2a`, `0XFF`
@@ -51,7 +51,7 @@ the base, but it should not decide the final integer type. Literal type
 selection belongs to semantic analysis, where expected types and defaults are
 known.
 
-Rejected in Core v0:
+Rejected in the initial frontend:
 
 - underscores: `1_000`
 - suffixes: `42u32`
@@ -62,7 +62,7 @@ These can be added later without changing the token or AST category.
 
 ### 2.2 Trailing Commas
 
-Core v0 rejects trailing commas in function parameter lists and call argument
+The initial frontend rejects trailing commas in function parameter lists and call argument
 lists:
 
 ```nex
@@ -75,7 +75,7 @@ a compatible extension.
 
 ### 2.3 `const`
 
-Core v0 accepts `const` only at module scope:
+The current language accepts `const` only at module scope:
 
 ```nex
 const N: i32 = 4;
@@ -106,7 +106,7 @@ example, `println("hello");` is valid because `println` returns `void`, while
 
 ### 2.5 Type Names
 
-The lexer reserves exactly the Core v0 keyword spellings from the language
+The lexer reserves exactly the keyword spellings from the language
 specification. In particular:
 
 - `bool` and `void` are keyword tokens.
@@ -119,12 +119,12 @@ type names.
 
 ### 2.6 Non-ASCII Input
 
-Core v0 syntax is ASCII-only. The lexer should:
+Current syntax is ASCII-only. The lexer should:
 
 - allow non-ASCII bytes inside comments and string literals
 - reject non-ASCII outside comments/string literals with an unsupported-character diagnostic
 
-Unicode identifiers are not part of Core v0.
+Unicode identifiers are not part of the current language.
 
 ## 3. Source Locations and Diagnostics
 
@@ -320,7 +320,7 @@ an identifier can begin either `x = expr;` or `foo(args);`.
 
 ### 6.1 Expression Precedence
 
-Use the Core v0 precedence table:
+Use the current precedence table:
 
 ```text
 postfix call
@@ -333,7 +333,7 @@ unary - !
 ||
 ```
 
-All binary operators in Core v0 are left-associative. Unary operators bind more
+All current binary operators are left-associative. Unary operators bind more
 tightly than binary operators. Function calls bind tighter than unary and binary
 operators.
 
@@ -361,7 +361,7 @@ dump should be plain text and stable enough for golden tests.
 
 ### 7.1 Initial Valid Inputs
 
-Use these Core v0 programs as first parser fixtures:
+Use these programs as first parser fixtures:
 
 ```nex
 fn main() -> void {
@@ -442,7 +442,7 @@ The first lexer tests should cover:
 5. Parser for items, types, blocks, and statements.
 6. Pratt or precedence-climbing expression parser.
 7. `--dump-ast`.
-8. Focused frontend tests from this contract and Core v0 examples.
+8. Focused frontend tests from this contract and examples.
 
 ## 9. First Semantic Analysis Contract
 

@@ -7,7 +7,7 @@ namespace nexc {
 
 // SemanticAnalyzer is the first "meaning" pass.
 //
-// The parser answers: "does this source have valid Core v0 syntax?"
+// The parser answers: "does this source have valid nex syntax?"
 // The semantic analyzer answers: "do those syntax nodes mean a valid program?"
 // It checks names, scopes, types, mutability, calls, returns, and the optional
 // executable entry point shape.

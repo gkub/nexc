@@ -40,7 +40,7 @@ namespace {
 // The lexer intentionally preserves the original text (`42`, `0x2a`, etc.) so
 // token/AST/IR dumps can show what the user wrote. MLIR construction needs the
 // actual integer value instead. Base 0 accepts both decimal and prefixed hex,
-// matching the Core v0 lexer contract.
+// matching the nex lexer contract.
 [[maybe_unused]] std::int64_t parseIntegerLiteral(std::string_view text) {
     std::size_t parsed = 0;
     const std::int64_t value = std::stoll(std::string(text), &parsed, 0);
@@ -297,7 +297,7 @@ public:
     // Create the MLIR `func.func`, create its entry block, seed parameter locals,
     // and lower the function body into that entry block.
     void lower() {
-        // A Core v0 function becomes one MLIR `func.func`. Straight-line
+        // A nex function becomes one MLIR `func.func`. Straight-line
         // expression code lowers directly into the function entry block, while
         // structured Core control flow maps onto MLIR's structured `scf` dialect.
         llvm::SmallVector<::mlir::Type> parameterTypes;
@@ -448,7 +448,7 @@ private:
         bindValue(result, constant.getResult());
     }
 
-    // Lower a string literal to the runtime representation used by Core v0.
+    // Lower a string literal to the runtime representation used by nex.
     //
     // A Nex `str` is not a C string. We lower it as two values:
     //
@@ -492,7 +492,7 @@ private:
 
     // Lower a module-level constant use by replaying its checked initializer.
     //
-    // Core v0 constants are compile-time values, not mutable storage. For the
+    // nex constants are compile-time values, not mutable storage. For the
     // first backend implementation we inline the initializer at each use site:
     // `const X: i32 = 40 + 2; return X;` lowers exactly like `return 40 + 2;`.
     // That keeps constants simple while preserving the source language rule that
@@ -666,7 +666,7 @@ private:
 
     // Lower a `let` or `let mut` declaration to a stack-like memref slot.
     //
-    // This is the simplest correct lowering for mutable Core v0 locals: allocate
+    // This is the simplest correct lowering for mutable nex locals: allocate
     // one zero-dimensional memref for the local, then store the initializer into
     // it. Later reads become memref.load and assignments become memref.store.
     void lowerDeclareLocal(const ir::Operation& operation) {
@@ -824,7 +824,7 @@ private:
             }
             break;
         case TokenKind::AmpAmp:
-            // Core v0 currently lowers logical operators as eager boolean
+            // nex currently lowers logical operators as eager boolean
             // operations. The language reference documents this explicitly so
             // nobody expects C-style short-circuiting until the IR grows
             // condition blocks for the right-hand side.
@@ -881,7 +881,7 @@ private:
         }
     }
 
-    // Lower Core v0 printing built-ins to bootstrap runtime calls.
+    // Lower nex printing built-ins to bootstrap runtime calls.
     //
     // `print` / `println` use Rust-style `"…{}…"` format strings (first argument
     // must be a string literal). Segments lower to `nex_runtime_print_str`; typed
@@ -1118,7 +1118,7 @@ private:
 
     // Lower a structured if statement to `scf.if`.
     //
-    // There are two useful shapes in Core v0 today:
+    // There are two useful shapes in nex today:
     //
     // - returning if/else: both branches end the function with `return`
     // - fallthrough if/else: branches perform side effects, then execution
@@ -1269,7 +1269,7 @@ private:
         return elseEnd;
     }
 
-    // Lower a Core v0 while loop to MLIR `scf.while`.
+    // Lower a nex while loop to MLIR `scf.while`.
     //
     // Because local variables currently live in memref slots, the loop does not
     // need loop-carried SSA values yet. The condition region recomputes the
@@ -1628,7 +1628,7 @@ private:
     std::size_t formatLiteralCounter_;
     std::vector<ActiveLoop> activeLoops_{};
     // directLocals_ maps immutable parameter locals to existing MLIR block
-    // arguments. No memory is needed for them in the current Core v0 slice.
+    // arguments. No memory is needed for them in the current slice.
     std::unordered_map<std::size_t, ::mlir::Value> directLocals_;
 
     // localSlots_ maps `let` / `let mut` locals to zero-dimensional memrefs. This
@@ -2077,7 +2077,7 @@ private:
         return false;
     }
 
-    // Emit a Core v0 while loop as textual `scf.while`.
+    // Emit a nex while loop as textual `scf.while`.
     //
     // This v0 lowering keeps local variables in memrefs, so there are no
     // loop-carried SSA values to list in the `scf.while` header. The condition
@@ -2338,7 +2338,7 @@ private:
 } // namespace
 
 #ifdef NEXC_HAS_REAL_MLIR
-// Register every dialect used by the Core v0 MLIR module builder.
+// Register every dialect used by the nex MLIR module builder.
 //
 // This function is intentionally tiny, but it is important: MLIR contexts are
 // dialect-aware. If a context has not loaded the dialect for an operation such as

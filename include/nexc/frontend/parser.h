@@ -56,7 +56,7 @@ private:
     // `for` step clause ends at `)` (no `;` after assignment or void call).
     std::unique_ptr<Stmt> parseForStepClause();
 
-    // In Core v0, statements beginning with an identifier have one-token
+    // In nex, statements beginning with an identifier have one-token
     // ambiguity: `x = ...` is assignment, while `f(...)` is a call statement.
     // Other expression starts are parsed here too so invalid expression
     // statements such as `1 + 2;` get one focused diagnostic.

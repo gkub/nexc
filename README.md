@@ -10,13 +10,26 @@ Implemented today:
 
 - lexer, parser, AST dumps, semantic checking
 - typed IR, MLIR, and LLVM IR dumps
-- native executable generation through `build/nexc <file.nexs> -o <output>`
-- runtime-backed `print` / `println`
+- native executable generation through `build/nexc <file.nexs> -o <output>` on
+  configured Linux and macOS hosts
+- runtime-backed `print` / `println` with `{}` formatting
 - selected input helpers such as `readln`, `parse_i32`, `parse_u64`,
   `parse_bool`, and `input_ok`
+- `if` / `else`, `while`, C-style `for`, `break`, and `continue`
+- fixed-size local arrays with literals, indexing, and mutable element assignment
 
 See [`docs/reference/language`](./docs/reference/language/README.md) if you want to learn how to write nex code, and
 [`NEXC_HOLY_BOOK.md`](./NEXC_HOLY_BOOK.md) for an educational tour of how the nex compiler works.
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Setup](#setup)
+- [Compiler Pipeline](#compiler-pipeline)
+- [Repository Layout](#repository-layout)
+- [Key Documents](#key-documents)
+- [Forward Priorities](#forward-priorities)
+- [License](#license)
 
 ## Quick Start
 
@@ -113,16 +126,26 @@ tests/     CTest fixtures and golden outputs
 docs/      reference docs, design notes, tutorials, backlog
 ```
 
-## Documentation
+## Key Documents
 
-- [`docs/reference/`](./docs/reference/README.md): current language, toolchain,
-  and runtime behavior
-- [`docs/IMPLEMENTATION_BACKLOG.md`](./docs/IMPLEMENTATION_BACKLOG.md): ordered
-  implementation milestones
 - [`NEXC_HOLY_BOOK.md`](./NEXC_HOLY_BOOK.md): educational explanation of the
   compiler internals
+- [`docs/reference/`](./docs/reference/README.md): current language, toolchain,
+  and runtime behavior
+- [`docs/reference/language/`](./docs/reference/language/README.md): language
+  rules by topic
+- [`docs/reference/toolchain/`](./docs/reference/toolchain/README.md): CLI,
+  build, tests, diagnostics, and artifacts
+- [`docs/IMPLEMENTATION_BACKLOG.md`](./docs/IMPLEMENTATION_BACKLOG.md): ordered
+  implementation milestones
 - [`LLM_REFERENCE.md`](./LLM_REFERENCE.md): short index for future chats/tools
 - [`nex.md`](./nex.md): longer project and language direction
+
+## Forward Priorities
+
+Near-term work is tracked in [`docs/IMPLEMENTATION_BACKLOG.md`](./docs/IMPLEMENTATION_BACKLOG.md).
+The current focus is definite assignment and uninitialized locals, followed by a
+tighter fixed-array story and later pointer work.
 
 ## License
 

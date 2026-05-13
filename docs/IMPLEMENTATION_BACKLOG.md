@@ -7,7 +7,6 @@ It complements:
 | Document | Role |
 | -------- | ---- |
 | [`nex.md`](../nex.md) | Long-horizon vision, language evolution buckets, compiler architecture narrative. |
-| [`docs/language/core_v0.md`](language/core_v0.md) | Historical **milestone** snapshot of the first language slice (may lag the compiler). |
 | [`docs/reference/`](reference/README.md) | **Normative reference for what the compiler does today**—must stay in sync with implementation and tests. |
 | [`NEXC_HOLY_BOOK.md`](../NEXC_HOLY_BOOK.md) | Educational tour of the compiler pipeline; good home for deep dives *after* a feature exists. |
 
@@ -23,12 +22,13 @@ It complements:
 
 - **Rust-style `print` / `println`:** format string literal with `` `{}` `` placeholders, typed arguments, `println` appends one `\n` after the formatted output; legacy `println(readln())` still allowed. See [`docs/reference/language/builtins_and_io.md`](reference/language/builtins_and_io.md).
 - **C-style `for`:** `for (init; condition; step) body` — any clause may be omitted (`for (;;)` uses a constant-true condition in IR); `init` may be `let`, assignment, or void call; `step` is assignment or void call (no `;` before `)`). Typed IR **desugars** to the existing `While` shape so MLIR stays unchanged. `let` in `init` is scoped to the whole `for` (not visible after the loop). Tests: `examples/for_loop.nexs`, goldens + `run_executable_for_loop`.
+- **Loop control:** `break;` exits the innermost loop; `continue;` advances to the next iteration. For `for`, `continue` runs the step clause before the next condition check. Tests: `examples/break_continue.nexs`, semantic diagnostics, and `run_executable_break_continue`.
 
 ---
 
 ## Wave A — `for` loops — **shipped**
 
-Follow-up polish (optional): `break` / `continue`; richer `for`-init if ever needed.
+`for`, `break`, and `continue` are implemented. Richer `for` initialization forms can be revisited if real examples need them.
 
 ---
 

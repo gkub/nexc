@@ -1,9 +1,9 @@
 # Frontend User Guide
 
-This guide explains how to use and read the first nex frontend tools. It is the
-practical companion to the normative language spec in
-`docs/language/core_v0.md` and the implementation contract in
-`docs/design/frontend_contract.md`.
+This guide explains how to use and read the nex frontend tools. It is the
+practical companion to the current language reference in
+[`docs/reference/language/`](../reference/language/README.md) and the design-era
+implementation contract in [`docs/design/frontend_contract.md`](../design/frontend_contract.md).
 
 For a code-level explanation of the implementation, see
 `NEXC_HOLY_BOOK.md`.
@@ -116,7 +116,7 @@ and golden test format.
 
 ## Check Semantics
 
-The semantic analyzer checks whether parsed syntax means a valid Core v0
+The semantic analyzer checks whether parsed syntax means a valid nex
 program:
 
 ```sh
@@ -159,7 +159,7 @@ Module
 ```
 
 The typed IR is not executable yet. It is the first explicit bridge from checked
-Core v0 programs toward future MLIR/LLVM lowering.
+checked nex programs toward MLIR/LLVM lowering.
 
 ## Dump MLIR
 
@@ -193,7 +193,7 @@ module {
 }
 ```
 
-This is intentionally still educational, but it now covers the Core v0 backend
+This is intentionally still educational, but it now covers the current backend
 surface: fixed-width integers, booleans, module constants, string literals,
 direct calls, built-in printing calls, mutable local storage, assignment,
 returning and fallthrough `if`/`else`, `while`, `/`, `%`, unsigned-specific
@@ -241,7 +241,7 @@ Once `build/nexc` exists, you can use it directly without `nexc.sh`:
 build/nexc examples/return_42.nexs -o build/return_42
 ```
 
-That path works for Core v0 programs, including runtime-backed stdout printing
+That path works for current nex programs, including runtime-backed stdout printing
 and the first `readln()` stdin slice.
 Internally the compiler emits LLVM IR to temporary files, runs `llc` to emit a
 relocatable object, then runs `ld.lld` with the usual Linux CRT objects, `-lc`,
@@ -273,7 +273,7 @@ printf 'typed input\n' | build/stdin_echo
 
 ## What Exists Now
 
-The current frontend supports the Core v0 parser surface:
+The current frontend supports this parser surface:
 
 - module-level `const`
 - function definitions
@@ -286,11 +286,11 @@ The current frontend supports the Core v0 parser surface:
 - textual and Graphviz AST dumps
 - semantic checking with `--check`
 - typed IR dumping with `--dump-ir`
-- MLIR dumping with `--dump-mlir` for Core v0 backend features including strings,
+- MLIR dumping with `--dump-mlir` for current backend features including strings,
   runtime printing, module constants, integer widths, and unsigned operations
-- LLVM IR dumping with `--dump-llvm` for the same Core v0 backend surface
+- LLVM IR dumping with `--dump-llvm` for the same backend surface
 - native executable compilation with `build/nexc <file.nexs> -o <output>` for
-  Core v0 programs
+  nex programs
 - experimental `readln() -> str` stdin input for direct use with printing
 - conditional `mlir-opt` validation for generated MLIR in the test suite
 - conditional `llvm-as` validation for generated LLVM IR in the test suite
@@ -322,6 +322,6 @@ extend.
 This page explains how to use the current frontend tools. It is not meant to be
 the long-term user reference for writing nex programs.
 
-For that, use [docs/user/core_v0_tutorial.md](./core_v0_tutorial.md). It is
+For that, use [docs/user/tutorial.md](./tutorial.md). It is
 focused on writing nex code: functions, variables, types, conditions, loops,
 calls, constants, and common diagnostics.

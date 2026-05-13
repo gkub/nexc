@@ -1,7 +1,7 @@
 # Nex I/O v1 Spitball
 
-This is a design note, not a finished specification. Core v0 proved that the
-compiler can build native executables and print stdout. The next I/O work should
+This is a design note, not a finished specification. The current compiler proved
+that nex can build native executables and print stdout. The next I/O work should
 avoid blindly copying C `stdio`, Rust traits, or shell syntax without deciding
 what Nex wants I/O to feel like.
 

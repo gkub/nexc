@@ -30,7 +30,7 @@ private:
     bool match(char expected);
 
     // Whitespace and comments separate tokens but are not tokens themselves in
-    // Core v0, so the parser never sees them.
+    // nex, so the parser never sees them.
     void skipWhitespaceAndComments();
 
     Token lexToken();

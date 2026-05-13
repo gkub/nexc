@@ -1,9 +1,8 @@
-# Language Functions And Calls
+# Functions and Calls
 
 ## Table of Contents
 
-- [Purpose](#purpose)
-- [Status](#status)
+- [Summary](#summary)
 - [Function Declaration Form](#function-declaration-form)
 - [Parameters](#parameters)
 - [Return Types](#return-types)
@@ -11,16 +10,13 @@
 - [Call Statements](#call-statements)
 - [Built-in Calls](#built-in-calls)
 - [Examples](#examples)
-- [Cross References](#cross-references)
+- [See Also](#see-also)
 
-## Purpose
+## Summary
 
-Define current function and call behavior in implemented language semantics.
-
-## Status
-
-- Stability: provisional
-- Applies to: current implemented language surface + built-ins
+Functions are top-level declarations with typed parameters and a typed return.
+Calls can appear as expressions when they return a value, or as statements when
+the callee returns `void`.
 
 ## Function Declaration Form
 
@@ -29,6 +25,8 @@ fn name(param: Type, ...) -> ReturnType {
     statements
 }
 ```
+
+Top-level placement rules are covered in [declarations_and_modules.md](declarations_and_modules.md).
 
 ## Parameters
 
@@ -60,24 +58,27 @@ Current checks:
 
 ## Call Statements
 
-Standalone call statements are currently valid when call return type is `void`.
-
-Discarding non-`void` call results is currently rejected.
+Standalone call statements are valid when the call return type is `void`.
+Discarding non-`void` call results is rejected.
 
 ## Built-in Calls
 
-Current built-ins:
+Current built-in signatures:
 
-- `print(fmt: str, ...) -> void` — format string literal plus `{}` placeholders (see built-ins reference), or one `str` value with no extra arguments.
-- `println(fmt: str, ...) -> void` — same as `print`, then one newline after the formatted output.
-- `readln() -> str`
-- `parse_i32(str) -> i32`
-- `parse_u64(str) -> u64`
-- `parse_bool(str) -> bool`
-- `input_ok() -> bool`
+```text
+print(fmt: str, ...) -> void
+println(fmt: str, ...) -> void
+readln() -> str
+parse_i32(str) -> i32
+parse_u64(str) -> u64
+parse_bool(str) -> bool
+input_ok() -> bool
+```
 
 Built-ins are language-defined calls (not user-declared functions), resolved by
 frontend semantics and lowered through runtime boundary.
+
+Formatting and input behavior are specified in [builtins_and_io.md](builtins_and_io.md).
 
 ## Examples
 
@@ -93,8 +94,8 @@ fn main() -> void {
 }
 ```
 
-## Cross References
+## See Also
 
-- `docs/reference/language/declarations_and_modules.md`
-- `docs/reference/language/expressions.md`
-- `docs/reference/language/builtins_and_io.md`
+- [declarations_and_modules.md](declarations_and_modules.md)
+- [expressions.md](expressions.md)
+- [builtins_and_io.md](builtins_and_io.md)

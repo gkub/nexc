@@ -1,4 +1,4 @@
-# Core v0 Typed IR
+# Initial Typed IR
 
 ## Purpose
 
@@ -6,7 +6,7 @@ This document sketches the first typed intermediate representation for `nexc`.
 The initial dump path is implemented; this note remains the design reference for
 growing that layer.
 
-The current compiler has a checked Core v0 frontend:
+The current compiler has a checked frontend:
 
 ```text
 source -> lexer -> parser -> AST -> semantic analysis
@@ -41,7 +41,7 @@ A small typed IR lets the frontend finish its job before backend code starts.
 
 The first IR should be:
 
-- **typed**: every value-producing instruction carries a Core v0 type
+- **typed**: every value-producing instruction carries a nex type
 - **resolved**: references point to IR symbols, not source-name lookups
 - **structured enough to stay simple**: keep functions, blocks, `if`, and
   `while` recognizable at first
@@ -68,9 +68,9 @@ The first typed IR does not need:
 - runtime ABI finalization
 - arrays, modules, user-defined types, effects, regions, channels, or tasks
 
-Those can layer on later once Core v0 scalar lowering works.
+Those can layer on later once scalar lowering works.
 
-## Core v0 Type Model
+## Initial Type Model
 
 The IR can reuse the frontend's scalar type model initially:
 
@@ -159,7 +159,7 @@ Return()
 ReturnValue(value)
 ```
 
-`ExprEffect` should be used sparingly. In Core v0 it mainly represents valid
+`ExprEffect` should be used sparingly. Today it mainly represents valid
 discarded `void` calls such as `println("hello");`.
 
 ## Name Resolution Boundary
@@ -179,7 +179,7 @@ than re-diagnosing ordinary semantic errors.
 
 ## Integer Semantics
 
-Core v0 integer semantics should follow the language specification:
+Integer semantics should follow the language specification:
 
 - fixed-width integer types
 - runtime arithmetic wraps for signed and unsigned integer operations
@@ -335,7 +335,7 @@ parse -> semantic analyze -> build typed IR -> dump typed IR
 ```
 
 Do not emit LLVM IR or native code until the typed IR and MLIR lowering continue
-to represent Core v0 scalar examples clearly and have golden tests plus MLIR
+to represent scalar examples clearly and have golden tests plus MLIR
 verifier coverage for the relevant shape. The walkthrough example now meets that
 bar for the current structured-control-flow slice, so the next backend design
 step can be the first LLVM/native lowering plan.

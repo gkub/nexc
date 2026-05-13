@@ -721,8 +721,8 @@ add_nexc_mlir_validation_test(
 )
 
 add_nexc_mlir_validation_test(
-    validate_mlir_core_v0_backend_coverage
-    examples/core_v0_backend_coverage.nexs
+    validate_mlir_backend_coverage
+    examples/backend_coverage.nexs
 )
 
 add_nexc_mlir_validation_test(
@@ -756,8 +756,8 @@ add_nexc_llvm_validation_test(
 )
 
 add_nexc_llvm_validation_test(
-    validate_llvm_core_v0_backend_coverage
-    examples/core_v0_backend_coverage.nexs
+    validate_llvm_backend_coverage
+    examples/backend_coverage.nexs
 )
 
 add_nexc_llvm_validation_test(
@@ -785,8 +785,8 @@ add_nexc_executable_test(
 )
 
 add_nexc_executable_test(
-    run_executable_core_v0_backend_coverage
-    examples/core_v0_backend_coverage.nexs
+    run_executable_backend_coverage
+    examples/backend_coverage.nexs
     33
 )
 
@@ -883,8 +883,8 @@ add_test(
 )
 
 add_test(
-    NAME semantic_check_core_v0_backend_coverage
-    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/core_v0_backend_coverage.nexs
+    NAME semantic_check_backend_coverage
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/backend_coverage.nexs
 )
 
 add_test(

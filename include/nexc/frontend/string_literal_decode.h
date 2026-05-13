@@ -7,7 +7,7 @@
 
 namespace nexc {
 
-// Decode a Core v0 string literal token (including quotes) into UTF-8 bytes.
+// Decode a nex string literal token (including quotes) into UTF-8 bytes.
 // Returns false on malformed input; optional `error` describes the failure.
 bool decodeStringLiteralContent(std::string_view rawQuoted, std::string& outDecoded,
                                 std::string* error = nullptr);

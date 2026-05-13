@@ -663,7 +663,7 @@ private:
     // condition-like rather than forced to one exact type.
     ValueRef buildBinary(const BinaryExpr& binary, std::optional<Type> expected) {
         if (binary.op == TokenKind::AmpAmp || binary.op == TokenKind::PipePipe) {
-            // Logical operators always produce bool in Core v0. Their operands
+            // Logical operators always produce bool. Their operands
             // may be bool or integer, so we do not force an expected operand
             // type here.
             const ValueRef left = buildExpr(*binary.left, std::nullopt);
@@ -716,7 +716,7 @@ private:
     std::optional<ValueRef> buildCall(const CallExpr& call) {
         const auto* callee = dynamic_cast<const NameExpr*>(call.callee.get());
         if (!callee) {
-            throw std::logic_error("typed IR only supports named callees in Core v0");
+            throw std::logic_error("typed IR only supports named callees");
         }
 
         const auto signature = functions_.find(callee->name);
@@ -811,7 +811,7 @@ private:
     ValueSymbol lookupValue(const std::string& name) const {
         // Lookup mirrors source lexical scoping: innermost local scope first,
         // then module-level constants. Functions are intentionally not values in
-        // Core v0; calls resolve functions through buildCall().
+        // nex; calls resolve functions through buildCall().
         for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
             if (const auto found = scope->find(name); found != scope->end()) {
                 return found->second;

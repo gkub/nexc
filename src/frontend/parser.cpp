@@ -17,13 +17,13 @@ Parser::Parser(const SourceFile& source, std::span<const Token> tokens,
 
 // Parse the whole file into the AST root.
 //
-// A TranslationUnit is the parser's representation of one source file. Core v0
+// A TranslationUnit is the parser's representation of one source file. nex
 // only permits top-level declarations, so this loop repeatedly parses items
 // until it reaches the explicit EOF token.
 TranslationUnit Parser::parseTranslationUnit() {
     TranslationUnit unit;
 
-    // The translation unit is the parser's root. Core v0 accepts only top-level
+    // The translation unit is the parser's root. nex accepts only top-level
     // items here, so each loop iteration should consume one `fn` or `const`.
     while (!isAtEnd()) {
         if (std::unique_ptr<Item> item = parseItem()) {
@@ -41,7 +41,7 @@ TranslationUnit Parser::parseTranslationUnit() {
 // Look ahead in the token stream without consuming.
 //
 // Recursive-descent parsers use lookahead to decide which grammar branch to take
-// before committing. Core v0 usually needs only one token of lookahead.
+// before committing. nex usually needs only one token of lookahead.
 const Token& Parser::peek(std::size_t offset) const {
     const std::size_t index = current_ + offset;
     if (index >= tokens_.size()) {
@@ -113,7 +113,7 @@ Token Parser::expect(TokenKind kind, std::string_view message) {
 
 // Parse one top-level item.
 //
-// In Core v0 an item is either a function declaration or a module constant.
+// In nex today an item is either a function declaration or a module constant.
 // Statements are intentionally not allowed at file scope.
 std::unique_ptr<Item> Parser::parseItem() {
     // Top-level parsing is intentionally strict. A stray statement at module
@@ -159,7 +159,7 @@ std::unique_ptr<FunctionDecl> Parser::parseFunctionDecl() {
 // The parser only checks the syntax shape. Semantic analysis later verifies that
 // the initializer is type-correct and compile-time evaluable.
 std::unique_ptr<ConstDecl> Parser::parseConstDecl() {
-    // Core v0 constants are module-level only. The parser handles that by only
+    // Constants are module-level only. The parser handles that by only
     // calling this routine from parseItem(); inner `const` is rejected in
     // parseStmt().
     const Token keyword = expect(TokenKind::KwConst, "expected `const`");
@@ -197,7 +197,7 @@ std::vector<ParameterSyntax> Parser::parseParameterList() {
 
         if (check(TokenKind::RightParen)) {
             diagnostics_.error(peek().span,
-                               "trailing commas are not allowed in parameter lists in Core v0");
+                               "trailing commas are not allowed in parameter lists");
             break;
         }
     }
@@ -222,7 +222,7 @@ ParameterSyntax Parser::parseParameter() {
     };
 }
 
-// Parse a Core v0 builtin type name.
+// Parse a nex built-in type name.
 //
 // User-defined types do not exist yet, so every accepted type is represented by
 // BuiltinTypeKind. Invalid type syntax still produces a TypeSyntax placeholder so
@@ -265,7 +265,7 @@ TypeSyntax Parser::parseType() {
     // in this parser context. This keeps the lexer from needing to know every
     // possible future type name.
     if (kind == BuiltinTypeKind::Invalid) {
-        diagnostics_.error(token.span, "expected Core v0 scalar type");
+        diagnostics_.error(token.span, "expected scalar type");
     }
 
     return TypeSyntax{.form = TypeSyntaxKind::Builtin, .kind = kind, .span = token.span};
@@ -297,7 +297,7 @@ std::unique_ptr<BlockStmt> Parser::parseBlockStmt() {
 
 // Parse one statement inside a function body or nested block.
 //
-// This is the statement-level dispatch table for Core v0. Each branch mirrors a
+// This is the statement-level dispatch table for nex. Each branch mirrors a
 // grammar production such as let-statement, return-statement, or if-statement.
 std::unique_ptr<Stmt> Parser::parseStmt() {
     // Statement dispatch is based on the first token. This is recursive descent:
@@ -336,7 +336,7 @@ std::unique_ptr<Stmt> Parser::parseStmt() {
     }
     if (check(TokenKind::KwConst)) {
         diagnostics_.error(peek().span,
-                           "inner `const` declarations are not part of Core v0");
+                           "inner `const` declarations are not supported yet");
         return nullptr;
     }
     if (check(TokenKind::Identifier) || check(TokenKind::IntegerLiteral) ||
@@ -542,7 +542,7 @@ std::unique_ptr<Stmt> Parser::parseForStepClause() {
 
 // Parse the statement forms that start like expressions.
 //
-// An identifier followed by `=` is assignment. Otherwise Core v0 allows only a
+// An identifier followed by `=` is assignment. Otherwise nex allows only a
 // call expression as a statement. This function exists because both forms begin
 // with expression-looking tokens.
 std::unique_ptr<Stmt> Parser::parseAssignmentOrCallStmt() {
@@ -573,7 +573,7 @@ std::unique_ptr<Stmt> Parser::parseAssignmentOrCallStmt() {
     auto* call = dynamic_cast<CallExpr*>(lhs.get());
     if (!call) {
         diagnostics_.error(lhs->span,
-                           "only call expressions may be used as expression statements in Core v0");
+                           "only call expressions may be used as expression statements");
         return nullptr;
     }
 
@@ -599,7 +599,7 @@ std::unique_ptr<Expr> Parser::parseExpr(int minPrecedence) {
 
         const Token op = advance();
 
-        // `precedence + 1` makes Core v0 binary operators left-associative.
+        // `precedence + 1` makes binary operators left-associative.
         // Example: `a - b - c` parses as `(a - b) - c`, not `a - (b - c)`.
         std::unique_ptr<Expr> right = parseExpr(precedence + 1);
         const SourceSpan span{.start = left->span.start, .end = right->span.end};
@@ -633,7 +633,7 @@ std::unique_ptr<Expr> Parser::parseUnaryExpr() {
 //
 // Starting from a primary expression, repeatedly attach argument lists. This
 // supports `f()(x)` syntactically even if semantic analysis later rejects
-// non-name callees in Core v0.
+// non-name callees.
 std::unique_ptr<Expr> Parser::parsePostfixExpr() {
     std::unique_ptr<Expr> expr = parsePrimaryExpr();
 
@@ -737,7 +737,7 @@ std::unique_ptr<Expr> Parser::parsePrimaryExpr() {
 // Parse the comma-separated expression list inside a call.
 //
 // The caller has already consumed `(` and will consume the final `)`. This
-// helper intentionally rejects trailing commas for the Core v0 grammar.
+// helper intentionally rejects trailing commas for the current grammar.
 std::vector<std::unique_ptr<Expr>> Parser::parseArgumentList() {
     std::vector<std::unique_ptr<Expr>> arguments;
 
@@ -754,7 +754,7 @@ std::vector<std::unique_ptr<Expr>> Parser::parseArgumentList() {
 
         if (check(TokenKind::RightParen)) {
             diagnostics_.error(peek().span,
-                               "trailing commas are not allowed in call arguments in Core v0");
+                               "trailing commas are not allowed in call arguments");
             break;
         }
     }

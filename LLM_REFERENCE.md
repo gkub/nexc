@@ -53,10 +53,9 @@ Or `./nexc.sh check` for the usual local loop. Canonical workflows: [build_and_t
 | **Ordered next milestones** | [docs/IMPLEMENTATION_BACKLOG.md](./docs/IMPLEMENTATION_BACKLOG.md) |
 | **Normative “what the compiler does now”** | [docs/reference/README.md](./docs/reference/README.md), then [language/README](./docs/reference/language/README.md), [toolchain/README](./docs/reference/toolchain/README.md), [runtime/README](./docs/reference/runtime/README.md) |
 | Formal CLI | [compiler_cli.md](./docs/reference/toolchain/compiler_cli.md) |
-| Learn to write programs | [docs/user/core_v0_tutorial.md](./docs/user/core_v0_tutorial.md) (filename is historical; content tracks current nex) |
+| Learn to write programs | [docs/user/tutorial.md](./docs/user/tutorial.md) |
 | Inspection / `nexc.sh` UX | [frontend.md](./docs/user/frontend.md) |
 | Compiler walkthrough | [NEXC_HOLY_BOOK.md](./NEXC_HOLY_BOOK.md) |
-| **Frozen early snapshot** (historical; may lag the compiler) | `docs/language/core_v0.md` when that file exists in the tree |
 | Design drafts (non-normative) | [docs/design/](./docs/design/) (e.g. [frontend_contract.md](./docs/design/frontend_contract.md), [llvm_native_first_slice.md](./docs/design/llvm_native_first_slice.md)) |
 | Frontend headers / sources | [include/nexc/frontend/](./include/nexc/frontend/), [src/frontend/](./src/frontend/) |
 | Typed IR | [include/nexc/ir/](./include/nexc/ir/), [src/ir/](./src/ir/) |
@@ -77,7 +76,6 @@ When editing docs:
 
 - **Normative behavior:** update the right file under `docs/reference/` (and tests), not only design drafts.
 - **Holy Book:** add or adjust teaching sections when pipeline stages gain new user-visible behavior.
-- **Frozen `core_v0` snapshot:** touch only when intentionally revising that historical document; it is **not** the live spec.
 
 ## Style guidance for agents
 

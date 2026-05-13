@@ -188,9 +188,9 @@ Features should be defined in writing before implementation. A feature should ge
 
 The language definition should not accidentally emerge from whatever the compiler happens to implement first.
 
-An early **frozen grammar snapshot** is **[docs/language/core_v0.md](./docs/language/core_v0.md)** (useful for comparing “first milestone” intent to the living
-**[`docs/reference/`](./docs/reference/README.md)** text). The compiler has since
-grown; **backlog + reference** track what ships next, not phase numbers.
+The living language reference is **[`docs/reference/`](./docs/reference/README.md)**.
+The compiler has grown past early milestone labels; backlog and reference docs
+track what ships next.
 
 ---
 
@@ -378,10 +378,9 @@ Normal builds should have minimal overhead. Debug/profile builds may enable inst
 **Near-term sequencing** (what the team builds next, with doc checklists) lives
 only in **[docs/IMPLEMENTATION_BACKLOG.md](./docs/IMPLEMENTATION_BACKLOG.md)**.
 
-The bullets below are **capability buckets**, not versioned releases. The frozen
-**first language snapshot** for historical comparison is still
-[`docs/language/core_v0.md`](./docs/language/core_v0.md); **what the compiler
-accepts today** is described under [`docs/reference/`](./docs/reference/README.md).
+The bullets below are **capability buckets**, not versioned releases. What the
+compiler accepts today is described under
+[`docs/reference/`](./docs/reference/README.md).
 
 **Already in active use** (non-exhaustive): functions; integer/bool/`str`/`void`;
 `let` / `let mut`; `if` / `else`; `while` and C-style **`for`**; fixed-size local
