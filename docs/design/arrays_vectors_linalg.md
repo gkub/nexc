@@ -30,6 +30,24 @@ Nex should probably distinguish these concepts instead of overloading one type:
 The spelling is not final. The important design choice is that these are not all
 the same semantic object.
 
+### What is a “slice” here?
+
+Roughly: **borrowed, contiguous range** — a **pointer (or reference) plus a
+length** (and sometimes a capacity is *not* part of a slice; capacity belongs to
+an **owning** buffer). A slice does not own storage; it **views** array elements,
+`str` bytes, file buffers, or the live portion of a growable vector. Operations
+are **index / sub-range / copy-out** — not `push`/`pop`, which change an owning
+allocation story.
+
+### Operations like `push` / `pop` / “dynamic length”
+
+Those are **growable-vector** (`Vec<T>`-style) concerns: heap allocation,
+reallocation, capacity vs length, and an error/abort policy when allocation
+fails. They do **not** belong on **`[T; N]`** without lying about the type
+(length is in the type). When vectors exist, **good diagnostics** can steer
+learners: “fixed array `xs` has length `N` known at compile time; to append
+elements you need …” with a doc link — same spirit as definite-assignment hints.
+
 ## Recommended Order
 
 1. Add fixed-size arrays first.
@@ -85,18 +103,19 @@ Surface syntax (target shape, not all implemented yet):
 - **Index:** `primary `[` index-expr `]`** — loads one element.
 
 **Locals path is implemented** (ranked `memref`, `arith.index_cast` for dynamic
-indices, `run_executable_array_fixed`). ABI (`fn` parameters/returns), `const`
-arrays, and nested arrays remain future work.
+indices, `run_executable_array_fixed`). **Function parameters, returns, and module
+`const` arrays** use the same ranked `memref` ABI (`examples/array_abi.nexs`).
+Nested arrays, **`str`** arrays, and uninitialized local arrays remain future work.
 
 ## Implementation Handoff Checklist (Arrays)
 
-**Local fixed arrays are implemented** in `nexc` (stack `memref`s, indexed
-load/store). Keep this list when extending the surface:
+**Fixed arrays (locals + `fn` ABI + `const`)** are implemented in `nexc`. Keep this list when extending the surface:
 
 1. **Language reference:** `docs/reference/language/types.md`,
    `docs/reference/language/expressions.md`, `docs/reference/language/statements.md`.
-2. **Future:** array **parameters** / **returns** (ABI), **`const`** array
-   initializers, nested `[ [T; N]; M ]`, **`str` arrays**.
-3. **Tests:** `examples/array_fixed.nexs`, CTest `run_executable_array_fixed`,
-   `semantic_check_array_fixed`.
+2. **Future:** nested `[ [T; N]; M ]`, **`str`** arrays, **`let mut a: [T; N];`**
+   with per-element definite assignment.
+3. **Tests:** `examples/array_fixed.nexs`, `examples/array_abi.nexs`, CTest
+   `run_executable_array_fixed`, `run_executable_array_abi`, `semantic_check_array_*`,
+   `validate_mlir_array_abi`.
 4. **This file:** update open questions when slices/vectors split from `[T; N]`.

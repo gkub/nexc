@@ -21,7 +21,7 @@ Succinct checklist of **implemented surface** (and a few prominent gaps). Normat
 
 - **Scalars:** `i8` … `u64`, `bool`, `void`. [types.md](types.md)
 - **`str`:** string type with runtime support; literals; some builtins. [types.md](types.md)
-- **Fixed arrays `[T; N]`:** **local bindings only** — array literals, index read `a[i]`, element assign `a[i] = e` when `a` is `let mut`. **Not** on parameters, return types, or module `const` yet. [types.md](types.md)
+- **Fixed arrays `[T; N]`:** locals, **`fn` parameters and returns**, module **`const`** (full array literal initializer); indexing and `let mut` element assign. **`main`** may not return an array type. Uninitialized `let mut a: [T; N];` is still rejected. [types.md](types.md)
 
 ## Locals and definite assignment
 

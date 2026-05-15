@@ -68,23 +68,28 @@ Built-in scalar types:
 
 ## Fixed-Size Arrays
 
-Fixed arrays are implemented for **locals** (`let` / `let mut`): element types are
-the usual scalar built-ins (`i8`–`u64`, `bool`). **`void`**, **`str`**, and nested
-`[…]` element types are rejected. **`N`** must be a positive decimal or hex integer
-literal in the type.
+Fixed arrays are implemented for **locals**, **function parameters**, **function
+return types**, and **module `const`** (initializer must be a compile-time
+full array literal, same rules as locals). Element types are the usual scalar
+built-ins (`i8`–`u64`, `bool`). **`void`**, **`str`**, and nested `[…]` element
+types are rejected. **`N`** must be a positive decimal or hex integer literal in
+the type.
 
-**Meaning:** `[T; N]` is **exactly `N` elements** of type `T`. Storage is inline
-(stack slots lowered as ranked `memref`s). This is not a growable vector and not a
-slice; see [arrays_vectors_linalg.md](../../design/arrays_vectors_linalg.md).
+**Meaning:** `[T; N]` is **exactly `N` elements** of type `T`. Locals and
+array-typed `const` values lower as ranked `memref`s; parameters and returns use
+the same ranked `memref<NxT>` ABI at the MLIR boundary. This is not a growable
+vector and not a slice; see [arrays_vectors_linalg.md](../../design/arrays_vectors_linalg.md).
 
-**Not supported yet:** array-typed **function parameters**, **returns**, and
-**module `const`** initializers (diagnosed in semantic analysis).
+**`main`:** the entry function may still only return `void` or `i32` (not an
+array type).
 
-**Initialization today:** a `let` / `let mut` array binding **must** provide a
-**full** array literal of length `N` on the declaration. There is no
-“uninitialized `[T; N]` then fill in a loop” form yet; that work is scheduled
-after **`for`** loops and **definite assignment** for scalars—see
+**Uninitialized locals:** `let mut a: [T; N];` without `=` remains **rejected**
+until per-element definite assignment is implemented; see
 [`docs/IMPLEMENTATION_BACKLOG.md`](../../IMPLEMENTATION_BACKLOG.md).
+
+**Initialization:** a `let` / `let mut` array binding **must** provide a **full**
+array literal of length `N` on the declaration. Module `const` arrays use the
+same rule.
 
 ```nex
 let xs: [i32; 4] = [1, 2, 3, 4];

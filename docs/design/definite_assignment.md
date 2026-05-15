@@ -46,9 +46,10 @@ loop (or, for `for`, reset to **after the init clause only**). This matches
 
 - **`let x: T;`** without **`mut`** and without **`=`** is a **parse error** (use
   `let mut` for declare-without-init).
-- **Fixed-size arrays** without an initializer are rejected for now (until
-  per-element or whole-array rules are chosen); see `IMPLEMENTATION_BACKLOG.md`
-  Wave C.
+- **Fixed-size array locals** without an initializer are rejected for now (until
+  per-element or whole-array rules are chosen); see
+  [`docs/IMPLEMENTATION_BACKLOG.md`](../IMPLEMENTATION_BACKLOG.md). Array-typed
+  **`fn` parameters** are still treated as assigned at entry (like scalars).
 
 ## Backends
 

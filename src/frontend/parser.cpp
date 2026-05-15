@@ -230,13 +230,7 @@ ParameterSyntax Parser::parseParameter() {
 TypeSyntax Parser::parseType() {
     if (check(TokenKind::LeftBracket)) {
         const Token lb = advance();
-        const Token elemTok = advance();
-        const BuiltinTypeKind elemKind = builtinTypeKind(elemTok);
-        if (elemKind == BuiltinTypeKind::Invalid || elemKind == BuiltinTypeKind::Void) {
-            diagnostics_.error(elemTok.span,
-                               "expected scalar element type in `[T; N]` array type");
-        }
-
+        TypeSyntax inner = parseType();
         expect(TokenKind::Semicolon, "expected `;` in `[T; N]`");
         const Token lenTok =
             expect(TokenKind::IntegerLiteral, "expected compile-time array length");
@@ -247,28 +241,32 @@ TypeSyntax Parser::parseType() {
         const unsigned long long lenVal = std::stoull(lenText, &consumed, 0);
         if (consumed != lenText.size() || lenVal == 0ULL) {
             diagnostics_.error(lenTok.span,
-                               "array length must be a positive integer literal");
+                                 "array length must be a positive integer literal");
         }
 
-        const SourceSpan span{.start = lb.span.start, .end = previous().span.end};
-        return TypeSyntax{.form = TypeSyntaxKind::FixedArray,
-                          .kind = BuiltinTypeKind::Invalid,
-                          .arrayElementKind = elemKind,
-                          .arrayLength = static_cast<std::uint64_t>(lenVal),
-                          .span = span};
+        if (inner.kind == BuiltinTypeKind::Invalid || inner.kind == BuiltinTypeKind::Void ||
+            inner.kind == BuiltinTypeKind::Str) {
+            diagnostics_.error(inner.span,
+                                 "array element type cannot be `void`, `str`, or invalid");
+        }
+
+        TypeSyntax out;
+        out.kind = inner.kind;
+        out.arrayDimensions = inner.arrayDimensions;
+        out.arrayDimensions.insert(out.arrayDimensions.begin(),
+                                   static_cast<std::uint64_t>(lenVal));
+        out.span = SourceSpan{.start = lb.span.start, .end = previous().span.end};
+        return out;
     }
 
     const Token token = advance();
     const BuiltinTypeKind kind = builtinTypeKind(token);
 
-    // `i32` and friends lex as identifiers, then become builtin type syntax only
-    // in this parser context. This keeps the lexer from needing to know every
-    // possible future type name.
     if (kind == BuiltinTypeKind::Invalid) {
         diagnostics_.error(token.span, "expected scalar type");
     }
 
-    return TypeSyntax{.form = TypeSyntaxKind::Builtin, .kind = kind, .span = token.span};
+    return TypeSyntax{.kind = kind, .arrayDimensions = {}, .span = token.span};
 }
 
 // Parse a `{ ... }` statement block.

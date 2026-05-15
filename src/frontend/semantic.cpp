@@ -24,38 +24,43 @@ namespace {
 // meaning-level view: it answers questions such as "is this an integer?" and
 // "is this void?" without exposing parser details to every check.
 struct Type {
-    enum class Form { Builtin, FixedArray };
-
-    Form form = Form::Builtin;
     BuiltinTypeKind kind = BuiltinTypeKind::Invalid;
-
-    BuiltinTypeKind arrayElement = BuiltinTypeKind::Invalid;
-    std::uint64_t arrayLength = 0;
+    // Non-empty => fixed-size array type; lengths are outermost dimension first
+    // (e.g. `{2, 3}` for `[[i32; 3]; 2]`). Empty => scalar `kind`.
+    std::vector<std::uint64_t> arrayDimensions;
 
     bool isInvalid() const {
-        return form == Form::Builtin && kind == BuiltinTypeKind::Invalid;
+        return kind == BuiltinTypeKind::Invalid && arrayDimensions.empty();
     }
 
     bool isVoid() const {
-        return form == Form::Builtin && kind == BuiltinTypeKind::Void;
+        return arrayDimensions.empty() && kind == BuiltinTypeKind::Void;
     }
 
     bool isBool() const {
-        return form == Form::Builtin && kind == BuiltinTypeKind::Bool;
+        return arrayDimensions.empty() && kind == BuiltinTypeKind::Bool;
     }
 
     bool isString() const {
-        return form == Form::Builtin && kind == BuiltinTypeKind::Str;
+        return arrayDimensions.empty() && kind == BuiltinTypeKind::Str;
     }
 
-    bool isFixedArray() const { return form == Form::FixedArray; }
+    bool isFixedArray() const { return !arrayDimensions.empty(); }
 
-    Type elementScalarType() const {
-        return Type{.form = Form::Builtin, .kind = arrayElement};
+    // Type after peeling one index dimension (still an array if more dims remain).
+    Type afterIndex() const {
+        Type t{.kind = kind, .arrayDimensions = arrayDimensions};
+        if (!t.arrayDimensions.empty()) {
+            t.arrayDimensions.erase(t.arrayDimensions.begin());
+        }
+        return t;
     }
+
+    // Leaf scalar element as a scalar `Type` (for assignments and literals).
+    Type elementScalarType() const { return Type{.kind = kind, .arrayDimensions = {}}; }
 
     bool isInteger() const {
-        if (form != Form::Builtin) {
+        if (isFixedArray()) {
             return false;
         }
         switch (kind) {
@@ -74,13 +79,12 @@ struct Type {
         case BuiltinTypeKind::Invalid:
             return false;
         }
-
         return false;
     }
 };
 
 Type builtinScalar(BuiltinTypeKind k) {
-    return Type{.form = Type::Form::Builtin, .kind = k};
+    return Type{.kind = k, .arrayDimensions = {}};
 }
 
 // Compare two semantic types for exact equality, with invalid acting as a
@@ -89,36 +93,25 @@ bool sameType(Type left, Type right) {
     if (left.isInvalid() || right.isInvalid()) {
         return true;
     }
-    if (left.form != right.form) {
-        return false;
-    }
-    if (left.form == Type::Form::Builtin) {
-        return left.kind == right.kind;
-    }
-    return left.arrayElement == right.arrayElement && left.arrayLength == right.arrayLength;
+    return left.kind == right.kind && left.arrayDimensions == right.arrayDimensions;
 }
 
 // Convert a semantic type to the spelling used in diagnostics.
 std::string typeName(Type type) {
-    if (type.form == Type::Form::FixedArray) {
-        return "[" + std::string(builtinTypeName(type.arrayElement)) + "; " +
-               std::to_string(type.arrayLength) + "]";
+    if (type.arrayDimensions.empty()) {
+        return std::string(builtinTypeName(type.kind));
     }
-    return std::string(builtinTypeName(type.kind));
+    std::string t = std::string(builtinTypeName(type.kind));
+    for (auto it = type.arrayDimensions.rbegin(); it != type.arrayDimensions.rend();
+         ++it) {
+        t = "[" + t + "; " + std::to_string(*it) + "]";
+    }
+    return t;
 }
 
 // Convert parser type syntax into semantic type information.
-//
-// This is tiny today because nex only has built-in scalar types. Keeping the
-// conversion explicit gives future user-defined types a clear expansion point.
 Type typeFromSyntax(TypeSyntax syntax) {
-    if (syntax.form == TypeSyntaxKind::FixedArray) {
-        return Type{.form = Type::Form::FixedArray,
-                    .kind = BuiltinTypeKind::Invalid,
-                    .arrayElement = syntax.arrayElementKind,
-                    .arrayLength = syntax.arrayLength};
-    }
-    return builtinScalar(syntax.kind);
+    return Type{.kind = syntax.kind, .arrayDimensions = syntax.arrayDimensions};
 }
 
 // Return true if a type is allowed in `if`, `while`, and `!` condition contexts.
@@ -167,6 +160,136 @@ struct ExprInfo {
     std::optional<unsigned long long> integerValue = std::nullopt;
 };
 
+// Expression analysis sometimes needs to relax whole-array definite assignment
+// when a fixed array appears only as the base of a chained index (`a[i][j]`).
+enum class ExprCtx { Normal, IndexBase };
+
+using ArrayElemMap = std::unordered_map<std::size_t, std::vector<std::uint8_t>>;
+
+struct IndexedNameChain {
+    const NameExpr* rootName = nullptr;
+    // Indices from outer dimension to inner, matching `Type::arrayDimensions` order.
+    std::vector<const Expr*> indices;
+};
+
+const Expr* stripParensConst(const Expr* e) {
+    while (const auto* p = dynamic_cast<const ParenExpr*>(e)) {
+        e = p->inner.get();
+    }
+    return e;
+}
+
+// If `outermost` is `name[…][…]` (with optional parens), peel it into a name plus
+// an outer-to-inner index list. Returns false for callees, non-name bases, etc.
+bool peelIndexedNameChain(const IndexExpr* outermost, IndexedNameChain* out) {
+    std::vector<const Expr*> idxRev;
+    const Expr* cur = outermost;
+    while (true) {
+        const auto* ix = dynamic_cast<const IndexExpr*>(stripParensConst(cur));
+        if (!ix) {
+            break;
+        }
+        idxRev.push_back(ix->index.get());
+        cur = ix->base.get();
+    }
+    cur = stripParensConst(cur);
+    const auto* nm = dynamic_cast<const NameExpr*>(cur);
+    if (!nm) {
+        return false;
+    }
+    out->rootName = nm;
+    out->indices.assign(idxRev.rbegin(), idxRev.rend());
+    return true;
+}
+
+unsigned long long flatElementCountRanked(const Type& t) {
+    if (!t.isFixedArray()) {
+        return 1;
+    }
+    unsigned long long p = 1;
+    for (std::uint64_t d : t.arrayDimensions) {
+        p *= d;
+    }
+    return p;
+}
+
+// Per-element definite assignment tracks at most this many elements per binding.
+constexpr std::size_t kMaxArrayElemsForDA = 65536;
+
+bool vectorAllOnes(const std::vector<std::uint8_t>& v) {
+    for (std::uint8_t b : v) {
+        if (b == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::vector<std::uint8_t> bandMasks(const std::vector<std::uint8_t>& a,
+                                    const std::vector<std::uint8_t>& b) {
+    std::vector<std::uint8_t> out(a.size());
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        out[i] = (a[i] != 0 && b[i] != 0) ? static_cast<std::uint8_t>(1) : 0;
+    }
+    return out;
+}
+
+std::vector<std::uint8_t> maskOrFull(const std::unordered_set<std::size_t>& def,
+                                     const ArrayElemMap& arr, std::size_t id, std::size_t n) {
+    if (def.contains(id)) {
+        return std::vector<std::uint8_t>(n, 1);
+    }
+    const auto it = arr.find(id);
+    if (it == arr.end()) {
+        return std::vector<std::uint8_t>(n, 0);
+    }
+    return it->second;
+}
+
+std::optional<std::size_t> constIndicesToFlatOffset(const Type& arrayTy,
+                                                    const std::vector<unsigned long long>& idxs) {
+    if (!arrayTy.isFixedArray() || idxs.size() != arrayTy.arrayDimensions.size()) {
+        return std::nullopt;
+    }
+    for (std::size_t k = 0; k < idxs.size(); ++k) {
+        if (idxs[k] >= arrayTy.arrayDimensions[k]) {
+            return std::nullopt;
+        }
+    }
+    unsigned long long offset = 0;
+    for (std::size_t k = 0; k < idxs.size(); ++k) {
+        unsigned long long stride = 1;
+        for (std::size_t j = k + 1; j < arrayTy.arrayDimensions.size(); ++j) {
+            stride *= arrayTy.arrayDimensions[j];
+        }
+        offset += static_cast<unsigned long long>(idxs[k]) * stride;
+    }
+    return static_cast<std::size_t>(offset);
+}
+
+// Flat index of the first element of the slice selected by the first `idxs.size()`
+// outer dimensions (indices must be within bounds on those dimensions).
+std::optional<std::size_t> flatOffsetForPrefixIndices(
+    const Type& arrayTy, const std::vector<unsigned long long>& idxs) {
+    if (!arrayTy.isFixedArray() || idxs.empty() || idxs.size() > arrayTy.arrayDimensions.size()) {
+        return std::nullopt;
+    }
+    for (std::size_t k = 0; k < idxs.size(); ++k) {
+        if (idxs[k] >= arrayTy.arrayDimensions[k]) {
+            return std::nullopt;
+        }
+    }
+    unsigned long long offset = 0;
+    for (std::size_t k = 0; k < idxs.size(); ++k) {
+        unsigned long long stride = 1;
+        for (std::size_t j = k + 1; j < arrayTy.arrayDimensions.size(); ++j) {
+            stride *= arrayTy.arrayDimensions[j];
+        }
+        offset += static_cast<unsigned long long>(idxs[k]) * stride;
+    }
+    return static_cast<std::size_t>(offset);
+}
+
 // Parse the raw spelling of an integer literal into an unsigned payload.
 //
 // This helper is deliberately unsigned because the parser represents unary minus
@@ -196,7 +319,7 @@ std::optional<unsigned long long> parseUnsignedInteger(std::string_view raw) {
 // Non-integer types return 0 so callers can use that as "not applicable" after
 // checking type.isInteger().
 unsigned bitWidth(Type type) {
-    if (type.form == Type::Form::FixedArray) {
+    if (type.isFixedArray()) {
         return bitWidth(type.elementScalarType());
     }
     // Integer widths are needed for literal range checks and constant overflow
@@ -229,7 +352,7 @@ unsigned bitWidth(Type type) {
 // Signedness is needed for literal range and overflow checks because i8 and u8
 // have the same bit width but different maximum positive literal values.
 bool isSigned(Type type) {
-    if (type.form == Type::Form::FixedArray) {
+    if (type.isFixedArray()) {
         return isSigned(type.elementScalarType());
     }
     // Signedness only matters for integer types. Returning false for non-integers
@@ -412,19 +535,12 @@ private:
                 parameterTypes.reserve(function->parameters.size());
                 for (const ParameterSyntax& parameter : function->parameters) {
                     const Type pt = typeFromSyntax(parameter.type);
-                    if (pt.isFixedArray()) {
-                        diagnostics_.error(
-                            parameter.type.span,
-                            "array-typed parameters are not supported yet");
-                    }
+                    validateFixedArrayDecl(pt, parameter.type.span);
                     parameterTypes.push_back(pt);
                 }
 
                 const Type returnType = typeFromSyntax(function->returnType);
-                if (returnType.isFixedArray()) {
-                    diagnostics_.error(function->returnType.span,
-                                       "array return types are not supported yet");
-                }
+                validateFixedArrayDecl(returnType, function->returnType.span);
 
                 functions_[function->name] = FunctionSymbol{
                     .nameSpan = function->nameSpan,
@@ -437,10 +553,7 @@ private:
             if (const auto* constant = dynamic_cast<const ConstDecl*>(item.get())) {
                 declareTopLevel(constant->name, constant->nameSpan);
                 const Type constTy = typeFromSyntax(constant->type);
-                if (constTy.isFixedArray()) {
-                    diagnostics_.error(constant->type.span,
-                                       "module constants cannot have array type yet");
-                }
+                validateFixedArrayDecl(constTy, constant->type.span);
                 globals_[constant->name] = ValueSymbol{
                     .type = constTy,
                     .isMutable = false,
@@ -485,8 +598,8 @@ private:
         }
 
         if (!main.returnType.isVoid() &&
-            !(main.returnType.form == Type::Form::Builtin &&
-              main.returnType.kind == BuiltinTypeKind::I32)) {
+            (main.returnType.isFixedArray() ||
+             main.returnType.kind != BuiltinTypeKind::I32)) {
             diagnostics_.error(main.nameSpan,
                                "`main` must return `void` or `i32`");
         }
@@ -568,6 +681,7 @@ private:
     void popScope() {
         for (const std::size_t id : scopeBindingIds_.back()) {
             definiteAssign_.erase(id);
+            arrayElemAssign_.erase(id);
         }
         scopeBindingIds_.pop_back();
         scopes_.pop_back();
@@ -607,10 +721,191 @@ private:
         if (symbol.isConst) {
             return;
         }
+        if (symbol.type.isFixedArray()) {
+            if (definiteAssign_.contains(symbol.bindingId)) {
+                return;
+            }
+            if (const auto it = arrayElemAssign_.find(symbol.bindingId);
+                it != arrayElemAssign_.end() && vectorAllOnes(it->second)) {
+                return;
+            }
+            diagnostics_.error(
+                useSpan,
+                "local `" + std::string(nameForDiag) + "` may be read before assignment");
+            return;
+        }
         if (!definiteAssign_.contains(symbol.bindingId)) {
             diagnostics_.error(
                 useSpan,
                 "local `" + std::string(nameForDiag) + "` may be read before assignment");
+        }
+    }
+
+    void initArrayElemTrackingForBinding(std::size_t bindingId, const Type& declared,
+                                         SourceSpan span) {
+        if (!declared.isFixedArray()) {
+            return;
+        }
+        const unsigned long long n64 = flatElementCountRanked(declared);
+        if (n64 == 0 || n64 > kMaxArrayElemsForDA) {
+            diagnostics_.error(span,
+                               "fixed array is too large for per-element definite assignment "
+                               "tracking in this compiler version");
+            return;
+        }
+        arrayElemAssign_.insert_or_assign(bindingId,
+                                          std::vector<std::uint8_t>(static_cast<std::size_t>(n64),
+                                                                    0));
+    }
+
+    void markArrayBindingFullyAssigned(std::size_t bindingId) {
+        arrayElemAssign_.erase(bindingId);
+        definiteAssign_.insert(bindingId);
+    }
+
+    void noteIndexedStoreToLocal(std::size_t bindingId, const Type& rootArrayTy,
+                                 const std::vector<ExprInfo>& indexInfos) {
+        if (!rootArrayTy.isFixedArray()) {
+            return;
+        }
+        const unsigned long long n64 = flatElementCountRanked(rootArrayTy);
+        if (n64 == 0 || n64 > kMaxArrayElemsForDA) {
+            return;
+        }
+        const std::size_t n = static_cast<std::size_t>(n64);
+        for (const ExprInfo& ii : indexInfos) {
+            if (!ii.type.isInteger() || !ii.isConstant || !ii.integerValue) {
+                arrayElemAssign_.insert_or_assign(bindingId, std::vector<std::uint8_t>(n, 0));
+                definiteAssign_.erase(bindingId);
+                return;
+            }
+        }
+        std::vector<unsigned long long> vals;
+        vals.reserve(indexInfos.size());
+        for (const ExprInfo& ii : indexInfos) {
+            vals.push_back(*ii.integerValue);
+        }
+        if (vals.size() != rootArrayTy.arrayDimensions.size()) {
+            return;
+        }
+        const std::optional<std::size_t> offset = constIndicesToFlatOffset(rootArrayTy, vals);
+        if (!offset) {
+            return;
+        }
+        auto it = arrayElemAssign_.find(bindingId);
+        if (it == arrayElemAssign_.end()) {
+            arrayElemAssign_.insert_or_assign(bindingId, std::vector<std::uint8_t>(n, 0));
+            it = arrayElemAssign_.find(bindingId);
+        }
+        std::vector<std::uint8_t>& mask = it->second;
+        if (*offset >= mask.size()) {
+            return;
+        }
+        mask[*offset] = 1;
+        if (vectorAllOnes(mask)) {
+            definiteAssign_.insert(bindingId);
+            arrayElemAssign_.erase(bindingId);
+        }
+    }
+
+    void requireIndexedScalarReadable(const ValueSymbol& symbol, const Type& rootTy,
+                                      const std::vector<ExprInfo>& indexInfos, SourceSpan useSpan,
+                                      std::string_view nameForDiag) {
+        if (symbol.isConst) {
+            return;
+        }
+        if (definiteAssign_.contains(symbol.bindingId)) {
+            return;
+        }
+        bool allConst = true;
+        std::vector<unsigned long long> vals;
+        vals.reserve(indexInfos.size());
+        for (const ExprInfo& ii : indexInfos) {
+            if (!ii.type.isInteger() || !ii.isConstant || !ii.integerValue) {
+                allConst = false;
+                break;
+            }
+            vals.push_back(*ii.integerValue);
+        }
+        if (!allConst || vals.size() != rootTy.arrayDimensions.size()) {
+            requireReadableLocal(symbol, useSpan, nameForDiag);
+            return;
+        }
+        for (std::size_t k = 0; k < vals.size(); ++k) {
+            if (vals[k] >= rootTy.arrayDimensions[k]) {
+                return;
+            }
+        }
+        const std::optional<std::size_t> offset = constIndicesToFlatOffset(rootTy, vals);
+        if (!offset) {
+            return;
+        }
+        const auto it = arrayElemAssign_.find(symbol.bindingId);
+        if (it == arrayElemAssign_.end() || *offset >= it->second.size() ||
+            it->second[*offset] == 0) {
+            diagnostics_.error(useSpan, "indexed read may access an uninitialized element of `" +
+                                           std::string(nameForDiag) + "`");
+        }
+    }
+
+    void requireSubArraySliceReadable(const ValueSymbol& symbol, const Type& rootTy,
+                                      std::size_t prefixLen, const std::vector<ExprInfo>& indexInfos,
+                                      SourceSpan useSpan, std::string_view nameForDiag) {
+        (void)rootTy;
+        if (symbol.isConst) {
+            return;
+        }
+        if (definiteAssign_.contains(symbol.bindingId)) {
+            return;
+        }
+        if (prefixLen == 0) {
+            return;
+        }
+        bool allConst = true;
+        std::vector<unsigned long long> vals;
+        for (std::size_t i = 0; i < prefixLen; ++i) {
+            const ExprInfo& ii = indexInfos[i];
+            if (!ii.type.isInteger() || !ii.isConstant || !ii.integerValue) {
+                allConst = false;
+                break;
+            }
+            vals.push_back(*ii.integerValue);
+        }
+        if (!allConst) {
+            requireReadableLocal(symbol, useSpan, nameForDiag);
+            return;
+        }
+        Type sliceTy = symbol.type;
+        for (std::size_t i = 0; i < prefixLen; ++i) {
+            if (vals[i] >= sliceTy.arrayDimensions[0]) {
+                return;
+            }
+            sliceTy = sliceTy.afterIndex();
+        }
+        const unsigned long long spanElems = flatElementCountRanked(sliceTy);
+        if (spanElems == 0 || spanElems > kMaxArrayElemsForDA) {
+            requireReadableLocal(symbol, useSpan, nameForDiag);
+            return;
+        }
+        const std::optional<std::size_t> rangeStart = flatOffsetForPrefixIndices(symbol.type, vals);
+        if (!rangeStart) {
+            return;
+        }
+        const auto it = arrayElemAssign_.find(symbol.bindingId);
+        if (it == arrayElemAssign_.end()) {
+            diagnostics_.error(useSpan,
+                               "indexed access may read uninitialized elements of `" +
+                                   std::string(nameForDiag) + "`");
+            return;
+        }
+        for (unsigned long long i = 0; i < spanElems; ++i) {
+            const std::size_t pos = static_cast<std::size_t>(*rangeStart + i);
+            if (pos >= it->second.size() || it->second[pos] == 0) {
+                diagnostics_.error(useSpan,
+                                   "indexed access may read uninitialized elements of `" +
+                                       std::string(nameForDiag) + "`");
+                return;
+            }
         }
     }
 
@@ -642,6 +937,198 @@ private:
         }
     }
 
+    std::optional<Type> lookupLocalTypeByBindingId(std::size_t id) const {
+        for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
+            for (const auto& entry : *scope) {
+                const ValueSymbol& sym = entry.second;
+                if (!sym.isConst && sym.bindingId == id) {
+                    return sym.type;
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
+    void mergeArrayElemAssignAfterIf(const ArrayElemMap& beforeArr,
+                                     const std::unordered_set<std::size_t>& beforeDef,
+                                     const ArrayElemMap& afterThenArr,
+                                     const std::unordered_set<std::size_t>& afterThenDef,
+                                     const ArrayElemMap& afterElseArr,
+                                     const std::unordered_set<std::size_t>& afterElseDef,
+                                     bool hasElse, bool thenReturns, bool elseReturns) {
+        auto promoteFullMasks = [&]() {
+            for (auto it = arrayElemAssign_.begin(); it != arrayElemAssign_.end();) {
+                if (vectorAllOnes(it->second)) {
+                    definiteAssign_.insert(it->first);
+                    it = arrayElemAssign_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        };
+
+        auto assignArrayMap = [&](const ArrayElemMap& src) {
+            arrayElemAssign_.clear();
+            for (const auto& entry : src) {
+                if (!definiteAssign_.contains(entry.first)) {
+                    arrayElemAssign_.insert(entry);
+                }
+            }
+            promoteFullMasks();
+        };
+
+        auto collectArrayCandidatesTwo = [&](const std::unordered_set<std::size_t>& d0,
+                                           const ArrayElemMap& a0,
+                                           const std::unordered_set<std::size_t>& d1,
+                                           const ArrayElemMap& a1) {
+            std::unordered_set<std::size_t> candidates;
+            for (const auto& e : a0) {
+                candidates.insert(e.first);
+            }
+            for (const auto& e : a1) {
+                candidates.insert(e.first);
+            }
+            for (const std::size_t id : d0) {
+                const auto ty = lookupLocalTypeByBindingId(id);
+                if (ty && ty->isFixedArray()) {
+                    candidates.insert(id);
+                }
+            }
+            for (const std::size_t id : d1) {
+                const auto ty = lookupLocalTypeByBindingId(id);
+                if (ty && ty->isFixedArray()) {
+                    candidates.insert(id);
+                }
+            }
+            return candidates;
+        };
+
+        auto collectArrayCandidatesBoth = [&]() {
+            std::unordered_set<std::size_t> candidates;
+            for (const auto& e : afterThenArr) {
+                candidates.insert(e.first);
+            }
+            for (const auto& e : afterElseArr) {
+                candidates.insert(e.first);
+            }
+            for (const std::size_t id : afterThenDef) {
+                const auto ty = lookupLocalTypeByBindingId(id);
+                if (ty && ty->isFixedArray()) {
+                    candidates.insert(id);
+                }
+            }
+            for (const std::size_t id : afterElseDef) {
+                const auto ty = lookupLocalTypeByBindingId(id);
+                if (ty && ty->isFixedArray()) {
+                    candidates.insert(id);
+                }
+            }
+            return candidates;
+        };
+
+        auto mergeTwoWayMaps = [&](const std::unordered_set<std::size_t>& d0,
+                                   const ArrayElemMap& a0, const std::unordered_set<std::size_t>& d1,
+                                   const ArrayElemMap& a1) {
+            const std::unordered_set<std::size_t> candidates =
+                collectArrayCandidatesTwo(d0, a0, d1, a1);
+            arrayElemAssign_.clear();
+            for (const std::size_t id : candidates) {
+                if (definiteAssign_.contains(id)) {
+                    continue;
+                }
+                const auto ty = lookupLocalTypeByBindingId(id);
+                if (!ty || !ty->isFixedArray()) {
+                    continue;
+                }
+                const unsigned long long n64 = flatElementCountRanked(*ty);
+                if (n64 == 0 || n64 > kMaxArrayElemsForDA) {
+                    continue;
+                }
+                const std::size_t n = static_cast<std::size_t>(n64);
+                const std::vector<std::uint8_t> m0 = maskOrFull(d0, a0, id, n);
+                const std::vector<std::uint8_t> m1 = maskOrFull(d1, a1, id, n);
+                const std::vector<std::uint8_t> merged = bandMasks(m0, m1);
+                if (vectorAllOnes(merged)) {
+                    definiteAssign_.insert(id);
+                    continue;
+                }
+                bool any = false;
+                for (std::uint8_t b : merged) {
+                    if (b != 0) {
+                        any = true;
+                        break;
+                    }
+                }
+                if (any) {
+                    arrayElemAssign_.insert({id, merged});
+                }
+            }
+            promoteFullMasks();
+        };
+
+        auto mergeBothWayMaps = [&]() {
+            const std::unordered_set<std::size_t> candidates = collectArrayCandidatesBoth();
+            arrayElemAssign_.clear();
+            for (const std::size_t id : candidates) {
+                if (definiteAssign_.contains(id)) {
+                    continue;
+                }
+                const auto ty = lookupLocalTypeByBindingId(id);
+                if (!ty || !ty->isFixedArray()) {
+                    continue;
+                }
+                const unsigned long long n64 = flatElementCountRanked(*ty);
+                if (n64 == 0 || n64 > kMaxArrayElemsForDA) {
+                    continue;
+                }
+                const std::size_t n = static_cast<std::size_t>(n64);
+                const std::vector<std::uint8_t> mT =
+                    maskOrFull(afterThenDef, afterThenArr, id, n);
+                const std::vector<std::uint8_t> mE =
+                    maskOrFull(afterElseDef, afterElseArr, id, n);
+                const std::vector<std::uint8_t> merged = bandMasks(mT, mE);
+                if (vectorAllOnes(merged)) {
+                    definiteAssign_.insert(id);
+                    continue;
+                }
+                bool any = false;
+                for (std::uint8_t b : merged) {
+                    if (b != 0) {
+                        any = true;
+                        break;
+                    }
+                }
+                if (any) {
+                    arrayElemAssign_.insert({id, merged});
+                }
+            }
+            promoteFullMasks();
+        };
+
+        if (!hasElse) {
+            if (thenReturns) {
+                assignArrayMap(beforeArr);
+                return;
+            }
+            mergeTwoWayMaps(beforeDef, beforeArr, afterThenDef, afterThenArr);
+            return;
+        }
+
+        if (thenReturns && !elseReturns) {
+            assignArrayMap(afterElseArr);
+            return;
+        }
+        if (!thenReturns && elseReturns) {
+            assignArrayMap(afterThenArr);
+            return;
+        }
+        if (thenReturns && elseReturns) {
+            assignArrayMap(beforeArr);
+            return;
+        }
+        mergeBothWayMaps();
+    }
+
     // Resolve a value-like name in lexical scopes, then module constants.
     //
     // Returns nullptr for an unresolved name so callers can issue a diagnostic
@@ -667,12 +1154,14 @@ private:
         if (!type.isFixedArray()) {
             return;
         }
-        if (type.arrayLength == 0) {
-            diagnostics_.error(span, "fixed array length must be greater than zero");
+        for (std::uint64_t d : type.arrayDimensions) {
+            if (d == 0) {
+                diagnostics_.error(span, "fixed array length must be greater than zero");
+                return;
+            }
         }
-        const BuiltinTypeKind elem = type.arrayElement;
-        if (elem == BuiltinTypeKind::Void || elem == BuiltinTypeKind::Str ||
-            elem == BuiltinTypeKind::Invalid) {
+        if (type.kind == BuiltinTypeKind::Void || type.kind == BuiltinTypeKind::Str ||
+            type.kind == BuiltinTypeKind::Invalid) {
             diagnostics_.error(span,
                                "fixed array element cannot be `void`, `str`, or invalid");
         }
@@ -709,9 +1198,11 @@ private:
                     return false;
                 }
                 if (declared.isFixedArray()) {
-                    diagnostics_.error(let->type.span,
-                                       "fixed-size array locals require an initializer "
-                                       "until per-element definite assignment is implemented");
+                    const std::size_t id =
+                        declareLocal(let->name, let->nameSpan, declared, true);
+                    if (id != 0) {
+                        initArrayElemTrackingForBinding(id, declared, let->type.span);
+                    }
                     return false;
                 }
                 const std::size_t id =
@@ -732,6 +1223,9 @@ private:
                 declareLocal(let->name, let->nameSpan, declared, let->isMutable);
             if (id != 0) {
                 definiteAssign_.insert(id);
+                if (declared.isFixedArray()) {
+                    markArrayBindingFullyAssigned(id);
+                }
             }
             return false;
         }
@@ -762,50 +1256,78 @@ private:
             }
 
             if (const auto* indexExpr = dynamic_cast<const IndexExpr*>(assign->target.get())) {
-                const auto* baseName =
-                    dynamic_cast<const NameExpr*>(indexExpr->base.get());
-                if (!baseName) {
-                    diagnostics_.error(indexExpr->base->span,
-                                       "indexed assignment requires a local array name");
+                IndexedNameChain chain;
+                if (!peelIndexedNameChain(indexExpr, &chain)) {
+                    diagnostics_.error(assign->target->span,
+                                       "indexed assignment requires a local array name "
+                                       "with a constant index chain");
                     analyzeExpr(*assign->value, std::nullopt);
                     return false;
                 }
 
-                const ValueSymbol* symbol = lookupValue(baseName->name);
+                const ValueSymbol* symbol = lookupValue(chain.rootName->name);
                 if (!symbol) {
-                    diagnostics_.error(baseName->span,
-                                       "undefined local `" + baseName->name + "`");
+                    diagnostics_.error(chain.rootName->span,
+                                       "undefined local `" + chain.rootName->name + "`");
                     analyzeExpr(*assign->value, std::nullopt);
                     return false;
                 }
-                requireReadableLocal(*symbol, baseName->span, baseName->name);
                 if (!symbol->isMutable) {
-                    diagnostics_.error(baseName->span,
+                    diagnostics_.error(chain.rootName->span,
                                        "cannot assign through immutable array binding `" +
-                                           baseName->name + "`");
+                                           chain.rootName->name + "`");
                     analyzeExpr(*assign->value, std::nullopt);
                     return false;
                 }
                 if (!symbol->type.isFixedArray()) {
-                    diagnostics_.error(baseName->span,
+                    diagnostics_.error(chain.rootName->span,
                                        "indexed assignment requires an array local");
                     analyzeExpr(*assign->value, std::nullopt);
                     return false;
                 }
 
-                ExprInfo idx = analyzeExpr(*indexExpr->index, builtinScalar(BuiltinTypeKind::I32));
-                if (!idx.type.isInteger()) {
-                    diagnostics_.error(indexExpr->index->span,
-                                       "array index must be an integer type");
+                if (chain.indices.size() != symbol->type.arrayDimensions.size()) {
+                    diagnostics_.error(assign->target->span,
+                                       "indexed assignment must store through a scalar element "
+                                       "of `" +
+                                           typeName(symbol->type) + "`");
+                    analyzeExpr(*assign->value, std::nullopt);
+                    return false;
                 }
 
-                const Type elem = symbol->type.elementScalarType();
+                Type walk = symbol->type;
+                std::vector<ExprInfo> idxInfos;
+                idxInfos.reserve(chain.indices.size());
+                for (const Expr* idxExpr : chain.indices) {
+                    ExprInfo idx = analyzeExpr(*idxExpr, builtinScalar(BuiltinTypeKind::I32));
+                    idxInfos.push_back(idx);
+                    if (!idx.type.isInteger()) {
+                        diagnostics_.error(idxExpr->span,
+                                           "array index must be an integer type");
+                    }
+                    if (idx.isConstant && idx.integerValue) {
+                        const unsigned long long idxVal = *idx.integerValue;
+                        if (walk.arrayDimensions.empty() ||
+                            idxVal >= walk.arrayDimensions[0]) {
+                            diagnostics_.error(idxExpr->span,
+                                               "array index out of bounds for `" +
+                                                   typeName(symbol->type) + "`");
+                        }
+                    }
+                    walk = walk.afterIndex();
+                }
+
+                const Type elem = walk;
                 ExprInfo value = analyzeExpr(*assign->value, elem);
                 if (!sameType(elem, value.type)) {
                     diagnostics_.error(assign->value->span,
                                        "cannot assign value of type `" +
                                            typeName(value.type) + "` to element type `" +
                                            typeName(elem) + "`");
+                }
+
+                if (!symbol->isConst) {
+                    noteIndexedStoreToLocal(symbol->bindingId, symbol->type, idxInfos);
                 }
                 return false;
             }
@@ -824,28 +1346,38 @@ private:
         if (const auto* ifStmt = dynamic_cast<const IfStmt*>(&stmt)) {
             analyzeCondition(*ifStmt->condition, "`if` condition");
             const std::unordered_set<std::size_t> beforeIf = definiteAssign_;
+            const ArrayElemMap beforeIfArrays = arrayElemAssign_;
             const bool thenReturns = analyzeStmt(*ifStmt->thenBranch);
             const std::unordered_set<std::size_t> afterThen = definiteAssign_;
+            const ArrayElemMap afterThenArrays = arrayElemAssign_;
             definiteAssign_ = beforeIf;
+            arrayElemAssign_ = beforeIfArrays;
             bool elseReturns = false;
             std::unordered_set<std::size_t> afterElse = beforeIf;
+            ArrayElemMap afterElseArrays = beforeIfArrays;
             if (ifStmt->elseBranch) {
                 elseReturns = analyzeStmt(*ifStmt->elseBranch);
                 afterElse = definiteAssign_;
+                afterElseArrays = arrayElemAssign_;
             }
             mergeDefiniteAssignAfterIf(beforeIf, afterThen, afterElse,
                                        ifStmt->elseBranch != nullptr, thenReturns,
                                        elseReturns);
+            mergeArrayElemAssignAfterIf(beforeIfArrays, beforeIf, afterThenArrays, afterThen,
+                                        afterElseArrays, afterElse, ifStmt->elseBranch != nullptr,
+                                        thenReturns, elseReturns);
             return ifStmt->elseBranch && thenReturns && elseReturns;
         }
 
         if (const auto* whileStmt = dynamic_cast<const WhileStmt*>(&stmt)) {
             const std::unordered_set<std::size_t> saved = definiteAssign_;
+            const ArrayElemMap savedArrays = arrayElemAssign_;
             analyzeCondition(*whileStmt->condition, "`while` condition");
             ++loopDepth_;
             analyzeStmt(*whileStmt->body);
             --loopDepth_;
             definiteAssign_ = saved;
+            arrayElemAssign_ = savedArrays;
             return false;
         }
 
@@ -855,6 +1387,7 @@ private:
                 analyzeStmt(*forStmt->init);
             }
             const std::unordered_set<std::size_t> afterInit = definiteAssign_;
+            const ArrayElemMap afterInitArrays = arrayElemAssign_;
             if (forStmt->condition) {
                 analyzeCondition(*forStmt->condition, "`for` condition");
             }
@@ -867,6 +1400,7 @@ private:
             }
             --loopDepth_;
             definiteAssign_ = afterInit;
+            arrayElemAssign_ = afterInitArrays;
             popScope();
             return false;
         }
@@ -961,7 +1495,8 @@ private:
     //
     // expected is a contextual type from declarations, returns, or call
     // arguments. It is especially important for unsuffixed integer literals.
-    ExprInfo analyzeExpr(const Expr& expr, std::optional<Type> expected) {
+    ExprInfo analyzeExpr(const Expr& expr, std::optional<Type> expected,
+                         ExprCtx ctx = ExprCtx::Normal) {
         if (const auto* integer = dynamic_cast<const IntegerLiteralExpr*>(&expr)) {
             // Unsuffixed integer literals get their type from context when there
             // is one, otherwise they default to i32.
@@ -1013,7 +1548,9 @@ private:
                 }
                 return ExprInfo{.type = Type{}, .isConstant = false};
             }
-            requireReadableLocal(*symbol, name->span, name->name);
+            if (!(ctx == ExprCtx::IndexBase && symbol->type.isFixedArray())) {
+                requireReadableLocal(*symbol, name->span, name->name);
+            }
             return ExprInfo{.type = symbol->type, .isConstant = symbol->isConst};
         }
 
@@ -1032,20 +1569,20 @@ private:
         if (const auto* arrayLit = dynamic_cast<const ArrayLiteralExpr*>(&expr)) {
             if (expected && expected->isFixedArray()) {
                 const Type arr = *expected;
-                if (arrayLit->elements.size() != arr.arrayLength) {
+                if (arrayLit->elements.size() != arr.arrayDimensions[0]) {
                     diagnostics_.error(expr.span,
                                        "array literal length " +
                                            std::to_string(arrayLit->elements.size()) +
                                            " does not match type `" + typeName(arr) + "`");
                 }
-                const Type elemType = arr.elementScalarType();
+                const Type innerExpected = arr.afterIndex();
                 bool allConst = true;
                 for (const std::unique_ptr<Expr>& el : arrayLit->elements) {
-                    ExprInfo ei = analyzeExpr(*el, elemType);
-                    if (!sameType(elemType, ei.type)) {
+                    ExprInfo ei = analyzeExpr(*el, innerExpected);
+                    if (!sameType(innerExpected, ei.type)) {
                         diagnostics_.error(el->span,
                                            "array element type `" + typeName(ei.type) +
-                                               "` does not match `" + typeName(elemType) +
+                                               "` does not match `" + typeName(innerExpected) +
                                                "`");
                     }
                     allConst = allConst && ei.isConstant;
@@ -1071,21 +1608,87 @@ private:
                 allConst = allConst && ei.isConstant;
             }
 
-            if (first.type.form != Type::Form::Builtin) {
+            if (first.type.isVoid() || first.type.isString() || first.type.isInvalid()) {
                 diagnostics_.error(expr.span,
-                                   "cannot infer array type from non-scalar elements");
+                                   "cannot infer array type from these element types");
                 return ExprInfo{.type = Type{}, .isConstant = false};
             }
 
-            const Type inferred{.form = Type::Form::FixedArray,
-                                .kind = BuiltinTypeKind::Invalid,
-                                .arrayElement = first.type.kind,
-                                .arrayLength = arrayLit->elements.size()};
+            if (first.type.isFixedArray()) {
+                Type inferred = first.type;
+                inferred.arrayDimensions.insert(inferred.arrayDimensions.begin(),
+                                                arrayLit->elements.size());
+                return ExprInfo{.type = inferred, .isConstant = allConst};
+            }
+
+            const Type inferred{.kind = first.type.kind,
+                                .arrayDimensions = {arrayLit->elements.size()}};
             return ExprInfo{.type = inferred, .isConstant = allConst};
         }
 
         if (const auto* indexExpr = dynamic_cast<const IndexExpr*>(&expr)) {
-            ExprInfo base = analyzeExpr(*indexExpr->base, std::nullopt);
+            if (ctx == ExprCtx::Normal) {
+                IndexedNameChain chain;
+                if (peelIndexedNameChain(indexExpr, &chain)) {
+                    const ValueSymbol* sym = lookupValue(chain.rootName->name);
+                    if (!sym) {
+                        if (functions_.contains(chain.rootName->name)) {
+                            diagnostics_.error(chain.rootName->span,
+                                               "function `" + chain.rootName->name +
+                                                   "` cannot be used as a value");
+                        } else {
+                            diagnostics_.error(chain.rootName->span,
+                                               "undefined name `" + chain.rootName->name + "`");
+                        }
+                        return ExprInfo{.type = Type{}, .isConstant = false};
+                    }
+                    Type walk = sym->type;
+                    if (!walk.isFixedArray()) {
+                        diagnostics_.error(chain.rootName->span,
+                                           "indexed access requires an array value");
+                        return ExprInfo{.type = Type{}, .isConstant = false};
+                    }
+                    if (chain.indices.size() > walk.arrayDimensions.size()) {
+                        diagnostics_.error(expr.span, "too many index operations for type `" +
+                                                          typeName(sym->type) + "`");
+                        return ExprInfo{.type = Type{}, .isConstant = false};
+                    }
+                    std::vector<ExprInfo> idxInfos;
+                    idxInfos.reserve(chain.indices.size());
+                    for (const Expr* idxExpr : chain.indices) {
+                        ExprInfo ii =
+                            analyzeExpr(*idxExpr, builtinScalar(BuiltinTypeKind::I32));
+                        idxInfos.push_back(ii);
+                        if (!ii.type.isInteger()) {
+                            diagnostics_.error(idxExpr->span,
+                                               "array index must be an integer type");
+                        }
+                        if (ii.isConstant && ii.integerValue) {
+                            const unsigned long long idxVal = *ii.integerValue;
+                            if (walk.arrayDimensions.empty() ||
+                                idxVal >= walk.arrayDimensions[0]) {
+                                diagnostics_.error(idxExpr->span,
+                                                   "array index out of bounds for `" +
+                                                       typeName(sym->type) + "`");
+                            }
+                        }
+                        walk = walk.afterIndex();
+                    }
+                    if (!sym->isConst && sym->type.isFixedArray()) {
+                        if (walk.isFixedArray()) {
+                            requireSubArraySliceReadable(*sym, sym->type, chain.indices.size(),
+                                                         idxInfos, expr.span, chain.rootName->name);
+                        } else {
+                            requireIndexedScalarReadable(*sym, sym->type, idxInfos, expr.span,
+                                                         chain.rootName->name);
+                        }
+                    }
+                    return ExprInfo{.type = walk, .isConstant = false};
+                }
+            }
+
+            ExprInfo base =
+                analyzeExpr(*indexExpr->base, std::nullopt, ExprCtx::IndexBase);
             ExprInfo index =
                 analyzeExpr(*indexExpr->index, builtinScalar(BuiltinTypeKind::I32));
 
@@ -1102,20 +1705,20 @@ private:
 
             if (index.isConstant && index.integerValue) {
                 const unsigned long long idxVal = *index.integerValue;
-                if (idxVal >= base.type.arrayLength) {
+                if (idxVal >= base.type.arrayDimensions[0]) {
                     diagnostics_.error(indexExpr->index->span,
                                        "array index out of bounds for `" +
                                            typeName(base.type) + "`");
                 }
             }
 
-            return ExprInfo{.type = base.type.elementScalarType(), .isConstant = false};
+            return ExprInfo{.type = base.type.afterIndex(), .isConstant = false};
         }
 
         if (const auto* paren = dynamic_cast<const ParenExpr*>(&expr)) {
             // Parentheses affect parsing but not semantic type, so forward the
             // expected type into the inner expression.
-            return analyzeExpr(*paren->inner, expected);
+            return analyzeExpr(*paren->inner, expected, ctx);
         }
 
         return ExprInfo{.type = Type{}, .isConstant = false};
@@ -1551,6 +2154,7 @@ private:
     // Loops use a deliberately conservative rule: body assignments do not
     // strengthen state after the loop (see docs/design/definite_assignment.md).
     std::unordered_set<std::size_t> definiteAssign_;
+    ArrayElemMap arrayElemAssign_;
     std::vector<std::vector<std::size_t>> scopeBindingIds_;
     std::size_t nextBindingId_ = 1;
 

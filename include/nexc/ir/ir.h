@@ -15,28 +15,33 @@ namespace nexc::ir {
 
 // IR Type is the backend-facing version of a nex type.
 //
-// Scalar types wrap BuiltinTypeKind. Fixed arrays `[T; N]` store element kind and
-// length for layout and lowering.
+// Scalar types use an empty `arrayDimensions`. Fixed-size arrays store outer-to-inner
+// dimension lengths in `arrayDimensions` and the leaf scalar in `kind`.
 struct Type {
-    enum class Shape { Scalar, FixedArray };
-
-    Shape shape = Shape::Scalar;
     BuiltinTypeKind kind = BuiltinTypeKind::Invalid;
-
-    BuiltinTypeKind elementKind = BuiltinTypeKind::Invalid;
-    std::uint64_t arrayLength = 0;
+    std::vector<std::uint64_t> arrayDimensions;
 
     // Return true for the special "no value" type used by void functions.
     //
-    // Lowering frequently needs this check because void functions have no MLIR
-    // result type and void calls have no ValueRef result.
+    // Lowering frequently needs this check because MLIR function types represent "no result"
+    // by omitting the result type entirely, not by using a first-class void value.
     bool isVoid() const {
-        return shape == Shape::Scalar && kind == BuiltinTypeKind::Void;
+        return arrayDimensions.empty() && kind == BuiltinTypeKind::Void;
     }
 
-    bool isFixedArray() const { return shape == Shape::FixedArray; }
+    bool isFixedArray() const { return !arrayDimensions.empty(); }
 
-    // Element scalar type for `[T; N]` (for loads/stores and diagnostics).
+    Type afterIndex() const {
+        Type t{.kind = kind, .arrayDimensions = arrayDimensions};
+        if (!t.arrayDimensions.empty()) {
+            t.arrayDimensions.erase(t.arrayDimensions.begin());
+        }
+        return t;
+    }
+
+    Type elementScalarType() const { return Type{.kind = kind, .arrayDimensions = {}}; }
+
+    // Element scalar type for memref element MLIR lowering (leaf `T` of `[… x T]`).
     Type elementType() const;
 
     // Return true for fixed-width integer types.

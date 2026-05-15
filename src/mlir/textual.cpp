@@ -9,6 +9,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Verifier.h"
 #include "llvm/ADT/SmallVector.h"
@@ -150,7 +151,7 @@ struct StringValue {
 
 unsigned integerBitWidth(ir::Type type) {
     if (type.isFixedArray()) {
-        return integerBitWidth(type.elementType());
+        return integerBitWidth(type.elementScalarType());
     }
     switch (type.kind) {
     case BuiltinTypeKind::I8:
@@ -176,7 +177,7 @@ unsigned integerBitWidth(ir::Type type) {
 
 bool isUnsignedInteger(ir::Type type) {
     if (type.isFixedArray()) {
-        return isUnsignedInteger(type.elementType());
+        return isUnsignedInteger(type.elementScalarType());
     }
     switch (type.kind) {
     case BuiltinTypeKind::U8:
@@ -230,21 +231,49 @@ bool isUnsignedInteger(ir::Type type) {
     if (!arrayType.isFixedArray()) {
         throw std::logic_error("rankedArrayMemRefType expects a fixed array IR type");
     }
-    llvm::SmallVector<int64_t, 1> shape;
-    shape.push_back(static_cast<int64_t>(arrayType.arrayLength));
-    const ::mlir::Type elemTy = mlirType(builder, arrayType.elementType());
+    llvm::SmallVector<int64_t, 4> shape;
+    shape.reserve(arrayType.arrayDimensions.size());
+    for (std::uint64_t d : arrayType.arrayDimensions) {
+        shape.push_back(static_cast<int64_t>(d));
+    }
+    const ::mlir::Type elemTy = mlirType(builder, arrayType.elementScalarType());
     return ::mlir::MemRefType::get(shape, elemTy);
+}
+
+// MLIR type used at function boundaries (parameters, returns, call results).
+//
+// Fixed arrays are passed and returned as ranked `memref<NxT>` values (same
+// representation as array temporaries from literals and local slots). Scalars
+// use plain integer/bool MLIR types via `mlirType`.
+::mlir::Type mlirAbiType(::mlir::OpBuilder& builder, ir::Type type) {
+    if (type.isFixedArray()) {
+        return rankedArrayMemRefType(builder, type);
+    }
+    return mlirType(builder, type);
 }
 
 void copyRankedMemRef(::mlir::OpBuilder& builder, ::mlir::Location loc,
                       ::mlir::Value from, ::mlir::Value to, ir::Type arrayType) {
-    const int64_t n = static_cast<int64_t>(arrayType.arrayLength);
-    for (int64_t i = 0; i < n; ++i) {
-        auto idx = builder.create<::mlir::arith::ConstantIndexOp>(loc, i);
+    unsigned long long total = 1;
+    for (std::uint64_t d : arrayType.arrayDimensions) {
+        total *= d;
+    }
+    for (unsigned long long flat = 0; flat < total; ++flat) {
+        unsigned long long rem = flat;
+        llvm::SmallVector<::mlir::Value, 4> idxVals;
+        for (std::size_t dim = 0; dim < arrayType.arrayDimensions.size(); ++dim) {
+            unsigned long long stride = 1;
+            for (std::size_t j = dim + 1; j < arrayType.arrayDimensions.size(); ++j) {
+                stride *= arrayType.arrayDimensions[j];
+            }
+            const int64_t coord = static_cast<int64_t>(rem / stride);
+            rem %= stride;
+            auto idxConst = builder.create<::mlir::arith::ConstantIndexOp>(loc, coord);
+            idxVals.push_back(idxConst.getResult());
+        }
         auto loaded =
-            builder.create<::mlir::memref::LoadOp>(loc, from, idx.getResult());
-        builder.create<::mlir::memref::StoreOp>(loc, loaded.getResult(), to,
-                                                idx.getResult());
+            builder.create<::mlir::memref::LoadOp>(loc, from, idxVals);
+        builder.create<::mlir::memref::StoreOp>(loc, loaded.getResult(), to, idxVals);
     }
 }
 
@@ -316,14 +345,14 @@ public:
         // structured Core control flow maps onto MLIR's structured `scf` dialect.
         llvm::SmallVector<::mlir::Type> parameterTypes;
         for (const ir::Parameter& parameter : function_.parameters) {
-            parameterTypes.push_back(mlirType(builder_, parameter.type));
+            parameterTypes.push_back(mlirAbiType(builder_, parameter.type));
         }
 
         llvm::SmallVector<::mlir::Type> resultTypes;
         if (usesNativeMainResult()) {
             resultTypes.push_back(builder_.getI32Type());
         } else if (!function_.returnType.isVoid()) {
-            resultTypes.push_back(mlirType(builder_, function_.returnType));
+            resultTypes.push_back(mlirAbiType(builder_, function_.returnType));
         }
 
         const ::mlir::FunctionType type =
@@ -638,6 +667,20 @@ private:
                 constValues.emplace(result.id, value);
                 break;
             }
+            case ir::Operation::Kind::ArrayLiteral: {
+                const ir::ValueRef result = requiredValue(op.result, "const array literal");
+                auto slot = builder_.create<::mlir::memref::AllocaOp>(
+                    loc_, rankedArrayMemRefType(builder_, result.type));
+                for (std::size_t i = 0; i < op.arguments.size(); ++i) {
+                    auto idx = builder_.create<::mlir::arith::ConstantIndexOp>(
+                        loc_, static_cast<int64_t>(i));
+                    const ::mlir::Value elem = lookupConstValue(op.arguments[i]);
+                    builder_.create<::mlir::memref::StoreOp>(loc_, elem, slot.getResult(),
+                                                            idx.getResult());
+                }
+                constValues.emplace(result.id, slot.getResult());
+                break;
+            }
             case ir::Operation::Kind::LoadConst: {
                 const ir::ValueRef result = requiredValue(op.result, "nested const load");
                 const auto nested = constants_.find(op.text);
@@ -768,12 +811,31 @@ private:
         auto slot = builder_.create<::mlir::memref::AllocaOp>(
             loc_, rankedArrayMemRefType(builder_, result.type));
 
+        const ir::Type innerTy = result.type.afterIndex();
         for (std::size_t i = 0; i < operation.arguments.size(); ++i) {
             auto idx =
                 builder_.create<::mlir::arith::ConstantIndexOp>(loc_, static_cast<int64_t>(i));
             const ::mlir::Value elem = lookupValue(operation.arguments[i]);
-            builder_.create<::mlir::memref::StoreOp>(loc_, elem, slot.getResult(),
-                                                       idx.getResult());
+            const ir::Type argTy = operation.arguments[i].type;
+            if (argTy.isFixedArray()) {
+                llvm::SmallVector<::mlir::OpFoldResult> offsets;
+                offsets.push_back(idx.getResult());
+                llvm::SmallVector<::mlir::OpFoldResult> sizes;
+                llvm::SmallVector<::mlir::OpFoldResult> strides;
+                for (std::size_t d = 1; d < result.type.arrayDimensions.size(); ++d) {
+                    sizes.push_back(builder_.getIndexAttr(
+                        static_cast<int64_t>(result.type.arrayDimensions[d])));
+                    strides.push_back(builder_.getIndexAttr(1));
+                }
+                const ::mlir::MemRefType sliceTy =
+                    rankedArrayMemRefType(builder_, innerTy);
+                auto sub = builder_.create<::mlir::memref::SubViewOp>(loc_, sliceTy, slot.getResult(),
+                                                                       offsets, sizes, strides);
+                copyRankedMemRef(builder_, loc_, elem, sub.getResult(), argTy);
+            } else {
+                builder_.create<::mlir::memref::StoreOp>(loc_, elem, slot.getResult(),
+                                                         idx.getResult());
+            }
         }
 
         bindValue(result, slot.getResult());
@@ -786,11 +848,37 @@ private:
         const ir::ValueRef index =
             requiredValue(operation.right, "indexed load index");
 
+        const ::mlir::Value baseVal = lookupValue(base);
         const ::mlir::Value idx =
             memrefIndexFromValue(builder_, loc_, lookupValue(index));
-        auto loaded = builder_.create<::mlir::memref::LoadOp>(
-            loc_, lookupValue(base), idx);
-        bindValue(result, loaded.getResult());
+        const ir::Type baseTy = base.type;
+        if (!baseTy.isFixedArray()) {
+            throw std::logic_error("indexed load base must be a fixed array");
+        }
+        if (baseTy.arrayDimensions.size() == 1) {
+            auto loaded = builder_.create<::mlir::memref::LoadOp>(loc_, baseVal, idx);
+            bindValue(result, loaded.getResult());
+            return;
+        }
+        llvm::SmallVector<::mlir::OpFoldResult> offsets;
+        offsets.push_back(idx);
+        llvm::SmallVector<::mlir::OpFoldResult> sizes;
+        llvm::SmallVector<::mlir::OpFoldResult> strides;
+        for (std::size_t i = 1; i < baseTy.arrayDimensions.size(); ++i) {
+            sizes.push_back(builder_.getIndexAttr(
+                static_cast<int64_t>(baseTy.arrayDimensions[i])));
+            strides.push_back(builder_.getIndexAttr(1));
+        }
+        auto srcTy = ::mlir::cast<::mlir::MemRefType>(baseVal.getType());
+        const ::mlir::Type elemTy = srcTy.getElementType();
+        llvm::SmallVector<int64_t> resShape;
+        for (std::size_t i = 1; i < baseTy.arrayDimensions.size(); ++i) {
+            resShape.push_back(static_cast<int64_t>(baseTy.arrayDimensions[i]));
+        }
+        const ::mlir::MemRefType resTy = ::mlir::MemRefType::get(resShape, elemTy);
+        auto sub = builder_.create<::mlir::memref::SubViewOp>(loc_, resTy, baseVal, offsets,
+                                                               sizes, strides);
+        bindValue(result, sub.getResult());
     }
 
     void lowerIndexStore(const ir::Operation& operation) {
@@ -801,10 +889,16 @@ private:
         const ir::ValueRef index =
             requiredValue(operation.right, "indexed store index");
 
+        const ::mlir::Value baseVal = lookupValue(base);
         const ::mlir::Value idx =
             memrefIndexFromValue(builder_, loc_, lookupValue(index));
-        builder_.create<::mlir::memref::StoreOp>(loc_, lookupValue(stored),
-                                                  lookupValue(base), idx);
+        const ir::Type baseTy = base.type;
+        if (!baseTy.isFixedArray() || baseTy.arrayDimensions.size() != 1) {
+            throw std::logic_error(
+                "indexed store expects a rank-1 memref base (see typed IR builder)");
+        }
+        const ::mlir::Value toStore = lookupValue(stored);
+        builder_.create<::mlir::memref::StoreOp>(loc_, toStore, baseVal, idx);
     }
 
     // Lower assignment to an existing local slot.
@@ -818,8 +912,12 @@ private:
         if (slot == localSlots_.end()) {
             throw std::logic_error("MLIR lowering stored to an unknown local slot");
         }
-        builder_.create<::mlir::memref::StoreOp>(loc_, lookupValue(stored),
-                                                 slot->second);
+        const ::mlir::Value src = lookupValue(stored);
+        if (stored.type.isFixedArray()) {
+            copyRankedMemRef(builder_, loc_, src, slot->second, stored.type);
+            return;
+        }
+        builder_.create<::mlir::memref::StoreOp>(loc_, src, slot->second);
     }
 
     // Convert a condition-like IR operand into the `i1` condition SSA value that
@@ -975,13 +1073,13 @@ private:
         }
 
         llvm::SmallVector<::mlir::Value> arguments;
-        for (const ir::ValueRef argument : operation.arguments) {
+        for (const ir::ValueRef& argument : operation.arguments) {
             arguments.push_back(lookupValue(argument));
         }
 
         llvm::SmallVector<::mlir::Type> resultTypes;
         if (operation.result) {
-            resultTypes.push_back(mlirType(builder_, operation.result->type));
+            resultTypes.push_back(mlirAbiType(builder_, operation.result->type));
         }
 
         auto call = builder_.create<::mlir::func::CallOp>(
@@ -1766,6 +1864,33 @@ std::string textualType(ir::Type type) {
     }
 }
 
+// MLIR memref type for a local slot (`let` / `let mut`) or ranked array SSA value.
+std::string textualMemrefSlotType(ir::Type storage) {
+    if (storage.isFixedArray()) {
+        std::string s = "memref<";
+        for (std::size_t i = 0; i < storage.arrayDimensions.size(); ++i) {
+            if (i != 0) {
+                s += 'x';
+            }
+            s += std::to_string(storage.arrayDimensions[i]);
+        }
+        s += 'x';
+        s += textualType(storage.elementScalarType());
+        s += '>';
+        return s;
+    }
+    return std::string("memref<") + textualType(storage) + ">";
+}
+
+// Function parameter or return position: scalars are plain `i32`/`i1`; arrays are
+// ranked `memref<NxT>` matching the real MLIR ABI lowering.
+std::string textualFuncBoundaryType(ir::Type type) {
+    if (type.isFixedArray()) {
+        return textualMemrefSlotType(type);
+    }
+    return textualType(type);
+}
+
 // Choose a stable MLIR-looking name for integer constants in the fallback path.
 //
 // Real MLIR prints constants as names like `%c42_i32`; using the same convention
@@ -1827,9 +1952,14 @@ public:
     // The dumper writes directly to the module stream and borrows the IR
     // Function. It keeps its own maps from IR values/locals to textual MLIR names
     // because no real MLIR Value objects exist in this build configuration.
-    TextualFunctionDumper(std::ostream& out, const ir::Function& function)
+    // `constants` may be null when the module has no `const` or the function never
+    // uses `LoadConst`.
+    TextualFunctionDumper(
+        std::ostream& out, const ir::Function& function,
+        const std::unordered_map<std::string, const ir::Const*>* constants = nullptr)
         : out_(out),
-          function_(function) {}
+          function_(function),
+          constants_(constants) {}
 
     // Emit the textual `func.func` wrapper and then dump the function body.
     //
@@ -1846,12 +1976,12 @@ public:
             const ir::Parameter& parameter = function_.parameters[i];
             const std::string argumentName = "%arg" + std::to_string(i);
             localValues_.emplace(parameter.local.id, argumentName);
-            out_ << argumentName << ": " << textualType(parameter.type);
+            out_ << argumentName << ": " << textualFuncBoundaryType(parameter.type);
         }
         out_ << ')';
 
         if (!function_.returnType.isVoid()) {
-            out_ << " -> " << textualType(function_.returnType);
+            out_ << " -> " << textualFuncBoundaryType(function_.returnType);
         }
         out_ << " {\n";
 
@@ -1899,12 +2029,22 @@ private:
             dumpLoadLocal(operation);
             return false;
         case ir::Operation::Kind::LoadConst:
-            throw std::logic_error("backend limitation: module constants are not lowered to MLIR yet");
+            dumpLoadConst(operation);
+            return false;
         case ir::Operation::Kind::DeclareLocal:
             dumpDeclareLocal(operation);
             return false;
         case ir::Operation::Kind::StoreLocal:
             dumpStoreLocal(operation);
+            return false;
+        case ir::Operation::Kind::ArrayLiteral:
+            dumpArrayLiteral(operation);
+            return false;
+        case ir::Operation::Kind::IndexLoad:
+            dumpIndexLoad(operation);
+            return false;
+        case ir::Operation::Kind::IndexStore:
+            dumpIndexStore(operation);
             return false;
         case ir::Operation::Kind::Unary:
             dumpUnary(operation);
@@ -1932,6 +2072,133 @@ private:
         default:
             throw std::logic_error("textual MLIR lowering encountered an unsupported operation");
         }
+    }
+
+    // Lower a module `const` initializer to textual MLIR for `LoadConst` replay.
+    //
+    // Supports the same small subset as real MLIR const lowering: integer/bool
+    // literals, array literals of those, and nested `const` references.
+    std::string emitConstInitializerOperations(const ir::Const& c) {
+        std::unordered_map<std::size_t, std::string> vals;
+        auto lookupVal = [&](ir::ValueRef ref) -> std::string {
+            const auto it = vals.find(ref.id);
+            if (it == vals.end()) {
+                throw std::logic_error("textual const lowering used a value before definition");
+            }
+            return it->second;
+        };
+
+        for (const ir::Operation& op : c.initializer.operations) {
+            switch (op.kind) {
+            case ir::Operation::Kind::IntegerLiteral: {
+                const ir::ValueRef lit = requiredValue(op.result, "const int literal");
+                if (lit.type.kind != BuiltinTypeKind::I32) {
+                    throw std::logic_error(
+                        "textual const lowering only supports i32 integer literals");
+                }
+                const std::string name = nextValueName();
+                out_ << indent() << name << " = arith.constant " << parseIntegerLiteral(op.text)
+                     << " : i32\n";
+                vals.emplace(lit.id, name);
+                break;
+            }
+            case ir::Operation::Kind::BoolLiteral: {
+                const ir::ValueRef lit = requiredValue(op.result, "const bool literal");
+                const std::string name = op.boolValue ? "%true" : "%false";
+                out_ << indent() << name << " = arith.constant "
+                     << (op.boolValue ? "true" : "false") << '\n';
+                vals.emplace(lit.id, name);
+                break;
+            }
+            case ir::Operation::Kind::ArrayLiteral: {
+                const ir::ValueRef res = requiredValue(op.result, "const array literal");
+                const std::string slot = nextValueName();
+                out_ << indent() << slot << " = memref.alloca() : "
+                     << textualMemrefSlotType(res.type) << "\n";
+                for (std::size_t i = 0; i < op.arguments.size(); ++i) {
+                    const std::string idxn = nextValueName();
+                    out_ << indent() << idxn << " = arith.constant " << i << " : index\n";
+                    out_ << indent() << "memref.store " << lookupVal(op.arguments[i]) << ", "
+                         << slot << "[" << idxn << "] : " << textualMemrefSlotType(res.type)
+                         << "\n";
+                }
+                vals.emplace(res.id, slot);
+                break;
+            }
+            case ir::Operation::Kind::LoadConst: {
+                const ir::ValueRef res = requiredValue(op.result, "nested const load");
+                if (!constants_) {
+                    throw std::logic_error("textual MLIR lowering has no const map for LoadConst");
+                }
+                const auto nested = constants_->find(op.text);
+                if (nested == constants_->end()) {
+                    throw std::logic_error("textual const lowering loaded an unknown const");
+                }
+                vals.emplace(res.id, emitConstInitializerOperations(*nested->second));
+                break;
+            }
+            default:
+                throw std::logic_error(
+                    "textual const lowering hit an unsupported initializer operation");
+            }
+        }
+
+        const ir::ValueRef init =
+            requiredValue(c.initializer.terminator.value, "const initializer");
+        return lookupVal(init);
+    }
+
+    void dumpLoadConst(const ir::Operation& operation) {
+        const ir::ValueRef result = requiredValue(operation.result, "const load");
+        if (!constants_) {
+            throw std::logic_error("textual MLIR lowering has no module const map");
+        }
+        const auto found = constants_->find(operation.text);
+        if (found == constants_->end()) {
+            throw std::logic_error("textual MLIR lowering loaded an unknown module constant");
+        }
+        const std::string valueName = emitConstInitializerOperations(*found->second);
+        bindValue(result, valueName);
+    }
+
+    void dumpArrayLiteral(const ir::Operation& operation) {
+        const ir::ValueRef result = requiredValue(operation.result, "array literal");
+        if (result.type.arrayDimensions.size() != 1) {
+            throw std::logic_error(
+                "textual MLIR dump: nested array literals require the real MLIR path");
+        }
+        const std::string slot = nextValueName();
+        out_ << indent() << slot << " = memref.alloca() : " << textualMemrefSlotType(result.type)
+             << "\n";
+        for (std::size_t i = 0; i < operation.arguments.size(); ++i) {
+            const std::string idxn = nextValueName();
+            out_ << indent() << idxn << " = arith.constant " << i << " : index\n";
+            out_ << indent() << "memref.store " << lookupValue(operation.arguments[i]) << ", "
+                 << slot << "[" << idxn << "] : " << textualMemrefSlotType(result.type) << "\n";
+        }
+        bindValue(result, slot);
+    }
+
+    void dumpIndexLoad(const ir::Operation& operation) {
+        const ir::ValueRef result = requiredValue(operation.result, "index load");
+        const ir::ValueRef base = requiredValue(operation.left, "indexed load base");
+        const ir::ValueRef index = requiredValue(operation.right, "indexed load index");
+        if (base.type.arrayDimensions.size() != 1) {
+            throw std::logic_error(
+                "textual MLIR dump: ranked index loads require the real MLIR path");
+        }
+        const std::string name = nextValueName();
+        out_ << indent() << name << " = memref.load " << lookupValue(base) << "["
+             << lookupValue(index) << "] : " << textualMemrefSlotType(base.type) << "\n";
+        bindValue(result, name);
+    }
+
+    void dumpIndexStore(const ir::Operation& operation) {
+        const ir::ValueRef stored = requiredValue(operation.value, "indexed store value");
+        const ir::ValueRef base = requiredValue(operation.left, "indexed store base");
+        const ir::ValueRef index = requiredValue(operation.right, "indexed store index");
+        out_ << indent() << "memref.store " << lookupValue(stored) << ", " << lookupValue(base)
+             << "[" << lookupValue(index) << "] : " << textualMemrefSlotType(base.type) << "\n";
     }
 
     // Emit an i32 integer literal as `arith.constant`.
@@ -1980,9 +2247,14 @@ private:
             throw std::logic_error("textual MLIR lowering loaded an unknown local slot");
         }
 
+        if (result.type.isFixedArray()) {
+            bindValue(result, slot->second);
+            return;
+        }
+
         const std::string name = nextValueName();
-        out_ << indent() << name << " = memref.load " << slot->second
-             << "[] : memref<" << textualType(result.type) << ">\n";
+        out_ << indent() << name << " = memref.load " << slot->second << "[] : memref<"
+             << textualType(result.type) << ">\n";
         bindValue(result, name);
     }
 
@@ -2007,8 +2279,8 @@ private:
         const std::string slotName = nextValueName();
         if (!operation.value) {
             const ir::Type storage = irLocalStorageType(operation.local);
-            out_ << indent() << slotName << " = memref.alloca() : memref<"
-                 << textualType(storage) << ">\n";
+            out_ << indent() << slotName << " = memref.alloca() : "
+                 << textualMemrefSlotType(storage) << "\n";
             const auto [_, inserted] = localSlots_.emplace(operation.local.id, slotName);
             if (!inserted) {
                 throw std::logic_error("textual MLIR lowering declared a local slot twice");
@@ -2017,16 +2289,47 @@ private:
         }
 
         const ir::ValueRef init = *operation.value;
-        out_ << indent() << slotName << " = memref.alloca() : memref<"
-             << textualType(init.type) << ">\n";
+        out_ << indent() << slotName << " = memref.alloca() : " << textualMemrefSlotType(init.type)
+             << "\n";
 
         const auto [__, insertedInit] = localSlots_.emplace(operation.local.id, slotName);
         if (!insertedInit) {
             throw std::logic_error("textual MLIR lowering declared a local slot twice");
         }
 
-        out_ << indent() << "memref.store " << lookupValue(init) << ", " << slotName
-             << "[] : memref<" << textualType(init.type) << ">\n";
+        if (init.type.isFixedArray()) {
+            unsigned long long total = 1;
+            for (std::uint64_t d : init.type.arrayDimensions) {
+                total *= d;
+            }
+            for (unsigned long long flat = 0; flat < total; ++flat) {
+                unsigned long long rem = flat;
+                std::string indexList;
+                for (std::size_t dim = 0; dim < init.type.arrayDimensions.size(); ++dim) {
+                    unsigned long long stride = 1;
+                    for (std::size_t j = dim + 1; j < init.type.arrayDimensions.size(); ++j) {
+                        stride *= init.type.arrayDimensions[j];
+                    }
+                    const int64_t coord = static_cast<int64_t>(rem / stride);
+                    rem %= stride;
+                    const std::string idxn = nextValueName();
+                    out_ << indent() << idxn << " = arith.constant " << coord << " : index\n";
+                    if (dim != 0) {
+                        indexList += ", ";
+                    }
+                    indexList += idxn;
+                }
+                const std::string elem = nextValueName();
+                out_ << indent() << elem << " = memref.load " << lookupValue(init) << "[" << indexList
+                     << "] : " << textualMemrefSlotType(init.type) << "\n";
+                out_ << indent() << "memref.store " << elem << ", " << slotName << "[" << indexList
+                     << "] : " << textualMemrefSlotType(init.type) << "\n";
+            }
+            return;
+        }
+
+        out_ << indent() << "memref.store " << lookupValue(init) << ", " << slotName << "[] : "
+             << "memref<" << textualType(init.type) << ">\n";
     }
 
     // Emit assignment to a local slot as `memref.store`.
@@ -2039,8 +2342,38 @@ private:
         if (slot == localSlots_.end()) {
             throw std::logic_error("textual MLIR lowering stored to an unknown local slot");
         }
-        out_ << indent() << "memref.store " << lookupValue(stored) << ", "
-             << slot->second << "[] : memref<" << textualType(stored.type) << ">\n";
+        if (stored.type.isFixedArray()) {
+            unsigned long long total = 1;
+            for (std::uint64_t d : stored.type.arrayDimensions) {
+                total *= d;
+            }
+            for (unsigned long long flat = 0; flat < total; ++flat) {
+                unsigned long long rem = flat;
+                std::string indexList;
+                for (std::size_t dim = 0; dim < stored.type.arrayDimensions.size(); ++dim) {
+                    unsigned long long stride = 1;
+                    for (std::size_t j = dim + 1; j < stored.type.arrayDimensions.size(); ++j) {
+                        stride *= stored.type.arrayDimensions[j];
+                    }
+                    const int64_t coord = static_cast<int64_t>(rem / stride);
+                    rem %= stride;
+                    const std::string idxn = nextValueName();
+                    out_ << indent() << idxn << " = arith.constant " << coord << " : index\n";
+                    if (dim != 0) {
+                        indexList += ", ";
+                    }
+                    indexList += idxn;
+                }
+                const std::string elem = nextValueName();
+                out_ << indent() << elem << " = memref.load " << lookupValue(stored) << "[" << indexList
+                     << "] : " << textualMemrefSlotType(stored.type) << "\n";
+                out_ << indent() << "memref.store " << elem << ", " << slot->second << "[" << indexList
+                     << "] : " << textualMemrefSlotType(stored.type) << "\n";
+            }
+            return;
+        }
+        out_ << indent() << "memref.store " << lookupValue(stored) << ", " << slot->second
+             << "[] : memref<" << textualType(stored.type) << ">\n";
     }
 
     // Emit `arith.cmpi ne` for i32 operands or pass bool through unchanged.
@@ -2174,9 +2507,9 @@ private:
             if (i != 0) {
                 out_ << ", ";
             }
-            out_ << textualType(operation.arguments[i].type);
+            out_ << textualFuncBoundaryType(operation.arguments[i].type);
         }
-        out_ << ") -> " << textualType(operation.result->type) << '\n';
+        out_ << ") -> " << textualFuncBoundaryType(operation.result->type) << '\n';
         bindValue(*operation.result, name);
     }
 
@@ -2214,7 +2547,7 @@ private:
             resultName = nextValueName();
             out_ << indent() << resultName << " = scf.if "
                  << lookupValue(requiredValue(operation.condition, "if condition"))
-                 << " -> (" << textualType(thenValue.type) << ") {\n";
+                 << " -> (" << textualFuncBoundaryType(thenValue.type) << ") {\n";
         } else {
             out_ << indent() << "scf.if "
                  << lookupValue(requiredValue(operation.condition, "if condition"))
@@ -2230,7 +2563,7 @@ private:
             const ir::ValueRef thenValue =
                 requiredValue(thenTerminator.value, "then return");
             out_ << indent() << "return " << resultName << " : "
-                 << textualType(thenValue.type) << '\n';
+                 << textualFuncBoundaryType(thenValue.type) << '\n';
         } else {
             out_ << indent() << "return\n";
         }
@@ -2478,6 +2811,7 @@ private:
 
     std::ostream& out_;
     const ir::Function& function_;
+    const std::unordered_map<std::string, const ir::Const*>* constants_ = nullptr;
     std::vector<ActiveLoopText> activeLoops_{};
     std::unordered_map<std::size_t, std::string> values_;
     // localValues_ holds direct SSA aliases for immutable parameter locals.
@@ -2581,8 +2915,12 @@ void dumpTextualMlir(std::ostream& out, const ir::Module& module) {
     mlirModule->print(rawOut);
 #else
     out << "module {\n";
+    std::unordered_map<std::string, const ir::Const*> constants;
+    for (const ir::Const& c : module.constants) {
+        constants.emplace(c.name, &c);
+    }
     for (const ir::Function& function : module.functions) {
-        TextualFunctionDumper(out, function).dump();
+        TextualFunctionDumper(out, function, &constants).dump();
     }
     out << "}\n";
 #endif

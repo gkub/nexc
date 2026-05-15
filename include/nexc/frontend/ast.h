@@ -30,20 +30,14 @@ enum class BuiltinTypeKind {
     Invalid,
 };
 
-enum class TypeSyntaxKind {
-    Builtin,
-    FixedArray,
-};
-
 struct TypeSyntax {
-    TypeSyntaxKind form = TypeSyntaxKind::Builtin;
-
-    // Builtin scalar / void / str: uses `kind`.
+    // Innermost scalar element (`i32`, `bool`, …). For non-array types this is
+    // the whole type; for `[T; …]` / nested arrays it is the leaf `T`.
     BuiltinTypeKind kind = BuiltinTypeKind::Invalid;
 
-    // Fixed-size array `[T; N]`: uses `arrayElementKind`, `arrayLength`.
-    BuiltinTypeKind arrayElementKind = BuiltinTypeKind::Invalid;
-    std::uint64_t arrayLength = 0;
+    // For `[[i32; 3]; 2]`, dimensions are `{2, 3}` (outer to inner). Empty means
+    // a plain scalar type `kind`, not an array.
+    std::vector<std::uint64_t> arrayDimensions;
 
     // The source span covers the full type spelling (`i32`, `[i32; 4]`, ...).
     SourceSpan span;

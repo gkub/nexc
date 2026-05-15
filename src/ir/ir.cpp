@@ -5,14 +5,14 @@
 namespace nexc::ir {
 
 Type Type::elementType() const {
-    return Type{.shape = Shape::Scalar, .kind = elementKind};
+    return elementScalarType();
 }
 
 // Keep integer classification close to the IR type wrapper. Later, if Type
 // grows beyond BuiltinTypeKind, lowering code can continue asking this semantic
 // question without knowing the exact representation.
 bool Type::isInteger() const {
-    if (shape != Shape::Scalar) {
+    if (isFixedArray()) {
         return false;
     }
     switch (kind) {
@@ -39,15 +39,15 @@ bool Type::isInteger() const {
 // keeps AST dumps, semantic diagnostics, and IR dumps visually consistent.
 std::string_view typeName(Type type) {
     static thread_local std::string scratch;
-    if (type.shape == Type::Shape::FixedArray) {
-        scratch = "[";
-        scratch += builtinTypeName(type.elementKind);
-        scratch += "; ";
-        scratch += std::to_string(type.arrayLength);
-        scratch += "]";
-        return scratch;
+    if (type.arrayDimensions.empty()) {
+        return builtinTypeName(type.kind);
     }
-    return builtinTypeName(type.kind);
+    scratch = std::string(builtinTypeName(type.kind));
+    for (auto it = type.arrayDimensions.rbegin(); it != type.arrayDimensions.rend();
+         ++it) {
+        scratch = "[" + scratch + "; " + std::to_string(*it) + "]";
+    }
+    return scratch;
 }
 
 // User functions/constants print as @name. Built-ins print as @builtin.name so

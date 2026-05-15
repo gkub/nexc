@@ -590,11 +590,15 @@ private:
 // This helper is shared by AST dumps, diagnostics, and IR dumps so the project
 // does not accidentally print the same type in multiple inconsistent ways.
 std::string formatTypeSyntax(TypeSyntax syntax) {
-    if (syntax.form == TypeSyntaxKind::Builtin) {
+    if (syntax.arrayDimensions.empty()) {
         return std::string(builtinTypeName(syntax.kind));
     }
-    return "[" + std::string(builtinTypeName(syntax.arrayElementKind)) + "; " +
-           std::to_string(syntax.arrayLength) + "]";
+    std::string t = std::string(builtinTypeName(syntax.kind));
+    for (auto it = syntax.arrayDimensions.rbegin(); it != syntax.arrayDimensions.rend();
+         ++it) {
+        t = "[" + t + "; " + std::to_string(*it) + "]";
+    }
+    return t;
 }
 
 std::string_view builtinTypeName(BuiltinTypeKind kind) {

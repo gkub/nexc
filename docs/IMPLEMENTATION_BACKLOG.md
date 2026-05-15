@@ -19,7 +19,7 @@ Ordered **checklist** for near-term compiler and language work. Prefer **removin
 
 Work **top to bottom** unless a dependency forces a swap (note it inline next to the item).
 
-1. [ ] **Fixed-size arrays — next milestone scope** — Decide and implement: (a) arrays on **parameters / returns / module `const`**, (b) **uninitialized** `let mut a: [T; N];` and/or **per-element** definite assignment, (c) or stay with **must initialize** full literal only. Reconcile with [arrays_vectors_linalg.md](design/arrays_vectors_linalg.md), then update [types.md](reference/language/types.md), [statements.md](reference/language/statements.md), [feature_inventory.md](reference/language/feature_inventory.md).
+1. [ ] **Fixed-size arrays — remaining** — (a) **`let mut a: [T; N];`** ~~and per-element DA for locals~~ **partially done** (bitmask + dynamic-index pessimism + `if` merge; cap 65536 elements). (b) **Nested arrays** — **ranked types + lowering done**; still optional: `memref.global` for small immutable module `const` (see [const_array_lowering.md](design/const_array_lowering.md)). `str` arrays, richer diagnostics as needed. **`push`/`pop`-style APIs stay out of scope** until a **growable vector + allocator** story exists (see [arrays_vectors_linalg.md](design/arrays_vectors_linalg.md)). ~~(c) Arrays on `fn` parameters / returns / module `const`~~ **done** (`examples/array_abi.nexs`).
 
 2. [ ] **Array story — documentation pass** — Once (1) is decided, update [arrays_vectors_linalg.md](design/arrays_vectors_linalg.md) if rules differ from the draft; ensure examples and goldens match.
 
@@ -56,3 +56,4 @@ Keep this section ** brief** so the file stays a forward-looking list. Older shi
 | ---- | ------ |
 | 2026-05-10 | Wave A (`for` loops) shipped; backlog wave structure introduced. |
 | 2026-05-15 | Rewrote as ordered laundry list; added [feature_inventory.md](reference/language/feature_inventory.md); folded completed waves into inventory + short “done” stub. |
+| 2026-05-16 | Shipped fixed-array `fn` ABI + module `const` arrays; backlog item narrowed to uninit locals / nested arrays. |

@@ -1,0 +1,19 @@
+// Fixed arrays as function parameters, return values, and module `const`.
+//
+// Arrays use ranked `memref<NxT>` at the MLIR ABI boundary (same as local slots).
+
+const TABLE: [i32; 3] = [1, 2, 3];
+
+fn sum_pair(a: [i32; 2]) -> i32 {
+    return a[0] + a[1];
+}
+
+fn pair_from_table() -> [i32; 2] {
+    return [TABLE[0] + TABLE[1], TABLE[2]];
+}
+
+fn main() -> i32 {
+    let xs: [i32; 2] = [10, 20];
+    let p: [i32; 2] = pair_from_table();
+    return sum_pair(xs) + sum_pair(p);
+}

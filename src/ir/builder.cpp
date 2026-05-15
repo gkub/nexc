@@ -52,13 +52,14 @@ struct ValueSymbol {
 // still useful as a named boundary: if IR types later grow layout/ABI details,
 // this becomes the one place where AST type syntax starts becoming IR type data.
 Type typeFromSyntax(TypeSyntax syntax) {
-    using TS = ::nexc::TypeSyntaxKind;
-    if (syntax.form == TS::FixedArray) {
-        return Type{.shape = Type::Shape::FixedArray,
-                    .elementKind = syntax.arrayElementKind,
-                    .arrayLength = syntax.arrayLength};
+    return Type{.kind = syntax.kind, .arrayDimensions = syntax.arrayDimensions};
+}
+
+const Expr* stripParensExpr(const Expr* e) {
+    while (const auto* p = dynamic_cast<const ParenExpr*>(e)) {
+        e = p->inner.get();
     }
-    return Type{.shape = Type::Shape::Scalar, .kind = syntax.kind};
+    return e;
 }
 
 // TypedIrBuilder owns the stateful AST walk that emits one IR module.
@@ -99,11 +100,11 @@ private:
     // functions. This lets call lowering treat `print("x")` and `foo(1)` the
     // same way until a later backend phase needs special runtime handling.
     void installBuiltins() {
-        const Type str{.kind = BuiltinTypeKind::Str};
-        const Type i32{.kind = BuiltinTypeKind::I32};
-        const Type u64{.kind = BuiltinTypeKind::U64};
-        const Type boolType{.kind = BuiltinTypeKind::Bool};
-        const Type voidType{.kind = BuiltinTypeKind::Void};
+        const Type str{.kind = BuiltinTypeKind::Str, .arrayDimensions = {}};
+        const Type i32{.kind = BuiltinTypeKind::I32, .arrayDimensions = {}};
+        const Type u64{.kind = BuiltinTypeKind::U64, .arrayDimensions = {}};
+        const Type boolType{.kind = BuiltinTypeKind::Bool, .arrayDimensions = {}};
+        const Type voidType{.kind = BuiltinTypeKind::Void, .arrayDimensions = {}};
 
         functions_["print"] = FunctionSignature{
             .parameterTypes = {},
@@ -316,23 +317,53 @@ private:
                 return;
             }
 
-            if (const auto* indexExpr = dynamic_cast<const IndexExpr*>(assign->target.get())) {
-                const ValueRef baseAddr =
-                    buildExpr(*indexExpr->base, std::nullopt);
-                const ValueRef indexVal =
-                    buildExpr(*indexExpr->index,
-                              Type{.shape = Type::Shape::Scalar,
-                                   .kind = BuiltinTypeKind::I32});
+            if (dynamic_cast<const IndexExpr*>(assign->target.get())) {
+                std::vector<const Expr*> idxRev;
+                const Expr* cur = assign->target.get();
+                while (const auto* ix = dynamic_cast<const IndexExpr*>(stripParensExpr(cur))) {
+                    idxRev.push_back(ix->index.get());
+                    cur = ix->base.get();
+                }
+                cur = stripParensExpr(cur);
+                const auto* nm = dynamic_cast<const NameExpr*>(cur);
+                if (!nm) {
+                    throw std::logic_error(
+                        "indexed assignment must resolve to a local name root in typed IR");
+                }
+                const ValueSymbol sym = lookupValue(nm->name);
+                std::vector<const Expr*> indices(idxRev.rbegin(), idxRev.rend());
+                if (indices.empty()) {
+                    throw std::logic_error("indexed assignment missing indices");
+                }
+                ValueRef curBase = buildExpr(*nm, std::nullopt);
+                Type curTy = sym.type;
+                for (std::size_t k = 0; k + 1 < indices.size(); ++k) {
+                    const ValueRef idxv =
+                        buildExpr(*indices[k], Type{.kind = BuiltinTypeKind::I32, .arrayDimensions = {}});
+                    const Type nextTy = curTy.afterIndex();
+                    Operation op{
+                        .kind = Operation::Kind::IndexLoad,
+                        .span = indices[k]->span,
+                        .result = makeValue(nextTy),
+                    };
+                    op.left = curBase;
+                    op.right = idxv;
+                    curBase = *op.result;
+                    append(std::move(op));
+                    curTy = nextTy;
+                }
+                const ValueRef lastIdx =
+                    buildExpr(*indices.back(), Type{.kind = BuiltinTypeKind::I32, .arrayDimensions = {}});
                 const ValueRef stored =
-                    buildExpr(*assign->value, baseAddr.type.elementType());
-                Operation op{
+                    buildExpr(*assign->value, curTy.elementScalarType());
+                Operation st{
                     .kind = Operation::Kind::IndexStore,
                     .span = assign->span,
                 };
-                op.left = baseAddr;
-                op.right = indexVal;
-                op.value = stored;
-                append(std::move(op));
+                st.left = curBase;
+                st.right = lastIdx;
+                st.value = stored;
+                append(std::move(st));
                 return;
             }
 
@@ -460,7 +491,7 @@ private:
         Operation op{
             .kind = Operation::Kind::BoolLiteral,
             .span = span,
-            .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+            .result = makeValue(Type{.kind = BuiltinTypeKind::Bool, .arrayDimensions = {}}),
             .boolValue = true,
         };
         const ValueRef value = *op.result;
@@ -521,7 +552,7 @@ private:
     // `i32` down so the literal operation is born typed as i32.
     ValueRef buildExpr(const Expr& expr, std::optional<Type> expected) {
         if (const auto* integer = dynamic_cast<const IntegerLiteralExpr*>(&expr)) {
-            Type type = expected.value_or(Type{.kind = BuiltinTypeKind::I32});
+            Type type = expected.value_or(Type{.kind = BuiltinTypeKind::I32, .arrayDimensions = {}});
             if (!type.isInteger()) {
                 // This should only happen if semantic analysis failed to reject
                 // the program first. Preserve an invalid type rather than
@@ -544,7 +575,7 @@ private:
             Operation op{
                 .kind = Operation::Kind::BoolLiteral,
                 .span = boolean->span,
-                .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+                .result = makeValue(Type{.kind = BuiltinTypeKind::Bool, .arrayDimensions = {}}),
                 .boolValue = boolean->value,
             };
             const ValueRef result = *op.result;
@@ -556,7 +587,7 @@ private:
             Operation op{
                 .kind = Operation::Kind::StringLiteral,
                 .span = string->span,
-                .result = makeValue(Type{.kind = BuiltinTypeKind::Str}),
+                .result = makeValue(Type{.kind = BuiltinTypeKind::Str, .arrayDimensions = {}}),
                 .text = string->raw,
             };
             const ValueRef result = *op.result;
@@ -599,7 +630,7 @@ private:
                 Operation op{
                     .kind = Operation::Kind::Unary,
                     .span = unary->span,
-                    .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+                    .result = makeValue(Type{.kind = BuiltinTypeKind::Bool, .arrayDimensions = {}}),
                     .op = unary->op,
                 };
                 op.value = operand;
@@ -608,7 +639,7 @@ private:
                 return result;
             }
 
-            const Type type = expected.value_or(Type{.kind = BuiltinTypeKind::I32});
+            const Type type = expected.value_or(Type{.kind = BuiltinTypeKind::I32, .arrayDimensions = {}});
             const ValueRef operand = buildExpr(*unary->operand, type);
             Operation op{
                 .kind = Operation::Kind::Unary,
@@ -637,9 +668,9 @@ private:
                 .span = expr.span,
                 .result = makeValue(arrType),
             };
-            const Type elemType = arrType.elementType();
+            const Type innerExpected = arrType.afterIndex();
             for (const std::unique_ptr<Expr>& el : arrayLit->elements) {
-                op.arguments.push_back(buildExpr(*el, elemType));
+                op.arguments.push_back(buildExpr(*el, innerExpected));
             }
             const ValueRef result = *op.result;
             append(std::move(op));
@@ -647,15 +678,61 @@ private:
         }
 
         if (const auto* indexExpr = dynamic_cast<const IndexExpr*>(&expr)) {
+            std::vector<const Expr*> idxRev;
+            const Expr* cur = &expr;
+            while (const auto* ix = dynamic_cast<const IndexExpr*>(stripParensExpr(cur))) {
+                idxRev.push_back(ix->index.get());
+                cur = ix->base.get();
+            }
+            cur = stripParensExpr(cur);
+            const auto* nm = dynamic_cast<const NameExpr*>(cur);
+            if (nm) {
+                const ValueSymbol sym = lookupValue(nm->name);
+                std::vector<const Expr*> indices(idxRev.rbegin(), idxRev.rend());
+                if (!indices.empty()) {
+                    ValueRef curBase = buildExpr(*nm, std::nullopt);
+                    Type curTy = sym.type;
+                    for (std::size_t k = 0; k + 1 < indices.size(); ++k) {
+                        const ValueRef idxv =
+                            buildExpr(*indices[k], Type{.kind = BuiltinTypeKind::I32, .arrayDimensions = {}});
+                        const Type nextTy = curTy.afterIndex();
+                        Operation op{
+                            .kind = Operation::Kind::IndexLoad,
+                            .span = indices[k]->span,
+                            .result = makeValue(nextTy),
+                        };
+                        op.left = curBase;
+                        op.right = idxv;
+                        curBase = *op.result;
+                        append(std::move(op));
+                        curTy = nextTy;
+                    }
+                    const ValueRef lastIdx =
+                        buildExpr(*indices.back(), Type{.kind = BuiltinTypeKind::I32, .arrayDimensions = {}});
+                    if (!curTy.isFixedArray()) {
+                        throw std::logic_error("indexed load chain has too many indices");
+                    }
+                    const Type elemType = curTy.afterIndex();
+                    Operation op{
+                        .kind = Operation::Kind::IndexLoad,
+                        .span = expr.span,
+                        .result = makeValue(elemType),
+                    };
+                    op.left = curBase;
+                    op.right = lastIdx;
+                    const ValueRef result = *op.result;
+                    append(std::move(op));
+                    return result;
+                }
+            }
+
             const ValueRef baseVal = buildExpr(*indexExpr->base, std::nullopt);
             const ValueRef indexVal =
-                buildExpr(*indexExpr->index,
-                          Type{.shape = Type::Shape::Scalar,
-                               .kind = BuiltinTypeKind::I32});
+                buildExpr(*indexExpr->index, Type{.kind = BuiltinTypeKind::I32, .arrayDimensions = {}});
             if (!baseVal.type.isFixedArray()) {
                 throw std::logic_error("indexed load base must be a fixed array");
             }
-            const Type elemType = baseVal.type.elementType();
+            const Type elemType = baseVal.type.afterIndex();
             Operation op{
                 .kind = Operation::Kind::IndexLoad,
                 .span = expr.span,
@@ -697,7 +774,7 @@ private:
                 const ValueRef rb =
                     coerceConditionLikeToBool(right, binary.right->span);
                 return appendBinary(binary, lb, rb,
-                                    Type{.kind = BuiltinTypeKind::Bool});
+                                    Type{.kind = BuiltinTypeKind::Bool, .arrayDimensions = {}});
             }
             if (binary.op == TokenKind::AmpAmp) {
                 return buildShortCircuitAnd(binary);
@@ -718,7 +795,7 @@ private:
                                 binary.op == TokenKind::EqualEqual ||
                                 binary.op == TokenKind::BangEqual;
         const Type resultType =
-            comparison ? Type{.kind = BuiltinTypeKind::Bool} : left.type;
+            comparison ? Type{.kind = BuiltinTypeKind::Bool, .arrayDimensions = {}} : left.type;
         return appendBinary(binary, left, right, resultType);
     }
 
@@ -731,7 +808,7 @@ private:
         Operation op{
             .kind = Operation::Kind::Unary,
             .span = span,
-            .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+            .result = makeValue(Type{.kind = BuiltinTypeKind::Bool, .arrayDimensions = {}}),
             .op = TokenKind::Bang,
         };
         op.value = operand;
@@ -783,7 +860,7 @@ private:
             Operation lit{
                 .kind = Operation::Kind::BoolLiteral,
                 .span = binary.span,
-                .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+                .result = makeValue(Type{.kind = BuiltinTypeKind::Bool, .arrayDimensions = {}}),
                 .boolValue = false,
             };
             const ValueRef falseRef = *lit.result;
@@ -799,7 +876,7 @@ private:
         Operation op{
             .kind = Operation::Kind::ShortCircuitAnd,
             .span = binary.span,
-            .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+            .result = makeValue(Type{.kind = BuiltinTypeKind::Bool, .arrayDimensions = {}}),
             .left = leftVal,
         };
         op.thenBlock = buildBoolResultBlock(*binary.right);
@@ -820,7 +897,7 @@ private:
             Operation lit{
                 .kind = Operation::Kind::BoolLiteral,
                 .span = binary.span,
-                .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+                .result = makeValue(Type{.kind = BuiltinTypeKind::Bool, .arrayDimensions = {}}),
                 .boolValue = true,
             };
             const ValueRef trueRef = *lit.result;
@@ -836,7 +913,7 @@ private:
         Operation op{
             .kind = Operation::Kind::ShortCircuitOr,
             .span = binary.span,
-            .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+            .result = makeValue(Type{.kind = BuiltinTypeKind::Bool, .arrayDimensions = {}}),
             .left = leftVal,
         };
         op.thenBlock = std::move(thenBlk);
