@@ -22,12 +22,12 @@ This guide is about how the compiler implementation works.
 - [10. Typed IR](#10-typed-ir)
 - [11. MLIR Lowering](#11-mlir-lowering)
 - [12. LLVM IR Lowering](#12-llvm-ir-lowering)
-- [13. Runtime Library And Language I/O (Current Status)](#13-runtime-library-and-language-io-current-status)
+- [13. Runtime Library And Language](#13-runtime-library-and-language-io)
 - [14. Native Executable Driver](#14-native-executable-driver)
   - [End-to-end steps](#end-to-end-steps-what-actually-runs)
   - [What `llc` is](#what-llc-is)
   - [What `ld.lld` is](#what-ldlld-is)
-  - [CRT, libc, and linking today](#crt-libc-and-linking-today)
+  - [Hosted linking stance](#hosted-linking-stance)
   - [How this compares to `gcc`](#how-this-compares-to-gcc)
 - [15. CLI Inspection Modes](#15-cli-inspection-modes)
 - [16. Tests, Golden Files, and CI](#16-tests-golden-files-and-ci)
@@ -854,6 +854,8 @@ LoadLocal
 LoadConst
 Unary
 Binary
+ShortCircuitAnd
+ShortCircuitOr
 Call
 DeclareLocal
 StoreLocal
@@ -865,6 +867,22 @@ This is not machine code. It is still close to nex source semantics. For
 example, `while` remains a structured operation with a condition block and a body
 block. That keeps the first IR readable and makes it a reasonable future input
 for MLIR `scf` lowering.
+
+### 10.4a Short-circuit logical operators
+
+Source-level `&&` and `||` lower to `ShortCircuitAnd` and `ShortCircuitOr` inside
+function bodies. Each operation stores the already-evaluated left-hand value
+(condition-like: `bool` or integer) and two nested blocks that become the
+then/else regions of a value-producing `scf.if` during MLIR lowering. Only one
+region evaluates the user’s right-hand side; the other yields a constant or the
+short-circuited `bool`, which is exactly how short-circuit semantics survive
+structured IR.
+
+Module-level `const` initializers use a different encoding: both sides are
+emitted and **truthified** to `bool` (double unary `!` for integers), then
+combined with a normal `Binary` using `AmpAmp` / `PipePipe`. That greedy IR is
+easier to replay when lowering `LoadConst`, while semantic analysis still folds
+constants using short-circuit rules.
 
 ### 10.5 Terminators
 
@@ -1485,7 +1503,9 @@ tests are skipped rather than breaking frontend-only development machines.
 
 The current MLIR lowering now covers the implemented backend surface: fixed-width
 integer literals, `bool`, string literals, module constants, `+`, `-`, `*`, `/`,
-`%`, integer comparisons, eager `&&` / `||`, unary `!`, function parameters,
+`%`, integer comparisons, **short-circuit** `&&` / `||` (via `scf.if` regions in
+function bodies; module `const` replays truthified eager `Binary` for
+initializers), unary `!`, function parameters,
 direct function calls, built-in `print` / `println` calls, function returns,
 local declarations, local loads/stores, assignment, returning `if`/`else`,
 fallthrough `if`/`else`, and `while`.
@@ -1854,7 +1874,6 @@ The current compiler does not yet implement:
 - type coercions or integer promotions
 - precise signed negative constant values
 - formatting/interpolation for strings
-- short-circuit `&&` / `||` (the current language documents eager boolean logic)
 - general I/O beyond stdout `print` / `println` and the tiny `readln()` slice
 - nested returning control flow beyond the currently tested shapes
 - array parameters, array returns, and array module constants (locals support
@@ -1892,9 +1911,7 @@ chat: it tracks intent and ordering, not every open bug.
    `nex.md`; not implemented).
 2. Formatting/interpolation and the full **Nex I/O** surface (see I/O design
    notes under `docs/design/`).
-3. **`&&` / `||` short-circuit** semantics vs today’s eager lowering — decide in
-   a dedicated language-design pass.
-4. **In-process LLVM object emission** instead of shelling out to `llc` (nice to
+3. **In-process LLVM object emission** instead of shelling out to `llc` (nice to
    have, not required for language features).
 
 **Standing rule:** keep typed IR, MLIR, LLVM IR, runtime, and executable tests

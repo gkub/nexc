@@ -1,0 +1,19 @@
+// Exercises short-circuit `&&` / `||` and compile-time folding.
+//
+// Module constants use greedy IR (`Binary` on truthified bools) but the analyzer
+// folds `false && …` and `true || …` without requiring a constant RHS.
+//
+// `main` uses `&&` in the condition so `--dump-ir` shows `ShortCircuitAnd`.
+
+const FOLD_AND: bool = false && true;
+const FOLD_OR: bool = true || false;
+
+fn main() -> i32 {
+    let a: i32 = 0;
+    let b: i32 = 1;
+    if (a != 0 && b == 1) {
+        return 1;
+    } else {
+        return 0;
+    }
+}

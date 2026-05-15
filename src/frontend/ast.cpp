@@ -97,9 +97,15 @@ private:
         if (const auto* let = dynamic_cast<const LetStmt*>(&stmt)) {
             line(std::string(let->isMutable ? "LetStmt mut " : "LetStmt ") +
                  let->name + ": " + formatTypeSyntax(let->type));
-            indent_ += 2;
-            dumpExpr(*let->init);
-            indent_ -= 2;
+            if (let->init) {
+                indent_ += 2;
+                dumpExpr(*let->init);
+                indent_ -= 2;
+            } else {
+                indent_ += 2;
+                line("(uninitialized)");
+                indent_ -= 2;
+            }
             return;
         }
 
@@ -436,7 +442,9 @@ private:
             const std::size_t id =
                 node(std::string(let->isMutable ? "LetStmt mut\n" : "LetStmt\n") +
                      let->name + ": " + formatTypeSyntax(let->type));
-            edge(id, dumpExpr(*let->init), "init");
+            if (let->init) {
+                edge(id, dumpExpr(*let->init), "init");
+            }
             return id;
         }
 

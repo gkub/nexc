@@ -45,13 +45,17 @@ Current statement forms include:
 ```text
 let name: Type = expr;
 let mut name: Type = expr;
+let mut name: Type;
 ```
 
-- `let x: T = expr;` creates immutable local binding.
-- `let mut x: T = expr;` creates mutable local binding.
-- Current language requires initializer on `let`.
-- There is no declare-now-assign-later form yet; definite assignment is tracked
-  in [IMPLEMENTATION_BACKLOG.md](../../IMPLEMENTATION_BACKLOG.md).
+- `let x: T = expr;` creates immutable local binding (initializer required).
+- `let mut x: T = expr;` creates mutable local binding with an initial value.
+- `let mut x: T;` declares mutable storage **without** an initializer. The name
+  may be read only after the compiler proves an assignment on **every path** to
+  that read (flow-sensitive **definite assignment**). Details and join/loop rules:
+  [definite_assignment.md](../../design/definite_assignment.md).
+- `let x: T;` (no `mut`, no `=`) is invalid: the parser requires either `= expr`
+  or `let mut` for uninitialized declarations.
 
 ## Assignment Statements
 
@@ -182,4 +186,5 @@ fn main() -> i32 {
 - [types.md](types.md)
 - [expressions.md](expressions.md)
 - [functions_and_calls.md](functions_and_calls.md)
+- [definite_assignment.md](../../design/definite_assignment.md) (compiler design)
 - [IMPLEMENTATION_BACKLOG.md](../../IMPLEMENTATION_BACKLOG.md)

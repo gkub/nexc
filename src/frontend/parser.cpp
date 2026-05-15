@@ -363,8 +363,17 @@ std::unique_ptr<Stmt> Parser::parseLetStmt() {
     const Token name = expect(TokenKind::Identifier, "expected local name");
     expect(TokenKind::Colon, "expected `:` after local name");
     TypeSyntax type = parseType();
-    expect(TokenKind::Equal, "expected `=` in local declaration");
-    std::unique_ptr<Expr> init = parseExpr();
+    std::unique_ptr<Expr> init;
+    if (match(TokenKind::Equal)) {
+        init = parseExpr();
+    } else {
+        if (!isMutable) {
+            diagnostics_.error(
+                peek().span,
+                "`let` requires an initializer expression after `=`; use `let mut` "
+                "to declare mutable storage without an initializer");
+        }
+    }
     const Token semicolon =
         expect(TokenKind::Semicolon, "expected `;` after local declaration");
 

@@ -95,6 +95,20 @@ ir::ValueRef requiredValue(const std::optional<ir::ValueRef>& value,
                 if (op.elseBlock) {
                     scan(*op.elseBlock);
                 }
+                return;
+            }
+            if (op.kind == ir::Operation::Kind::ShortCircuitAnd ||
+                op.kind == ir::Operation::Kind::ShortCircuitOr) {
+                if (op.thenBlock) {
+                    scan(*op.thenBlock);
+                }
+                if (found) {
+                    return;
+                }
+                if (op.elseBlock) {
+                    scan(*op.elseBlock);
+                }
+                return;
             }
             if (op.kind == ir::Operation::Kind::While) {
                 if (op.conditionBlock) {
@@ -396,6 +410,10 @@ private:
         case ir::Operation::Kind::Binary:
             lowerBinary(operation);
             return false;
+        case ir::Operation::Kind::ShortCircuitAnd:
+        case ir::Operation::Kind::ShortCircuitOr:
+            lowerShortCircuitValueOp(operation);
+            return false;
         case ir::Operation::Kind::Call:
             lowerCall(operation);
             return false;
@@ -606,6 +624,14 @@ private:
                         loc_, comparisonPredicate(op.op, isUnsignedInteger(leftRef.type)),
                         left, right);
                     break;
+                // Module const initializers truthify both sides to `i1` in typed IR
+                // before emitting `Binary` with these token kinds.
+                case TokenKind::AmpAmp:
+                    value = builder_.create<::mlir::arith::AndIOp>(loc_, left, right);
+                    break;
+                case TokenKind::PipePipe:
+                    value = builder_.create<::mlir::arith::OrIOp>(loc_, left, right);
+                    break;
                 default:
                     throw std::logic_error("unsupported binary operator in const lowering");
                 }
@@ -664,13 +690,50 @@ private:
         bindValue(result, load.getResult());
     }
 
+    // Look up the IR element type for a function local/parameter slot.
+    //
+    // Declarations without initializers (`let mut x: T;`) still need `mlirType`
+    // information even though there is no ValueRef initializer to borrow from.
+    ir::Type irLocalStorageType(ir::LocalRef ref) const {
+        for (const ir::Local& loc : function_.locals) {
+            if (loc.ref.id == ref.id) {
+                return loc.type;
+            }
+        }
+        throw std::logic_error("MLIR lowering could not resolve local slot type");
+    }
+
     // Lower a `let` or `let mut` declaration to a stack-like memref slot.
     //
-    // This is the simplest correct lowering for mutable nex locals: allocate
-    // one zero-dimensional memref for the local, then store the initializer into
-    // it. Later reads become memref.load and assignments become memref.store.
+    // With an initializer: allocate and store. Uninitialized `let mut` only
+    // allocates; semantic definite assignment guarantees no `LoadLocal` happens
+    // until a `StoreLocal` runs.
     void lowerDeclareLocal(const ir::Operation& operation) {
-        const ir::ValueRef init = requiredValue(operation.value, "local initializer");
+        if (!operation.value) {
+            const ir::Type storage = irLocalStorageType(operation.local);
+            if (storage.isFixedArray()) {
+                const ::mlir::MemRefType slotType =
+                    rankedArrayMemRefType(builder_, storage);
+                auto slot = builder_.create<::mlir::memref::AllocaOp>(loc_, slotType);
+                const auto [_, inserted] =
+                    localSlots_.emplace(operation.local.id, slot.getResult());
+                if (!inserted) {
+                    throw std::logic_error("MLIR lowering declared a local slot twice");
+                }
+                return;
+            }
+            const ::mlir::MemRefType memTy =
+                ::mlir::MemRefType::get({}, mlirType(builder_, storage));
+            auto slot = builder_.create<::mlir::memref::AllocaOp>(loc_, memTy);
+            const auto [__, insertedScalar] =
+                localSlots_.emplace(operation.local.id, slot.getResult());
+            if (!insertedScalar) {
+                throw std::logic_error("MLIR lowering declared a local slot twice");
+            }
+            return;
+        }
+
+        const ir::ValueRef init = *operation.value;
         const ::mlir::Value initValue = lookupValue(init);
 
         if (init.type.isFixedArray()) {
@@ -759,6 +822,58 @@ private:
                                                  slot->second);
     }
 
+    // Convert a condition-like IR operand into the `i1` condition SSA value that
+    // structured control-flow ops expect.
+    //
+    // Bool IR values are already `i1`. Integers compare against zero at their own
+    // bit width, matching the truth table used for `if`/`while` in semantic land
+    // and for unary `!` lowering (`icmp ne` pairs with `icmp eq` for `!`).
+    ::mlir::Value conditionLikeToMlirI1(ir::ValueRef ref) {
+        const ::mlir::Value v = lookupValue(ref);
+        if (ref.type.kind == BuiltinTypeKind::Bool) {
+            return v;
+        }
+        if (ref.type.isInteger()) {
+            const unsigned w = integerBitWidth(ref.type);
+            auto zero = builder_.create<::mlir::arith::ConstantIntOp>(loc_, 0, w);
+            return builder_
+                .create<::mlir::arith::CmpIOp>(
+                    loc_, ::mlir::arith::CmpIPredicate::ne, v, zero.getResult())
+                .getResult();
+        }
+        throw std::logic_error("conditionLikeToMlirI1 expects bool or integer typed IR");
+    }
+
+    // Lower `ShortCircuitAnd` / `ShortCircuitOr` to value `scf.if` with `i1` result.
+    //
+    // Child blocks were produced by the IR builder: each ends in `ReturnValue`
+    // carrying the bool-temporary that must become `scf.yield` here. The
+    // short-circuit **shape** (which arm evaluates the user's RHS) is entirely
+    // encoded in IR; this function is the same for both kinds.
+    void lowerShortCircuitValueOp(const ir::Operation& operation) {
+        const ir::ValueRef result =
+            requiredValue(operation.result, "short-circuit logical");
+        const ir::ValueRef leftRef =
+            requiredValue(operation.left, "short-circuit left operand");
+        if (!operation.thenBlock || !operation.elseBlock) {
+            throw std::logic_error("short-circuit operation missing structured arm");
+        }
+
+        const ::mlir::Value cond = conditionLikeToMlirI1(leftRef);
+        llvm::SmallVector<::mlir::Type, 1> resultTypes;
+        resultTypes.push_back(builder_.getI1Type());
+        auto ifOp = builder_.create<::mlir::scf::IfOp>(loc_, resultTypes, cond, true);
+
+        builder_.setInsertionPointToStart(&ifOp.getThenRegion().front());
+        lowerYieldingReturnBlock(*operation.thenBlock);
+
+        builder_.setInsertionPointToStart(&ifOp.getElseRegion().front());
+        lowerYieldingReturnBlock(*operation.elseBlock);
+
+        builder_.setInsertionPointAfter(ifOp);
+        bindValue(result, ifOp.getResult(0));
+    }
+
     // Lower a unary operation.
     //
     // The current MLIR slice only supports logical not. It is emitted as a
@@ -824,15 +939,10 @@ private:
             }
             break;
         case TokenKind::AmpAmp:
-            // nex currently lowers logical operators as eager boolean
-            // operations. The language reference documents this explicitly so
-            // nobody expects C-style short-circuiting until the IR grows
-            // condition blocks for the right-hand side.
-            lowered = builder_.create<::mlir::arith::AndIOp>(loc_, left, right);
-            break;
         case TokenKind::PipePipe:
-            lowered = builder_.create<::mlir::arith::OrIOp>(loc_, left, right);
-            break;
+            throw std::logic_error(
+                "logical && and || must be lowered as ShortCircuit* operations in "
+                "function bodies; module const initializers use truthified Binary");
         case TokenKind::EqualEqual:
         case TokenKind::BangEqual:
         case TokenKind::Less:
@@ -1802,6 +1912,10 @@ private:
         case ir::Operation::Kind::Binary:
             dumpBinary(operation);
             return false;
+        case ir::Operation::Kind::ShortCircuitAnd:
+        case ir::Operation::Kind::ShortCircuitOr:
+            dumpShortCircuitValueOp(operation);
+            return false;
         case ir::Operation::Kind::Call:
             dumpCall(operation);
             return false;
@@ -1872,18 +1986,42 @@ private:
         bindValue(result, name);
     }
 
-    // Emit a local declaration as memref allocation plus initializer store.
+    // Resolve stack-slot element type for a local when there is no initializer
+    // IR value (uninitialized `let mut x: T;`).
+    ir::Type irLocalStorageType(ir::LocalRef ref) const {
+        for (const ir::Local& loc : function_.locals) {
+            if (loc.ref.id == ref.id) {
+                return loc.type;
+            }
+        }
+        throw std::logic_error("textual MLIR lowering could not resolve local slot type");
+    }
+
+    // Emit a local declaration as memref allocation, optionally with initializer store.
     //
-    // The fallback mirrors the real MLIR path closely: each local gets a
-    // zero-dimensional memref, which behaves like a single stack slot.
+    // With `operation.value`, mirrors the real MLIR path: allocate a
+    // zero-dimensional memref (stack slot) and store the initializer. Without it,
+    // only allocate; semantic definite assignment ensures no load occurs before a
+    // store.
     void dumpDeclareLocal(const ir::Operation& operation) {
-        const ir::ValueRef init = requiredValue(operation.value, "local initializer");
         const std::string slotName = nextValueName();
+        if (!operation.value) {
+            const ir::Type storage = irLocalStorageType(operation.local);
+            out_ << indent() << slotName << " = memref.alloca() : memref<"
+                 << textualType(storage) << ">\n";
+            const auto [_, inserted] = localSlots_.emplace(operation.local.id, slotName);
+            if (!inserted) {
+                throw std::logic_error("textual MLIR lowering declared a local slot twice");
+            }
+            return;
+        }
+
+        const ir::ValueRef init = *operation.value;
         out_ << indent() << slotName << " = memref.alloca() : memref<"
              << textualType(init.type) << ">\n";
 
-        const auto [_, inserted] = localSlots_.emplace(operation.local.id, slotName);
-        if (!inserted) {
+        const auto [__, insertedInit] = localSlots_.emplace(operation.local.id, slotName);
+        if (!insertedInit) {
             throw std::logic_error("textual MLIR lowering declared a local slot twice");
         }
 
@@ -1903,6 +2041,44 @@ private:
         }
         out_ << indent() << "memref.store " << lookupValue(stored) << ", "
              << slot->second << "[] : memref<" << textualType(stored.type) << ">\n";
+    }
+
+    // Emit `arith.cmpi ne` for i32 operands or pass bool through unchanged.
+    //
+    // Mirrors `conditionLikeToMlirI1` on the real path; the fallback only promises
+    // the same small type slice as other textual dumpers (`bool`, `i32`).
+    std::string emitTextualConditionLikeToI1(const ir::ValueRef& ref) {
+        if (ref.type.kind == BuiltinTypeKind::Bool) {
+            return lookupValue(ref);
+        }
+        if (ref.type.kind == BuiltinTypeKind::I32) {
+            const std::string v = lookupValue(ref);
+            const std::string name = nextValueName();
+            out_ << indent() << "%c0_i32 = arith.constant 0 : i32\n";
+            out_ << indent() << name << " = arith.cmpi ne, " << v
+                 << ", %c0_i32 : i32\n";
+            return name;
+        }
+        throw std::logic_error(
+            "textual MLIR short-circuit conditions only support bool and i32 today");
+    }
+
+    // Handwritten `scf.if` with `(i1)` result type for `--dump-mlir` without MLIR.
+    void dumpShortCircuitValueOp(const ir::Operation& operation) {
+        const ir::ValueRef result =
+            requiredValue(operation.result, "short-circuit logical");
+        if (!operation.thenBlock || !operation.elseBlock) {
+            throw std::logic_error("short-circuit IR missing arm");
+        }
+        const std::string cond = emitTextualConditionLikeToI1(
+            requiredValue(operation.left, "short-circuit left operand"));
+        const std::string out = nextValueName();
+        out_ << indent() << out << " = scf.if " << cond << " -> (i1) {\n";
+        dumpYieldingReturnBlock(*operation.thenBlock);
+        out_ << indent() << "} else {\n";
+        dumpYieldingReturnBlock(*operation.elseBlock);
+        out_ << indent() << "}\n";
+        bindValue(result, out);
     }
 
     // Emit unary logical not as a comparison against false/zero.
@@ -1957,6 +2133,10 @@ private:
                  << ", " << right << " : " << textualType(operation.left->type)
                  << '\n';
             break;
+        case TokenKind::AmpAmp:
+        case TokenKind::PipePipe:
+            throw std::logic_error(
+                "textual MLIR: && and || must use ShortCircuit* IR operations");
         default:
             out_ << indent() << name << " = " << textualBinaryOp(operation.op) << ' '
                  << left << ", " << right << " : " << textualType(result.type)

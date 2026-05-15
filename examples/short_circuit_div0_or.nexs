@@ -1,0 +1,11 @@
+// `||` short-circuit must skip `(one / zero)` when the LHS is true.
+
+fn main() -> i32 {
+    let zero: i32 = 0;
+    let one: i32 = 1;
+    if (one != 0 || (one / zero) > one) {
+        return 42;
+    } else {
+        return 2;
+    }
+}

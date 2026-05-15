@@ -27,11 +27,11 @@ Inspection and compile modes (details and flags: [compiler_cli.md](./docs/refere
 
 **Types and data:** scalars (`i8`…`u64`, `bool`, `void`, `str`), `let` / `let mut`, calls, assignments. **Fixed-size arrays** `[T; N]` for **local** bindings only (literals, index read, `mut` element assign); not parameters, return types, or module `const` yet ([types.md](./docs/reference/language/types.md)).
 
-**Logical operators:** `&&` and `||` are **eager** (no short-circuit yet); see [expressions.md](./docs/reference/language/expressions.md).
+**Logical operators:** `&&` and `||` **short-circuit**; operands use the same bool-or-integer condition rules as `if`. Module `const` initializers use an eager IR representation for lowering but the language still folds constants with short-circuit rules (details in [expressions.md](./docs/reference/language/expressions.md)).
 
 **Native link:** `nexc` writes temporary LLVM IR, runs **`llc`** to a relocatable object, then **Linux:** **`ld.lld`** with discovered glibc CRT paths; **macOS:** host **`clang`** as Mach-O link driver. Requires matching tools at CMake configure time ([README](./README.md), [Holy Book §14](./NEXC_HOLY_BOOK.md#14-native-executable-driver)). No in-process codegen yet (still subprocess-driven).
 
-**Not in scope yet (examples):** imports / modules / headers, user-defined structs beyond what exists today, heap allocation, channels/tasks, short-circuiting `&&`/`||`.
+**Not in scope yet (examples):** imports / modules / headers, user-defined structs beyond what exists today, heap allocation, channels/tasks.
 
 ## Build and test
 
@@ -50,7 +50,8 @@ Or `./nexc.sh check` for the usual local loop. Canonical workflows: [build_and_t
 | Map of `docs/` tree | [docs/README.md](./docs/README.md) |
 | Repo overview, setup | [README.md](./README.md) |
 | Long-horizon language/compiler narrative | [nex.md](./nex.md) |
-| **Ordered next milestones** | [docs/IMPLEMENTATION_BACKLOG.md](./docs/IMPLEMENTATION_BACKLOG.md) |
+| **Ordered next work** | [docs/IMPLEMENTATION_BACKLOG.md](./docs/IMPLEMENTATION_BACKLOG.md) |
+| **Language feature inventory (succinct)** | [docs/reference/language/feature_inventory.md](./docs/reference/language/feature_inventory.md) |
 | **Normative “what the compiler does now”** | [docs/reference/README.md](./docs/reference/README.md), then [language/README](./docs/reference/language/README.md), [toolchain/README](./docs/reference/toolchain/README.md), [runtime/README](./docs/reference/runtime/README.md) |
 | Formal CLI | [compiler_cli.md](./docs/reference/toolchain/compiler_cli.md) |
 | Learn to write programs | [docs/user/tutorial.md](./docs/user/tutorial.md) |
@@ -70,7 +71,7 @@ Registered in [CMakeLists.txt](./CMakeLists.txt): golden dumps (tokens through L
 
 ## Near-term direction
 
-Follow the backlog order (today: definite assignment / uninitialized locals, then tightening fixed arrays, pointers later). Prefer updating **`docs/reference/`** and goldens with each behavior change. High-level roadmap bullets also appear under [README.md § Forward Priorities](./README.md#forward-priorities).
+Follow the ordered checklist in **`docs/IMPLEMENTATION_BACKLOG.md`** (living list: arrays/next scope, optional DA diagnostics, deferred inference/I/O/pointers). Prefer updating **`docs/reference/`** and goldens with each behavior change. High-level roadmap bullets also appear under [README.md § Forward Priorities](./README.md#forward-priorities).
 
 When editing docs:
 

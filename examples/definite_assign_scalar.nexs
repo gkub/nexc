@@ -1,0 +1,10 @@
+// Uninitialized `let mut` with definite assignment across branches.
+fn main() -> i32 {
+    let mut x: i32;
+    if (0) {
+        x = 10;
+    } else {
+        x = 20;
+    }
+    return x;
+}

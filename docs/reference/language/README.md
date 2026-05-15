@@ -9,10 +9,14 @@ pages describe what the compiler accepts today.
 | -------- | ---------------- | ----- |
 | [declarations_and_modules.md](declarations_and_modules.md) | One `.nexs` translation unit, top-level `fn` / `const`, `main`, single namespace. | "Modules" here means file/top-level structure, not `.nexh` imports. |
 | [types.md](types.md) | Built-in scalars, fixed arrays `[T; N]` for locals, typing rules. | Arrays are not accepted on function parameters, returns, or module `const` yet. |
-| [expressions.md](expressions.md) | Literals, operators, calls, array literals, indexing `a[i]`, precedence. | Logical `&&` and logical `\|\|` are eager, not short-circuiting. |
+| [expressions.md](expressions.md) | Literals, operators, calls, array literals, indexing `a[i]`, precedence. | Logical `&&` / `\|\|` short-circuit; module `const` lowers `&&`/`\|\|` eagerly as truthified `Binary` for a simpler initializer IR. |
 | [statements.md](statements.md) | Blocks, `let` / `let mut`, assignment, `return`, `if` / `else`, `while`, `for`, `break`, `continue`, call statements. | `for` lowers to `While` in typed IR dumps. |
 | [functions_and_calls.md](functions_and_calls.md) | Function signatures, calls as expressions vs statements, built-ins vs user functions. | Top-level placement rules live in declarations. |
 | [builtins_and_io.md](builtins_and_io.md) | `print` / `println`, stdin helpers, parse built-ins. | Formatting uses `{}` placeholders from a string-literal first argument. |
+
+## Feature inventory (non-normative)
+
+Quick scan of implemented surface and prominent gaps: [feature_inventory.md](feature_inventory.md).
 
 ## Near-term roadmap (not reference normative text)
 

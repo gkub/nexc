@@ -579,6 +579,13 @@ add_nexc_golden_test(
 )
 
 add_nexc_golden_test(
+    dump_ir_short_circuit_golden
+    --dump-ir
+    examples/short_circuit.nexs
+    tests/golden/dump_ir/short_circuit.ir.txt
+)
+
+add_nexc_golden_test(
     dump_mlir_return_42_golden
     --dump-mlir
     examples/return_42.nexs
@@ -730,6 +737,11 @@ add_nexc_mlir_validation_test(
     examples/for_loop.nexs
 )
 
+add_nexc_mlir_validation_test(
+    validate_mlir_short_circuit
+    examples/short_circuit.nexs
+)
+
 add_nexc_llvm_validation_test(
     validate_llvm_return_42
     examples/return_42.nexs
@@ -765,6 +777,11 @@ add_nexc_llvm_validation_test(
     examples/for_loop.nexs
 )
 
+add_nexc_llvm_validation_test(
+    validate_llvm_short_circuit
+    examples/short_circuit.nexs
+)
+
 add_nexc_executable_test(
     run_executable_return_42
     examples/return_42.nexs
@@ -788,6 +805,18 @@ add_nexc_executable_test(
     run_executable_backend_coverage
     examples/backend_coverage.nexs
     33
+)
+
+add_nexc_executable_test(
+    run_executable_short_circuit_div0_and
+    examples/short_circuit_div0_and.nexs
+    42
+)
+
+add_nexc_executable_test(
+    run_executable_short_circuit_div0_or
+    examples/short_circuit_div0_or.nexs
+    42
 )
 
 add_test(
@@ -873,6 +902,11 @@ add_test(
 )
 
 add_test(
+    NAME semantic_check_definite_assign_scalar
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/definite_assign_scalar.nexs
+)
+
+add_test(
     NAME semantic_check_comparison
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/comparison.nexs
 )
@@ -885,6 +919,21 @@ add_test(
 add_test(
     NAME semantic_check_backend_coverage
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/backend_coverage.nexs
+)
+
+add_test(
+    NAME semantic_check_short_circuit
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/short_circuit.nexs
+)
+
+add_test(
+    NAME semantic_check_short_circuit_div0_and
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/short_circuit_div0_and.nexs
+)
+
+add_test(
+    NAME semantic_check_short_circuit_div0_or
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/short_circuit_div0_or.nexs
 )
 
 add_test(
@@ -944,6 +993,32 @@ add_test(
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_immutable_assignment.nexs
 )
 set_tests_properties(semantic_immutable_assignment PROPERTIES WILL_FAIL TRUE)
+
+add_test(
+    NAME semantic_use_before_assign
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_use_before_assign.nexs
+)
+set_tests_properties(semantic_use_before_assign PROPERTIES WILL_FAIL TRUE)
+
+add_nexc_golden_diagnostic_test(
+    semantic_use_before_assign_golden
+    --check
+    tests/semantic_use_before_assign.nexs
+    tests/golden/diagnostics/semantic_use_before_assign.stderr.txt
+)
+
+add_test(
+    NAME semantic_if_branch_definite_assign
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_if_branch_definite_assign.nexs
+)
+set_tests_properties(semantic_if_branch_definite_assign PROPERTIES WILL_FAIL TRUE)
+
+add_nexc_golden_diagnostic_test(
+    semantic_if_branch_definite_assign_golden
+    --check
+    tests/semantic_if_branch_definite_assign.nexs
+    tests/golden/diagnostics/semantic_if_branch_definite_assign.stderr.txt
+)
 
 add_test(
     NAME semantic_discard_non_void_call

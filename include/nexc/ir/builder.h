@@ -12,6 +12,20 @@ namespace nexc::ir {
 // them. Typed IR is backend-shaped: names are resolved into locals, constants,
 // functions, and built-ins; expression results become typed temporary values.
 //
+// Logical `&&` and `||` are lowered differently depending on context:
+//
+// - Inside **functions**, the builder emits `ShortCircuitAnd` / `ShortCircuitOr`
+//   so backends can preserve short-circuit evaluation: each arm is a child block
+//   whose terminator yields a boolean to an enclosing `scf.if`, not a function
+//   return. See `Operation::Kind` in `ir.h` for the payload contract.
+//
+// - Inside **module `const` initializers**, the builder stays linear: both sides
+//   are fully evaluated in the IR stream, each coerced to `bool` with the same
+//   “integer zero is false” rule as unary `!`, then combined with `Binary` using
+//   the same `AmpAmp` / `PipePipe` token kind. Const initializers are required
+//   to be compile-time-evaluable anyway, so eager representation is simpler for
+//   MLIR replay and does not change observable behavior for valid programs.
+//
 // The builder assumes semantic analysis has already accepted the translation
 // unit. It may throw std::logic_error if that frontend invariant is violated.
 // That is intentional: user-facing errors belong to semantic analysis, while an

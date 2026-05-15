@@ -6,7 +6,7 @@
 - [Syntax](#syntax)
 - [Expression Forms](#expression-forms)
 - [Operator Precedence](#operator-precedence)
-- [Logical Operators Note](#logical-operators-note)
+- [Logical AND/OR (`&&`, `||`)](#logical-andor--)
 - [Arrays And Indexing](#arrays-and-indexing)
 - [Type Rules](#type-rules)
 - [Examples](#examples)
@@ -64,17 +64,34 @@ From highest to lowest:
 | 7 | `&&` | left |
 | 8 | logical or | left |
 
-## Logical Operators Note
+## Logical AND/OR (`&&`, `||`)
 
-Current `&&` and `||` semantics are eager:
+`&&` and `||` use **short-circuit** evaluation, matching familiar C-family rules:
 
-- both operands are evaluated
-- then the boolean operation is applied
+- For `a && b`, `b` is evaluated only if `a` is true after applying condition rules.
+- For `a || b`, `b` is evaluated only if `a` is false.
 
-They do not short-circuit yet. For example, `y != 0 && x / y > 1` still evaluates
-`x / y`.
+Any condition context accepts operands that are `bool` or an integer type. As
+with `if` and `while`, integer **zero** is false and any non-zero integer is
+true.
 
-## Arrays And Indexing
+Module-level `const` initializers are a special case: they must be compile-time
+expressions, but the compiler still types and analyzes both operands. The
+intermediate typed IR for `const` chooses a **linear**, truthify-then-`Binary`
+representation so constant lowering stays a simple instruction list; the
+**language** nevertheless follows short-circuit rules for constant folding (for
+example, `false && <anything>` is a constant `false` without requiring a constant
+right-hand side).
+
+Example where short-circuit avoids evaluating the division when `y == 0`:
+
+```nex
+if (y != 0 && x / y > 1) {
+    return 1;
+} else {
+    return 0;
+}
+```
 
 - An array **literal** lists element expressions separated by commas inside `[` `]`.
 - An array **load** is postfix: the base expression must have a fixed array type;

@@ -1,0 +1,45 @@
+Module
+  Const @FOLD_AND: bool
+    Block
+      %0: bool = BoolLiteral false
+      %1: bool = BoolLiteral true
+      %2: bool = Binary AmpAmp %0, %1
+      InitValue %2
+  Const @FOLD_OR: bool
+    Block
+      %0: bool = BoolLiteral true
+      %1: bool = BoolLiteral false
+      %2: bool = Binary PipePipe %0, %1
+      InitValue %2
+  Function @main() -> i32
+    Locals
+      $0 a: i32
+      $1 b: i32
+    Block
+      %0: i32 = IntegerLiteral 0
+      DeclareLocal $0 = %0
+      %1: i32 = IntegerLiteral 1
+      DeclareLocal $1 = %1
+      %2: i32 = LoadLocal $0
+      %3: i32 = IntegerLiteral 0
+      %4: bool = Binary BangEqual %2, %3
+      %6: bool = ShortCircuitAnd %4
+        Then
+          Block
+            %7: i32 = LoadLocal $1
+            %8: i32 = IntegerLiteral 1
+            %9: bool = Binary EqualEqual %7, %8
+            ReturnValue %9
+        Else
+          Block
+            %5: bool = BoolLiteral false
+            ReturnValue %5
+      If %6
+        Then
+          Block
+            %10: i32 = IntegerLiteral 1
+            ReturnValue %10
+        Else
+          Block
+            %11: i32 = IntegerLiteral 0
+            ReturnValue %11

@@ -8,7 +8,7 @@ implementation notes live elsewhere.
 
 1. **Run something:** [`docs/user/tutorial.md`](../user/tutorial.md) and small programs under `examples/`.
 2. **Look up exact rules:** this `reference/` tree (language, toolchain, runtime).
-3. **Check planned work:** [`docs/IMPLEMENTATION_BACKLOG.md`](../IMPLEMENTATION_BACKLOG.md) lists ordered next milestones.
+3. **Check planned work:** [`docs/IMPLEMENTATION_BACKLOG.md`](../IMPLEMENTATION_BACKLOG.md) is the ordered living to-do list. For a quick **feature inventory** (what exists / gaps), see [language/feature_inventory.md](language/feature_inventory.md).
 
 Milestone history and long-horizon vision: [`nex.md`](../../nex.md).
 

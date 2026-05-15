@@ -6,6 +6,25 @@
 #include <unordered_map>
 #include <utility>
 
+// Typed IR construction for nex expressions and statements.
+//
+// `let mut x: T;` lowers to `DeclareLocal` **without** `value`; MLIR allocates a
+// memref slot and skips the initializing `memref.store`. Paired with semantic
+// definite assignment, this is sound: the front end rejects reads until a store
+// has executed.
+//
+// Short-circuit lowering for `&&` / `||` is implemented here (not in MLIR):
+//
+// - Function bodies use distinct IR operations (`ShortCircuitAnd` /
+//   `ShortCircuitOr`) whose child blocks map cleanly onto `scf.if` regions.
+// - Module-level `const` initializers use eager lowering: both operands are
+//   evaluated, each is coerced to `bool`, then lowered as a plain `Binary` so
+//   replay stays a straight-line sequence (see `buildBinary` and `currentConst_`).
+//
+// Condition-like to bool uses double logical negation (`!!v` at source level):
+// IR emits two unary `!` operations. For integers, each `!` lowers to a compare
+// against zero, matching `if` / `while` condition semantics.
+
 namespace nexc::ir {
 
 namespace {
@@ -266,19 +285,19 @@ private:
 
         if (const auto* let = dynamic_cast<const LetStmt*>(&stmt)) {
             const Type type = typeFromSyntax(let->type);
-            const ValueRef init = buildExpr(*let->init, type);
             const LocalRef local =
                 declareLocal(let->name, let->nameSpan, type, let->isMutable,
                              Local::Kind::Local);
-            // A `let` has two IR effects: evaluate the initializer to a value,
-            // then create a local slot initialized with that value.
             Operation op{
                 .kind = Operation::Kind::DeclareLocal,
                 .span = let->span,
             };
             op.local = local;
-            op.value = init;
             op.isMutable = let->isMutable;
+            if (let->init) {
+                const ValueRef init = buildExpr(*let->init, type);
+                op.value = init;
+            }
             append(std::move(op));
             return;
         }
@@ -659,17 +678,31 @@ private:
     // Lower a binary expression while choosing the correct result type.
     //
     // Arithmetic keeps the operand type. Comparisons and equality operators
-    // produce bool. Logical `&&` / `||` also produce bool, but their operands are
-    // condition-like rather than forced to one exact type.
+    // produce bool. Logical `&&` / `||` also produce bool. In function bodies they
+    // use structured short-circuit operations; in module `const` initializers they
+    // lower as eager truthify-then-binary (`Binary` on bool) for a straight-line
+    // initializer block.
     ValueRef buildBinary(const BinaryExpr& binary, std::optional<Type> expected) {
         if (binary.op == TokenKind::AmpAmp || binary.op == TokenKind::PipePipe) {
-            // Logical operators always produce bool. Their operands
-            // may be bool or integer, so we do not force an expected operand
-            // type here.
-            const ValueRef left = buildExpr(*binary.left, std::nullopt);
-            const ValueRef right = buildExpr(*binary.right, std::nullopt);
-            return appendBinary(binary, left, right,
-                                Type{.kind = BuiltinTypeKind::Bool});
+            if (currentConst_ != nullptr) {
+                // Const contexts are compile-time-only. Both sides are emitted and
+                // truthified so MLIR const replay can stay a simple operation stream
+                // without nested `scf.if`. Observable semantics match short-circuit
+                // for constant folding, but invalid RHS side effects are not the
+                // concern of const initializers (they are rejected earlier).
+                const ValueRef left = buildExpr(*binary.left, std::nullopt);
+                const ValueRef right = buildExpr(*binary.right, std::nullopt);
+                const ValueRef lb =
+                    coerceConditionLikeToBool(left, binary.left->span);
+                const ValueRef rb =
+                    coerceConditionLikeToBool(right, binary.right->span);
+                return appendBinary(binary, lb, rb,
+                                    Type{.kind = BuiltinTypeKind::Bool});
+            }
+            if (binary.op == TokenKind::AmpAmp) {
+                return buildShortCircuitAnd(binary);
+            }
+            return buildShortCircuitOr(binary);
         }
 
         // For arithmetic/equality/comparison, semantic analysis has already
@@ -687,6 +720,130 @@ private:
         const Type resultType =
             comparison ? Type{.kind = BuiltinTypeKind::Bool} : left.type;
         return appendBinary(binary, left, right, resultType);
+    }
+
+    // Emit one unary logical-not (`!`) and return its bool result.
+    //
+    // Integer `!` is implemented in the backend as `icmp eq v, 0`, so chaining two
+    // unary nodes implements C-style truthiness without inventing a dedicated IR
+    // opcode.
+    ValueRef appendUnaryBang(ValueRef operand, SourceSpan span) {
+        Operation op{
+            .kind = Operation::Kind::Unary,
+            .span = span,
+            .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+            .op = TokenKind::Bang,
+        };
+        op.value = operand;
+        const ValueRef result = *op.result;
+        append(std::move(op));
+        return result;
+    }
+
+    // Interpret `v` as a condition, then normalize to an explicit `bool` value.
+    //
+    // `bool` is already boolean. Integers use double-negation (`!!`) so only zero
+    // becomes false, matching `if`/`while` condition rules in semantic analysis.
+    ValueRef coerceConditionLikeToBool(ValueRef v, SourceSpan span) {
+        if (v.type.kind == BuiltinTypeKind::Bool) {
+            return v;
+        }
+        if (v.type.isInteger()) {
+            const ValueRef once = appendUnaryBang(v, span);
+            return appendUnaryBang(once, span);
+        }
+        throw std::logic_error("truthify expected bool or integer operand");
+    }
+
+    // Build `expr` inside a fresh block, truthify its value to `bool`, and end
+    // with `ReturnValue` for use as an `scf.if` arm (MLIR `scf.yield`).
+    std::unique_ptr<Block> buildBoolResultBlock(const Expr& expr) {
+        auto block = std::make_unique<Block>(Block{.span = expr.span});
+        Block* const outerBlock = currentBlock_;
+        currentBlock_ = block.get();
+        const ValueRef v = buildExpr(expr, std::nullopt);
+        const ValueRef b = coerceConditionLikeToBool(v, expr.span);
+        block->terminator = Terminator{
+            .kind = Terminator::Kind::ReturnValue,
+            .span = expr.span,
+            .value = b,
+        };
+        currentBlock_ = outerBlock;
+        return block;
+    }
+
+    // `&&`: evaluate LHS first; enter RHS block only if LHS tests true.
+    ValueRef buildShortCircuitAnd(const BinaryExpr& binary) {
+        const ValueRef leftVal = buildExpr(*binary.left, std::nullopt);
+
+        auto elseBlk = std::make_unique<Block>(Block{.span = binary.span});
+        {
+            Block* const outerBlock = currentBlock_;
+            currentBlock_ = elseBlk.get();
+            Operation lit{
+                .kind = Operation::Kind::BoolLiteral,
+                .span = binary.span,
+                .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+                .boolValue = false,
+            };
+            const ValueRef falseRef = *lit.result;
+            append(std::move(lit));
+            elseBlk->terminator = Terminator{
+                .kind = Terminator::Kind::ReturnValue,
+                .span = binary.span,
+                .value = falseRef,
+            };
+            currentBlock_ = outerBlock;
+        }
+
+        Operation op{
+            .kind = Operation::Kind::ShortCircuitAnd,
+            .span = binary.span,
+            .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+            .left = leftVal,
+        };
+        op.thenBlock = buildBoolResultBlock(*binary.right);
+        op.elseBlock = std::move(elseBlk);
+        const ValueRef result = *op.result;
+        append(std::move(op));
+        return result;
+    }
+
+    // `||`: evaluate LHS first; skip RHS when LHS already tests true.
+    ValueRef buildShortCircuitOr(const BinaryExpr& binary) {
+        const ValueRef leftVal = buildExpr(*binary.left, std::nullopt);
+
+        auto thenBlk = std::make_unique<Block>(Block{.span = binary.span});
+        {
+            Block* const outerBlock = currentBlock_;
+            currentBlock_ = thenBlk.get();
+            Operation lit{
+                .kind = Operation::Kind::BoolLiteral,
+                .span = binary.span,
+                .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+                .boolValue = true,
+            };
+            const ValueRef trueRef = *lit.result;
+            append(std::move(lit));
+            thenBlk->terminator = Terminator{
+                .kind = Terminator::Kind::ReturnValue,
+                .span = binary.span,
+                .value = trueRef,
+            };
+            currentBlock_ = outerBlock;
+        }
+
+        Operation op{
+            .kind = Operation::Kind::ShortCircuitOr,
+            .span = binary.span,
+            .result = makeValue(Type{.kind = BuiltinTypeKind::Bool}),
+            .left = leftVal,
+        };
+        op.thenBlock = std::move(thenBlk);
+        op.elseBlock = buildBoolResultBlock(*binary.right);
+        const ValueRef result = *op.result;
+        append(std::move(op));
+        return result;
     }
 
     // Append the actual Binary operation after both operands have been lowered.

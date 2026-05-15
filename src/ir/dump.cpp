@@ -161,13 +161,20 @@ private:
                  << valueName(requiredValue(operation.left)) << ", "
                  << valueName(requiredValue(operation.right)) << '\n';
             return;
+        case Operation::Kind::ShortCircuitAnd:
+            dumpShortCircuit(operation, "ShortCircuitAnd");
+            return;
+        case Operation::Kind::ShortCircuitOr:
+            dumpShortCircuit(operation, "ShortCircuitOr");
+            return;
         case Operation::Kind::Call:
             dumpCall(operation);
             return;
         case Operation::Kind::DeclareLocal:
             line("DeclareLocal " + localName(operation.local) +
-                 (operation.isMutable ? " mutable = " : " = ") +
-                 valueName(requiredValue(operation.value)));
+                 (operation.isMutable ? " mutable" : "") +
+                 (operation.value ? (" = " + valueName(requiredValue(operation.value)))
+                                  : std::string(" (uninitialized)")));
             return;
         case Operation::Kind::StoreLocal:
             line("StoreLocal " + localName(operation.local) + " = " +
@@ -208,6 +215,25 @@ private:
             line("Continue");
             return;
         }
+    }
+
+    // Print short-circuit `&&` / `||` with the same Then/Else nesting as `If`.
+    //
+    // The first line records the bool-typed result and names the already-evaluated
+    // LHS value; child blocks hold the RHS path and the skipped path.
+    void dumpShortCircuit(const Operation& operation, const char* kindName) {
+        dumpResultPrefix(operation);
+        out_ << kindName << ' ' << valueName(requiredValue(operation.left)) << '\n';
+        indent_ += 2;
+        line("Then");
+        indent_ += 2;
+        dumpBlock(requiredBlock(operation.thenBlock));
+        indent_ -= 2;
+        line("Else");
+        indent_ += 2;
+        dumpBlock(requiredBlock(operation.elseBlock));
+        indent_ -= 2;
+        indent_ -= 2;
     }
 
     // Print a call operation, with or without a result prefix.

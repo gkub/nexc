@@ -16,7 +16,8 @@ lives under **`reference/`**; planning and drafts live in sibling trees.
 
 | Path | Role |
 |------|------|
-| [`IMPLEMENTATION_BACKLOG.md`](IMPLEMENTATION_BACKLOG.md) | Ordered implementation milestones and near-term work. |
+| [`IMPLEMENTATION_BACKLOG.md`](IMPLEMENTATION_BACKLOG.md) | Ordered living to-do list for near-term implementation work. |
+| [`reference/language/feature_inventory.md`](reference/language/feature_inventory.md) | Succinct inventory of implemented language surface and prominent gaps. |
 | [`../NEXC_HOLY_BOOK.md`](../NEXC_HOLY_BOOK.md) | Educational walkthrough of the compiler pipeline and implementation. |
 | [`user/frontend.md`](user/frontend.md) | User-facing guide to inspection modes and semantic checking. |
 | [`../nex.md`](../nex.md) | Longer project overview and language-planning context. |

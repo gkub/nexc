@@ -189,6 +189,9 @@ struct LetStmt final : Stmt {
 
     // `let` and `let mut` share one AST node. Mutability is a semantic property
     // checked later when assignment statements target this binding.
+    //
+    // `init` may be null only for `let mut name: T;` (no `=`). Immutable `let`
+    // always has an initializer expression.
     bool isMutable = false;
     std::string name;
     SourceSpan nameSpan;

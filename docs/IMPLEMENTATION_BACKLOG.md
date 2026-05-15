@@ -1,107 +1,58 @@
-# Implementation backlog (ordered)
+# Implementation backlog (living to-do list)
 
-This file is the **single maintained checklist** for **near-term compiler and language work**—the sequence we intend to follow next, with enough context that contributors (and learners reading the repo) know *why* each step exists and *what* to update when it lands.
+Ordered **checklist** for near-term compiler and language work. Prefer **removing or checking off** items when they ship; keep the list short and actionable. If sequencing changes, edit order here first, then update `docs/reference/` and tests.
 
-It complements:
+**Related**
 
 | Document | Role |
 | -------- | ---- |
-| [`nex.md`](../nex.md) | Long-horizon vision, language evolution buckets, compiler architecture narrative. |
-| [`docs/reference/`](reference/README.md) | **Normative reference for what the compiler does today**—must stay in sync with implementation and tests. |
-| [`NEXC_HOLY_BOOK.md`](../NEXC_HOLY_BOOK.md) | Educational tour of the compiler pipeline; good home for deep dives *after* a feature exists. |
+| [Language feature inventory](reference/language/feature_inventory.md) | Succinct inventory of what exists today (and obvious gaps). |
+| [Language reference](reference/README.md) | Normative “what the compiler does now.” |
+| [nex.md](../nex.md) | Long-horizon vision and evolution buckets. |
+| [NEXC_HOLY_BOOK.md](../NEXC_HOLY_BOOK.md) | Educational pipeline tour. |
 
-**How to use this backlog**
-
-1. Work **top to bottom** unless a dependency forces a swap (call that out in a short note here).
-2. When a slice **ships**: tick the checklist here, update **reference** (`docs/reference/language/*.md`, toolchain if needed), add or extend **tests** (semantic, IR/MLIR/LLVM goldens, executables), and add a **Holy Book** section if the teaching value is high.
-3. When **sequencing** changes: edit this file first so `nex.md` / `README` pointers stay accurate.
+**Quality bar when an item ships:** reference pages + tests (semantic, goldens, executable if user-visible) + implementation comments; Holy Book only when it helps teaching.
 
 ---
 
-## Recently landed (for context)
+## Ordered backlog
 
-- **Rust-style `print` / `println`:** format string literal with `` `{}` `` placeholders, typed arguments, `println` appends one `\n` after the formatted output; legacy `println(readln())` still allowed. See [`docs/reference/language/builtins_and_io.md`](reference/language/builtins_and_io.md).
-- **C-style `for`:** `for (init; condition; step) body` — any clause may be omitted (`for (;;)` uses a constant-true condition in IR); `init` may be `let`, assignment, or void call; `step` is assignment or void call (no `;` before `)`). Typed IR **desugars** to the existing `While` shape so MLIR stays unchanged. `let` in `init` is scoped to the whole `for` (not visible after the loop). Tests: `examples/for_loop.nexs`, goldens + `run_executable_for_loop`.
-- **Loop control:** `break;` exits the innermost loop; `continue;` advances to the next iteration. For `for`, `continue` runs the step clause before the next condition check. Tests: `examples/break_continue.nexs`, semantic diagnostics, and `run_executable_break_continue`.
+Work **top to bottom** unless a dependency forces a swap (note it inline next to the item).
 
----
+1. [ ] **Fixed-size arrays — next milestone scope** — Decide and implement: (a) arrays on **parameters / returns / module `const`**, (b) **uninitialized** `let mut a: [T; N];` and/or **per-element** definite assignment, (c) or stay with **must initialize** full literal only. Reconcile with [arrays_vectors_linalg.md](design/arrays_vectors_linalg.md), then update [types.md](reference/language/types.md), [statements.md](reference/language/statements.md), [feature_inventory.md](reference/language/feature_inventory.md).
 
-## Wave A — `for` loops — **shipped**
+2. [ ] **Array story — documentation pass** — Once (1) is decided, update [arrays_vectors_linalg.md](design/arrays_vectors_linalg.md) if rules differ from the draft; ensure examples and goldens match.
 
-`for`, `break`, and `continue` are implemented. Richer `for` initialization forms can be revisited if real examples need them.
+3. [ ] **Definite assignment — nicer diagnostics (optional)** — Path hints (e.g. which branch skipped assignment); low priority while messages stay correct.
 
----
+4. [ ] **`builtins_and_io.md`** — Short cross-link or example for “read in a loop, then use” using `let mut` + definite assignment, if it fits naturally.
 
-## Wave B — Uninitialized locals + **definite assignment**
+5. [ ] **Type inference** — `let x = expr` without `: T` when `=` is present (grammar + semantic); explicitly deferred until we want the complexity.
 
-**Goal:** Allow `let mut x: T;` (and optionally `let x: T;` with rules for `mut`) so storage can be filled after declaration—e.g. user input loops—while **rejecting reads** on paths where the compiler cannot prove assignment happened first.
+6. [ ] **Richer I/O** — Files, errors; see [io_v1_spitball.md](design/io_v1_spitball.md); pairs with `Option`/`Result`-style types later.
 
-**Before coding**
+7. [ ] **`Option` / `Result`** — After basic I/O patterns stabilize.
 
-- [ ] Which types may use uninitialized form in **v1** (recommend starting with **scalars + fixed arrays**; **`str`** may stay “must initialize” until owned/uninit `str` semantics exist).
-- [ ] Exact diagnostic style: path-sensitive messages (e.g. “may be uninitialized here: not assigned in `else` branch at line …”).
-- [ ] Interaction with `for` / `while` / `if` (loops are the main consumer).
+8. [ ] **Toolchain `portability.md`** — Flesh out [toolchain/README.md](reference/toolchain/README.md) stub for cross-host stories.
 
-**Implementation note**
-
-- This is a **flow-sensitive** analysis pass (assigned-on-all-paths to a use). Plan data structures (e.g. per-block state, merge at join points) in a short `docs/design/` note if the Holy Book would get too long.
-
-**Learner-facing output**
-
-- [ ] [`docs/reference/language/statements.md`](reference/language/statements.md) — `let` forms, definite assignment rules, examples.
-- [ ] Cross-link from [`builtins_and_io.md`](reference/language/builtins_and_io.md) if we show “read in a loop then use” patterns.
+9. [ ] **Pointers** — Large milestone: address-of / references or `*T`, provenance, `null`, arrays/`str` interaction, LLVM lowering, diagnostics. Split into sub-items when someone starts.
 
 ---
 
-## Wave C — Tighten **array** story (revisit after A + B)
+## Done (remove rows here as they age out; git history is canonical)
 
-**Goal:** Make fixed-size arrays feel complete and honest for systems learners: clear rules for initialization, filling by index, and passing initialized data to functions.
+Keep this section ** brief** so the file stays a forward-looking list. Older shipped work: `for` / `break` / `continue`, formatted `print`/`println`, **scalar** `let mut x: T;` + definite assignment + IR/MLIR uninit locals — see [feature_inventory.md](reference/language/feature_inventory.md), [definite_assignment.md](design/definite_assignment.md).
 
-We previously outlined **three coherent directions**; **reopen after Wave B**
-(uninitialized locals + definite assignment), because those rules change how arrays
-are taught and tested.
-
-| Track | Idea | When it shines |
-| ----- | ---- | ---------------- |
-| **C1 — Explicit initialization** | Require visible initial values (literals, `= expr`, or an explicit `default` spelling later). | Simplest semantics; zero surprises. |
-| **C2 — Uninit + definite assignment per element** | Array binding may start uninitialized if every element is **proven** assigned before any read/use. | Pairs with Wave B; matches “fill from input in a loop.” |
-| **C3 — Typed “partially initialized” / optional views** | Stronger types for “not yet valid whole array” (heavier). | Longer-term; depends on type system appetite. |
-
-**After Wave A + B,** reopen this section and:
-
-- [ ] Decide which of C1/C2/C3 (or combination) is in scope for the **next** milestone.
-- [ ] Align [`docs/reference/language/types.md`](reference/language/types.md) and [`statements.md`](reference/language/statements.md) with reality (today: array locals need a full literal initializer—see examples).
-- [ ] Update [`docs/design/arrays_vectors_linalg.md`](design/arrays_vectors_linalg.md) if the language rule changes relative to that design draft.
+| Shipped | Pointer |
+| ------- | ------- |
+| C-style `for`, loop control | [statements.md](reference/language/statements.md), examples `for_loop.nexs`, `break_continue.nexs` |
+| Scalar definite assignment | [definite_assignment.md](design/definite_assignment.md), tests `semantic_use_before_assign*.nexs` |
 
 ---
 
-## Explicitly **not** in this wave (carry forward)
-
-| Topic | Note |
-| ----- | ---- |
-| **Type inference** (`let x = expr` without `: T`) | Deferred by choice; grammar can later allow optional type when `=` is present. Not a prerequisite for Waves A–C. |
-| **Richer I/O** (files, structured errors) | See `docs/design/io_v1_spitball.md`; pairs well with `Option`/`Result`-style types later. |
-| **`Option` / `Result`** | Composes with I/O and error handling; revisit after input patterns stabilize. |
-| **`portability.md` (toolchain)** | Stubbed in [`docs/reference/toolchain/README.md`](reference/toolchain/README.md); still planned, lower urgency than language surface. |
-| **Pointers** | Address-of, references or raw `*T`, pointer arithmetic, provenance/aliasing rules, `null` story, interaction with arrays/`str`, LLVM (`i8*` / inbounds GEP), and diagnostics. Large semantic + backend milestone—track here until split into sub-tasks. |
-
----
-
-## Documentation quality bar (each wave)
-
-For every shipped slice:
-
-1. **Reference** — accurate for a newcomer using only `docs/reference/` + examples.
-2. **Tests** — semantic errors, IR/MLIR/LLVM dumps where applicable, at least one **executable** test if behavior is user-visible at runtime.
-3. **Comments in implementation** — match the existing educational style (why this pass exists, invariants, non-obvious tradeoffs); prefer a short design note over a 200-line comment in code.
-4. **Holy Book** — add or extend a section when the feature is a good teaching moment (e.g. how `for` lowers, how definite assignment is checked).
-
----
-
-## Revision history (optional)
+## Revision history
 
 | Date | Change |
 | ---- | ------ |
-| 2026-05-10 | Wave A (`for` loops) shipped; pointers added to carry-forward; `nex.md` phased roadmap condensed to evolution buckets. |
-
-Maintainers: append a row when reordering waves or completing a wave’s doc checklist.
+| 2026-05-10 | Wave A (`for` loops) shipped; backlog wave structure introduced. |
+| 2026-05-15 | Rewrote as ordered laundry list; added [feature_inventory.md](reference/language/feature_inventory.md); folded completed waves into inventory + short “done” stub. |

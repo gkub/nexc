@@ -197,7 +197,9 @@ This is intentionally still educational, but it now covers the current backend
 surface: fixed-width integers, booleans, module constants, string literals,
 direct calls, built-in printing calls, mutable local storage, assignment,
 returning and fallthrough `if`/`else`, `while`, `/`, `%`, unsigned-specific
-integer operations, and eager `&&` / `||`.
+integer operations, and short-circuiting `&&` / `||` (module `const`
+initializers keep a greedy IR encoding for lowering; see
+`docs/reference/language/expressions.md`).
 
 When `mlir-opt` is available, CTest also validates selected `--dump-mlir`
 outputs with MLIR's verifier. Golden tests catch text drift; verifier tests catch
@@ -296,9 +298,8 @@ The current frontend supports this parser surface:
 - conditional `llvm-as` validation for generated LLVM IR in the test suite
 
 Semantic analysis intentionally remains small. It does not yet implement
-coercions/promotions, definite assignment analysis, short-circuit logical
-operators, arbitrary constant-expression overflow evaluation, or inter-file/module
-resolution.
+coercions/promotions, definite assignment analysis, arbitrary constant-expression
+overflow evaluation, or inter-file/module resolution.
 
 ## Mental Model
 

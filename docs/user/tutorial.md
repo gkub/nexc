@@ -252,8 +252,12 @@ Logical operators:
 !   &&   ||
 ```
 
-Current `&&` and `||` are eager: both operands are evaluated before the
-boolean result is computed. Do not rely on short-circuit behavior yet.
+`&&` and `||` **short-circuit**: the right-hand side runs only when it can
+change the result (see the language reference for details). Integer operands use
+the same “zero is false” rule as `if` / `while`. Module-level `const`
+initializers are still fully analyzed on both sides; the compiler folds
+constants using short-circuit rules even though the initializer IR uses a
+linear truthify-and-binary lowering for simplicity.
 
 Conditions accept `bool` or integer values. For integers, zero is false and
 nonzero is true, like C:

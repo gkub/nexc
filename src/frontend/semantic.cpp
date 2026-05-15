@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -142,11 +143,17 @@ struct FunctionSymbol {
 // ValueSymbol is the semantic table entry for a value-like name: locals,
 // parameters, and module constants. Functions intentionally live in a separate
 // table because nex does not let functions be used as first-class values.
+//
+// `bindingId` identifies one storage binding for **flow-sensitive definite
+// assignment** of locals and parameters (see AnalyzerImpl). Module constants use
+// `isConst == true` and leave `bindingId` at zero because they are not checked
+// against the per-function assignment graph.
 struct ValueSymbol {
-    Type type;
+    Type type{};
     bool isMutable = false;
     bool isConst = false;
-    SourceSpan nameSpan;
+    SourceSpan nameSpan{};
+    std::size_t bindingId = 0;
 };
 
 // ExprInfo is the result of semantically analyzing an expression.
@@ -266,6 +273,20 @@ unsigned long long maxIntegerValue(Type type) {
     // 2^(width - 1) - 1. Unsigned integers use all bits for the value.
     const unsigned valueBits = isSigned(type) ? width - 1 : width;
     return (1ULL << valueBits) - 1;
+}
+
+// Intersection of two definite-assignment sets: value is readable after a join
+// only if it was readable on **both** incoming structured paths.
+std::unordered_set<std::size_t> intersectDefAssign(const std::unordered_set<std::size_t>& a,
+                                                   const std::unordered_set<std::size_t>& b) {
+    std::unordered_set<std::size_t> out;
+    out.reserve(std::min(a.size(), b.size()));
+    for (const std::size_t id : a) {
+        if (b.contains(id)) {
+            out.insert(id);
+        }
+    }
+    return out;
 }
 
 // AnalyzerImpl owns one semantic-analysis run.
@@ -499,16 +520,19 @@ private:
     // non-void function definitely returns along all structured paths.
     void analyzeFunction(const FunctionDecl& function) {
         // Function analysis resets per-function state: return type, local scopes,
-        // and return-path tracking.
+        // definite-assignment graph, and return-path tracking.
         currentReturnType_ = typeFromSyntax(function.returnType);
         sawReturnValue_ = false;
         scopes_.clear();
+        definiteAssign_.clear();
+        scopeBindingIds_.clear();
+        nextBindingId_ = 1;
         pushScope();
 
         for (const ParameterSyntax& parameter : function.parameters) {
-            // Parameters behave like immutable locals inside the function body.
-            declareLocal(parameter.name, parameter.nameSpan, typeFromSyntax(parameter.type),
-                         false);
+            const std::size_t id = declareLocal(parameter.name, parameter.nameSpan,
+                                                typeFromSyntax(parameter.type), false);
+            definiteAssign_.insert(id);
         }
 
         const bool allPathsReturn = analyzeStmt(*function.body);
@@ -529,18 +553,32 @@ private:
     // Start a new lexical local scope.
     //
     // Blocks and function bodies use this to make shadowing/local lifetime match
-    // source nesting.
-    void pushScope() { scopes_.push_back({}); }
+    // source nesting. Nested scopes also track which bindingIds were declared
+    // here so `popScope` can scrub them from the definite-assignment set.
+    void pushScope() {
+        scopes_.push_back({});
+        scopeBindingIds_.push_back({});
+    }
 
     // End the current lexical local scope.
-    void popScope() { scopes_.pop_back(); }
+    //
+    // Bindings introduced in the scope disappear from the symbol tables, and their
+    // ids leave `definiteAssign_` so shadowed outer names do not inherit the
+    // inner symbol's assignment state.
+    void popScope() {
+        for (const std::size_t id : scopeBindingIds_.back()) {
+            definiteAssign_.erase(id);
+        }
+        scopeBindingIds_.pop_back();
+        scopes_.pop_back();
+    }
 
     // Declare a local or parameter in the current scope.
     //
-    // Mutability is stored with the symbol because assignment checking needs to
-    // know whether `x = value;` is allowed.
-    void declareLocal(const std::string& name, SourceSpan span, Type type,
-                      bool isMutable) {
+    // Returns the new binding id, or 0 on duplicate-name failure (diagnostics
+    // already emitted). Parameters should always succeed.
+    std::size_t declareLocal(const std::string& name, SourceSpan span, Type type,
+                              bool isMutable) {
         // Duplicates are only rejected within the current lexical scope. Shadowing
         // an outer local is allowed by this implementation unless the language
         // spec later forbids it.
@@ -549,15 +587,59 @@ private:
             diagnostics_.error(span, "duplicate local name `" + name + "`");
             diagnostics_.note(scope[name].nameSpan,
                               "previous declaration of `" + name + "` is here");
-            return;
+            return 0;
         }
 
+        const std::size_t id = nextBindingId_++;
         scope[name] = ValueSymbol{
             .type = type,
             .isMutable = isMutable,
             .isConst = false,
             .nameSpan = span,
+            .bindingId = id,
         };
+        scopeBindingIds_.back().push_back(id);
+        return id;
+    }
+
+    void requireReadableLocal(const ValueSymbol& symbol, SourceSpan useSpan,
+                              std::string_view nameForDiag) {
+        if (symbol.isConst) {
+            return;
+        }
+        if (!definiteAssign_.contains(symbol.bindingId)) {
+            diagnostics_.error(
+                useSpan,
+                "local `" + std::string(nameForDiag) + "` may be read before assignment");
+        }
+    }
+
+    void mergeDefiniteAssignAfterIf(const std::unordered_set<std::size_t>& beforeIf,
+                                    const std::unordered_set<std::size_t>& afterThen,
+                                    const std::unordered_set<std::size_t>& afterElse,
+                                    bool hasElse, bool thenReturns, bool elseReturns) {
+        if (!hasElse) {
+            if (thenReturns) {
+                // Only the "condition false, skip then" path reaches the code
+                // after the `if`.
+                definiteAssign_ = beforeIf;
+            } else {
+                // Either skipped the then-arm (state `beforeIf`) or ran it and fell
+                // through (state `afterThen`).
+                definiteAssign_ = intersectDefAssign(beforeIf, afterThen);
+            }
+            return;
+        }
+
+        if (thenReturns && !elseReturns) {
+            definiteAssign_ = afterElse;
+        } else if (!thenReturns && elseReturns) {
+            definiteAssign_ = afterThen;
+        } else if (thenReturns && elseReturns) {
+            definiteAssign_ = beforeIf;
+        } else {
+            definiteAssign_ = intersectDefAssign(afterThen, afterElse);
+        }
     }
 
     // Resolve a value-like name in lexical scopes, then module constants.
@@ -619,6 +701,25 @@ private:
             // = x;` does not accidentally refer to the binding being declared.
             const Type declared = typeFromSyntax(let->type);
             validateFixedArrayDecl(declared, let->type.span);
+            if (!let->init) {
+                if (!let->isMutable) {
+                    diagnostics_.error(let->span,
+                                       "`let` requires an initializer; only `let mut` "
+                                       "may omit `=`");
+                    return false;
+                }
+                if (declared.isFixedArray()) {
+                    diagnostics_.error(let->type.span,
+                                       "fixed-size array locals require an initializer "
+                                       "until per-element definite assignment is implemented");
+                    return false;
+                }
+                const std::size_t id =
+                    declareLocal(let->name, let->nameSpan, declared, true);
+                (void)id;
+                return false;
+            }
+
             ExprInfo init = analyzeExpr(*let->init, declared);
             if (!sameType(declared, init.type)) {
                 diagnostics_.error(let->init->span,
@@ -627,7 +728,11 @@ private:
                                        "` with value of type `" + typeName(init.type) +
                                        "`");
             }
-            declareLocal(let->name, let->nameSpan, declared, let->isMutable);
+            const std::size_t id =
+                declareLocal(let->name, let->nameSpan, declared, let->isMutable);
+            if (id != 0) {
+                definiteAssign_.insert(id);
+            }
             return false;
         }
 
@@ -652,6 +757,7 @@ private:
                                            typeName(value.type) + "` to `" + nameExpr->name +
                                            "` of type `" + typeName(symbol->type) + "`");
                 }
+                definiteAssign_.insert(symbol->bindingId);
                 return false;
             }
 
@@ -672,6 +778,7 @@ private:
                     analyzeExpr(*assign->value, std::nullopt);
                     return false;
                 }
+                requireReadableLocal(*symbol, baseName->span, baseName->name);
                 if (!symbol->isMutable) {
                     diagnostics_.error(baseName->span,
                                        "cannot assign through immutable array binding `" +
@@ -715,34 +822,39 @@ private:
         }
 
         if (const auto* ifStmt = dynamic_cast<const IfStmt*>(&stmt)) {
-            // For return-path analysis, an if expression returns only when both
-            // branches exist and both branches return.
             analyzeCondition(*ifStmt->condition, "`if` condition");
+            const std::unordered_set<std::size_t> beforeIf = definiteAssign_;
             const bool thenReturns = analyzeStmt(*ifStmt->thenBranch);
+            const std::unordered_set<std::size_t> afterThen = definiteAssign_;
+            definiteAssign_ = beforeIf;
             bool elseReturns = false;
+            std::unordered_set<std::size_t> afterElse = beforeIf;
             if (ifStmt->elseBranch) {
                 elseReturns = analyzeStmt(*ifStmt->elseBranch);
+                afterElse = definiteAssign_;
             }
+            mergeDefiniteAssignAfterIf(beforeIf, afterThen, afterElse,
+                                       ifStmt->elseBranch != nullptr, thenReturns,
+                                       elseReturns);
             return ifStmt->elseBranch && thenReturns && elseReturns;
         }
 
         if (const auto* whileStmt = dynamic_cast<const WhileStmt*>(&stmt)) {
-            // This first analyzer does not prove loops execute, so while never
-            // counts as a guaranteed return path.
+            const std::unordered_set<std::size_t> saved = definiteAssign_;
             analyzeCondition(*whileStmt->condition, "`while` condition");
             ++loopDepth_;
             analyzeStmt(*whileStmt->body);
             --loopDepth_;
+            definiteAssign_ = saved;
             return false;
         }
 
         if (const auto* forStmt = dynamic_cast<const ForStmt*>(&stmt)) {
-            // `for` introduces one scope for init, condition, body, and step so a
-            // `let` in the init clause does not leak past the loop (C-family rule).
             pushScope();
             if (forStmt->init) {
                 analyzeStmt(*forStmt->init);
             }
+            const std::unordered_set<std::size_t> afterInit = definiteAssign_;
             if (forStmt->condition) {
                 analyzeCondition(*forStmt->condition, "`for` condition");
             }
@@ -754,6 +866,7 @@ private:
                 inForStepClause_ = false;
             }
             --loopDepth_;
+            definiteAssign_ = afterInit;
             popScope();
             return false;
         }
@@ -900,6 +1013,7 @@ private:
                 }
                 return ExprInfo{.type = Type{}, .isConstant = false};
             }
+            requireReadableLocal(*symbol, name->span, name->name);
             return ExprInfo{.type = symbol->type, .isConstant = symbol->isConst};
         }
 
@@ -1203,20 +1317,58 @@ private:
     // logical operators accept condition-like operands and return bool.
     ExprInfo analyzeBinaryExpr(const BinaryExpr& binary, std::optional<Type> expected) {
         if (binary.op == TokenKind::AmpAmp || binary.op == TokenKind::PipePipe) {
-            // Logical binary operators are condition-like on both sides and
-            // always produce bool.
+            // Logical operators accept condition-like operands and produce bool.
+            // Constant folding mirrors runtime short-circuit: a constant false LHS
+            // on `&&` (or true LHS on `||`) determines the result without requiring
+            // a constant RHS.
             ExprInfo left = analyzeExpr(*binary.left, std::nullopt);
-            ExprInfo right = analyzeExpr(*binary.right, std::nullopt);
             if (!canBeCondition(left.type)) {
                 diagnostics_.error(binary.left->span,
                                    "left operand must be `bool` or integer");
             }
+            ExprInfo right = analyzeExpr(*binary.right, std::nullopt);
             if (!canBeCondition(right.type)) {
                 diagnostics_.error(binary.right->span,
                                    "right operand must be `bool` or integer");
             }
-            return ExprInfo{.type = builtinScalar(BuiltinTypeKind::Bool),
-                            .isConstant = left.isConstant && right.isConstant};
+
+            auto truth = [](const ExprInfo& e) -> std::optional<bool> {
+                if (!e.isConstant || !e.integerValue) {
+                    return std::nullopt;
+                }
+                return *e.integerValue != 0;
+            };
+
+            const std::optional<bool> lt = truth(left);
+            const std::optional<bool> rt = truth(right);
+
+            bool foldedConst = false;
+            std::optional<unsigned long long> outVal;
+
+            if (binary.op == TokenKind::AmpAmp) {
+                if (lt && !*lt) {
+                    foldedConst = true;
+                    outVal = 0;
+                } else if (lt && *lt && rt) {
+                    foldedConst = true;
+                    outVal = *rt ? 1ULL : 0ULL;
+                }
+            } else {
+                if (lt && *lt) {
+                    foldedConst = true;
+                    outVal = 1;
+                } else if (lt && !*lt && rt) {
+                    foldedConst = true;
+                    outVal = *rt ? 1ULL : 0ULL;
+                }
+            }
+
+            ExprInfo info{.type = builtinScalar(BuiltinTypeKind::Bool),
+                          .isConstant = foldedConst};
+            if (foldedConst) {
+                info.integerValue = outVal;
+            }
+            return info;
         }
 
         // For arithmetic/comparison/equality, infer/check the left side first,
@@ -1389,6 +1541,18 @@ private:
 
     // Lexical local scopes for the function currently being analyzed.
     std::vector<std::unordered_map<std::string, ValueSymbol>> scopes_;
+
+    // --- Definite assignment (flow-sensitive) --------------------------------
+    //
+    // Each non-const local/parameter gets a stable bindingId (see ValueSymbol).
+    // `definiteAssign_` holds the ids proven readable at the current point. Module
+    // constants skip this: they use isConst and are always readable.
+    //
+    // Loops use a deliberately conservative rule: body assignments do not
+    // strengthen state after the loop (see docs/design/definite_assignment.md).
+    std::unordered_set<std::size_t> definiteAssign_;
+    std::vector<std::vector<std::size_t>> scopeBindingIds_;
+    std::size_t nextBindingId_ = 1;
 
     // Current function state used while analyzing return statements.
     Type currentReturnType_;

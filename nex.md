@@ -165,9 +165,10 @@ nexc/
 
 `docs/design/` is for rationale, architecture notes, optimization plans, and implementation strategy.
 
-`docs/IMPLEMENTATION_BACKLOG.md` is the **ordered near-term implementation checklist**
-(compiler milestones and documentation tasks); see the section *Ordered
-implementation backlog* above.
+`docs/IMPLEMENTATION_BACKLOG.md` is the **ordered living to-do list** for near-term
+implementation work; see the section *Ordered implementation backlog* above. A
+succinct **feature inventory** (what exists today) is
+[`docs/reference/language/feature_inventory.md`](./docs/reference/language/feature_inventory.md).
 
 ---
 

@@ -74,7 +74,9 @@ struct Block;
 // structured representation of checked nex programs. The union-like payload
 // fields below are selected by `kind`; for example, Binary uses `op`, `left`,
 // `right`, and `result`, while If uses `condition`, `thenBlock`, and
-// optionally `elseBlock`.
+// optionally `elseBlock`. ShortCircuitAnd / ShortCircuitOr also use `left`,
+// `thenBlock`, and `elseBlock`, but interpret the arms differently: see the
+// `Operation::Kind` enumerators for the exact contract.
 struct Operation {
     enum class Kind {
         Invalid,
@@ -92,9 +94,61 @@ struct Operation {
         // Value-producing expression operations.
         Unary,
         Binary,
+
+        // Short-circuit logical AND (`&&`) and OR (`||`).
+        //
+        // These exist so backends can preserve the standard language rule: the
+        // right-hand side is evaluated only when its value can change the result
+        // (`&&` skips the RHS when the LHS is false; `||` skips it when the LHS is
+        // true).
+        //
+        // Payload (both kinds share the same slot layout):
+        //
+        // - `left` (ValueRef): the **already evaluated** left-hand operand. Its type
+        //   is any *condition-like* scalar: `bool` or a fixed-width integer. MLIR
+        //   lowering first converts it to a truth test (`i1`) the same way `if` and
+        //   `while` conditions are tested: `bool` is already `i1`; integers use
+        //   `icmp ne %v, 0`.
+        //
+        // - `thenBlock` / `elseBlock` (structured child blocks): the two arms of
+        //   an `scf.if`-shaped lowering over that truth test. Which arm evaluates
+        //   the user’s RHS depends on the kind (see below).
+        //
+        // - `result` (bool ValueRef): the `bool` temporary produced by the operation.
+        //
+        // Child block terminators use `ReturnValue`, but that name is **scoped** to
+        // the structured region, not to the surrounding function: lowering turns each
+        // branch into `scf.yield` carrying an `i1`, *not* `func.return`. (The same
+        // `ReturnValue` terminator is reused by `if` arms for the same reason.)
+        //
+        // ShortCircuitAnd (`&&`):
+        //   If the truth test on `left` is true, `thenBlock` runs the user’s RHS,
+        //   coerces its value to `bool` (integer `0` is false, any other integer is
+        //   true; `bool` is identity), and ends with `ReturnValue` that boolean.
+        //   If the test is false, `elseBlock` skips the RHS entirely and yields
+        //   `false`.
+        //
+        // ShortCircuitOr (`||`):
+        //   If the truth test on `left` is true, `thenBlock` skips the RHS and
+        //   yields `true`. If false, `elseBlock` evaluates the RHS with the same
+        //   truthify-to-bool contract as the `&&` “take RHS” arm above.
+        //
+        // Module-level `const` initializers do **not** use these operations. They
+        // are analyzed as compile-time values and the IR builder lowers `&&` / `||`
+        // there as plain `Binary` on **truthified** `bool` operands (see
+        // `TypedIrBuilder` in `src/ir/builder.cpp`). That keeps const MLIR replay
+        // linear and avoids duplicating region-based control flow in initializers.
+        ShortCircuitAnd,
+        ShortCircuitOr,
+
         Call,
 
         // Side-effecting local storage operations.
+        //
+        // `DeclareLocal` normally carries an initializing ValueRef. When the source
+        // used `let mut x: T;` (no `=`), `value` is empty and backends allocate
+        // stack storage without an initial store—reads are still rejected by
+        // semantic definite-assignment checking.
         DeclareLocal,
         StoreLocal,
 
