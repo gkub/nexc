@@ -166,6 +166,12 @@ enum class ExprCtx { Normal, IndexBase };
 
 using ArrayElemMap = std::unordered_map<std::size_t, std::vector<std::uint8_t>>;
 
+struct DefAssignReason {
+    SourceSpan span;
+    std::string message;
+};
+using DefAssignReasonMap = std::unordered_map<std::size_t, DefAssignReason>;
+
 struct IndexedNameChain {
     const NameExpr* rootName = nullptr;
     // Indices from outer dimension to inner, matching `Type::arrayDimensions` order.
@@ -638,6 +644,7 @@ private:
         sawReturnValue_ = false;
         scopes_.clear();
         definiteAssign_.clear();
+        defAssignReasons_.clear();
         scopeBindingIds_.clear();
         nextBindingId_ = 1;
         pushScope();
@@ -645,7 +652,7 @@ private:
         for (const ParameterSyntax& parameter : function.parameters) {
             const std::size_t id = declareLocal(parameter.name, parameter.nameSpan,
                                                 typeFromSyntax(parameter.type), false);
-            definiteAssign_.insert(id);
+            markDefiniteAssigned(id);
         }
 
         const bool allPathsReturn = analyzeStmt(*function.body);
@@ -682,6 +689,7 @@ private:
         for (const std::size_t id : scopeBindingIds_.back()) {
             definiteAssign_.erase(id);
             arrayElemAssign_.erase(id);
+            defAssignReasons_.erase(id);
         }
         scopeBindingIds_.pop_back();
         scopes_.pop_back();
@@ -732,13 +740,40 @@ private:
             diagnostics_.error(
                 useSpan,
                 "local `" + std::string(nameForDiag) + "` may be read before assignment");
+            noteDefAssignReason(symbol);
             return;
         }
         if (!definiteAssign_.contains(symbol.bindingId)) {
             diagnostics_.error(
                 useSpan,
                 "local `" + std::string(nameForDiag) + "` may be read before assignment");
+            noteDefAssignReason(symbol);
         }
+    }
+
+    void rememberDefAssignReason(std::size_t bindingId, SourceSpan span,
+                                 std::string message) {
+        if (bindingId != 0) {
+            defAssignReasons_[bindingId] = DefAssignReason{
+                .span = span,
+                .message = std::move(message),
+            };
+        }
+    }
+
+    void markDefiniteAssigned(std::size_t bindingId) {
+        definiteAssign_.insert(bindingId);
+        defAssignReasons_.erase(bindingId);
+    }
+
+    void noteDefAssignReason(const ValueSymbol& symbol) {
+        const auto it = defAssignReasons_.find(symbol.bindingId);
+        if (it != defAssignReasons_.end()) {
+            diagnostics_.note(it->second.span, it->second.message);
+            return;
+        }
+        diagnostics_.note(symbol.nameSpan,
+                          "binding declared here; it must be assigned on every path before use");
     }
 
     void initArrayElemTrackingForBinding(std::size_t bindingId, const Type& declared,
@@ -760,7 +795,7 @@ private:
 
     void markArrayBindingFullyAssigned(std::size_t bindingId) {
         arrayElemAssign_.erase(bindingId);
-        definiteAssign_.insert(bindingId);
+        markDefiniteAssigned(bindingId);
     }
 
     void noteIndexedStoreToLocal(std::size_t bindingId, const Type& rootArrayTy,
@@ -803,7 +838,7 @@ private:
         }
         mask[*offset] = 1;
         if (vectorAllOnes(mask)) {
-            definiteAssign_.insert(bindingId);
+            markDefiniteAssigned(bindingId);
             arrayElemAssign_.erase(bindingId);
         }
     }
@@ -845,6 +880,7 @@ private:
             it->second[*offset] == 0) {
             diagnostics_.error(useSpan, "indexed read may access an uninitialized element of `" +
                                            std::string(nameForDiag) + "`");
+            noteDefAssignReason(symbol);
         }
     }
 
@@ -896,6 +932,7 @@ private:
             diagnostics_.error(useSpan,
                                "indexed access may read uninitialized elements of `" +
                                    std::string(nameForDiag) + "`");
+            noteDefAssignReason(symbol);
             return;
         }
         for (unsigned long long i = 0; i < spanElems; ++i) {
@@ -904,6 +941,7 @@ private:
                 diagnostics_.error(useSpan,
                                    "indexed access may read uninitialized elements of `" +
                                        std::string(nameForDiag) + "`");
+                noteDefAssignReason(symbol);
                 return;
             }
         }
@@ -934,6 +972,50 @@ private:
             definiteAssign_ = beforeIf;
         } else {
             definiteAssign_ = intersectDefAssign(afterThen, afterElse);
+        }
+    }
+
+    void noteIfDefAssignLosses(SourceSpan ifSpan,
+                               const std::unordered_set<std::size_t>& beforeIf,
+                               const std::unordered_set<std::size_t>& afterThen,
+                               const std::unordered_set<std::size_t>& afterElse,
+                               bool hasElse, bool thenReturns, bool elseReturns) {
+        std::unordered_set<std::size_t> candidates = afterThen;
+        candidates.insert(afterElse.begin(), afterElse.end());
+        for (const std::size_t id : candidates) {
+            if (definiteAssign_.contains(id) || beforeIf.contains(id)) {
+                continue;
+            }
+            if (!hasElse) {
+                if (afterThen.contains(id)) {
+                    rememberDefAssignReason(
+                        id, ifSpan,
+                        "assignment may be skipped because this `if` has no `else`");
+                }
+                continue;
+            }
+            const bool thenCanFallThrough = !thenReturns;
+            const bool elseCanFallThrough = !elseReturns;
+            const bool missingFromThen = thenCanFallThrough && !afterThen.contains(id);
+            const bool missingFromElse = elseCanFallThrough && !afterElse.contains(id);
+            if (missingFromThen || missingFromElse) {
+                rememberDefAssignReason(
+                    id, ifSpan,
+                    "assignment is not guaranteed on every branch of this `if`");
+            }
+        }
+    }
+
+    void noteLoopDefAssignLosses(SourceSpan loopSpan,
+                                 const std::unordered_set<std::size_t>& beforeLoop,
+                                 const std::unordered_set<std::size_t>& afterBody) {
+        for (const std::size_t id : afterBody) {
+            if (beforeLoop.contains(id)) {
+                continue;
+            }
+            rememberDefAssignReason(
+                id, loopSpan,
+                "assignment inside a loop is not guaranteed because the loop may run zero times");
         }
     }
 
@@ -1202,12 +1284,16 @@ private:
                         declareLocal(let->name, let->nameSpan, declared, true);
                     if (id != 0) {
                         initArrayElemTrackingForBinding(id, declared, let->type.span);
+                        rememberDefAssignReason(
+                            id, let->nameSpan,
+                            "binding declared here without an initializer");
                     }
                     return false;
                 }
                 const std::size_t id =
                     declareLocal(let->name, let->nameSpan, declared, true);
-                (void)id;
+                rememberDefAssignReason(id, let->nameSpan,
+                                        "binding declared here without an initializer");
                 return false;
             }
 
@@ -1222,7 +1308,7 @@ private:
             const std::size_t id =
                 declareLocal(let->name, let->nameSpan, declared, let->isMutable);
             if (id != 0) {
-                definiteAssign_.insert(id);
+                markDefiniteAssigned(id);
                 if (declared.isFixedArray()) {
                     markArrayBindingFullyAssigned(id);
                 }
@@ -1251,7 +1337,7 @@ private:
                                            typeName(value.type) + "` to `" + nameExpr->name +
                                            "` of type `" + typeName(symbol->type) + "`");
                 }
-                definiteAssign_.insert(symbol->bindingId);
+                markDefiniteAssigned(symbol->bindingId);
                 return false;
             }
 
@@ -1347,22 +1433,36 @@ private:
             analyzeCondition(*ifStmt->condition, "`if` condition");
             const std::unordered_set<std::size_t> beforeIf = definiteAssign_;
             const ArrayElemMap beforeIfArrays = arrayElemAssign_;
+            const DefAssignReasonMap beforeIfReasons = defAssignReasons_;
             const bool thenReturns = analyzeStmt(*ifStmt->thenBranch);
             const std::unordered_set<std::size_t> afterThen = definiteAssign_;
             const ArrayElemMap afterThenArrays = arrayElemAssign_;
+            const DefAssignReasonMap afterThenReasons = defAssignReasons_;
             definiteAssign_ = beforeIf;
             arrayElemAssign_ = beforeIfArrays;
+            defAssignReasons_ = beforeIfReasons;
             bool elseReturns = false;
             std::unordered_set<std::size_t> afterElse = beforeIf;
             ArrayElemMap afterElseArrays = beforeIfArrays;
+            DefAssignReasonMap afterElseReasons = beforeIfReasons;
             if (ifStmt->elseBranch) {
                 elseReturns = analyzeStmt(*ifStmt->elseBranch);
                 afterElse = definiteAssign_;
                 afterElseArrays = arrayElemAssign_;
+                afterElseReasons = defAssignReasons_;
+            }
+            if (ifStmt->elseBranch && thenReturns && !elseReturns) {
+                defAssignReasons_ = afterElseReasons;
+            } else if (ifStmt->elseBranch && !thenReturns && elseReturns) {
+                defAssignReasons_ = afterThenReasons;
+            } else {
+                defAssignReasons_ = beforeIfReasons;
             }
             mergeDefiniteAssignAfterIf(beforeIf, afterThen, afterElse,
                                        ifStmt->elseBranch != nullptr, thenReturns,
                                        elseReturns);
+            noteIfDefAssignLosses(ifStmt->span, beforeIf, afterThen, afterElse,
+                                  ifStmt->elseBranch != nullptr, thenReturns, elseReturns);
             mergeArrayElemAssignAfterIf(beforeIfArrays, beforeIf, afterThenArrays, afterThen,
                                         afterElseArrays, afterElse, ifStmt->elseBranch != nullptr,
                                         thenReturns, elseReturns);
@@ -1372,12 +1472,16 @@ private:
         if (const auto* whileStmt = dynamic_cast<const WhileStmt*>(&stmt)) {
             const std::unordered_set<std::size_t> saved = definiteAssign_;
             const ArrayElemMap savedArrays = arrayElemAssign_;
+            const DefAssignReasonMap savedReasons = defAssignReasons_;
             analyzeCondition(*whileStmt->condition, "`while` condition");
             ++loopDepth_;
             analyzeStmt(*whileStmt->body);
             --loopDepth_;
+            const std::unordered_set<std::size_t> afterBody = definiteAssign_;
             definiteAssign_ = saved;
             arrayElemAssign_ = savedArrays;
+            defAssignReasons_ = savedReasons;
+            noteLoopDefAssignLosses(whileStmt->span, saved, afterBody);
             return false;
         }
 
@@ -1388,6 +1492,7 @@ private:
             }
             const std::unordered_set<std::size_t> afterInit = definiteAssign_;
             const ArrayElemMap afterInitArrays = arrayElemAssign_;
+            const DefAssignReasonMap afterInitReasons = defAssignReasons_;
             if (forStmt->condition) {
                 analyzeCondition(*forStmt->condition, "`for` condition");
             }
@@ -1399,8 +1504,11 @@ private:
                 inForStepClause_ = false;
             }
             --loopDepth_;
+            const std::unordered_set<std::size_t> afterBody = definiteAssign_;
             definiteAssign_ = afterInit;
             arrayElemAssign_ = afterInitArrays;
+            defAssignReasons_ = afterInitReasons;
+            noteLoopDefAssignLosses(forStmt->span, afterInit, afterBody);
             popScope();
             return false;
         }
@@ -2154,6 +2262,7 @@ private:
     // Loops use a deliberately conservative rule: body assignments do not
     // strengthen state after the loop (see docs/design/definite_assignment.md).
     std::unordered_set<std::size_t> definiteAssign_;
+    DefAssignReasonMap defAssignReasons_;
     ArrayElemMap arrayElemAssign_;
     std::vector<std::vector<std::size_t>> scopeBindingIds_;
     std::size_t nextBindingId_ = 1;

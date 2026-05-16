@@ -25,9 +25,9 @@ Current built-ins:
 print(fmt: str, ...) -> void
 println(fmt: str, ...) -> void
 readln() -> str
-parse_i32(str) -> i32
-parse_u64(str) -> u64
-parse_bool(str) -> bool
+parse_i32(text: str) -> i32
+parse_u64(text: str) -> u64
+parse_bool(text: str) -> bool
 input_ok() -> bool
 ```
 
@@ -73,17 +73,17 @@ Escape sequences in string literals follow the usual rules (`\n`, `\t`, `\"`, `\
   the value.
 - `input_ok()` reports success/failure of the last fallible input/parse operation.
 
-### `parse_i32(str) -> i32`
+### `parse_i32(text: str) -> i32`
 
 Parses signed decimal text into `i32`. On failure, returns `0` and sets
 `input_ok()` to `false`.
 
-### `parse_u64(str) -> u64`
+### `parse_u64(text: str) -> u64`
 
 Parses unsigned decimal text into `u64`. On failure, returns `0` and sets
 `input_ok()` to `false`.
 
-### `parse_bool(str) -> bool`
+### `parse_bool(text: str) -> bool`
 
 Accepts `true`, `false`, `1`, or `0`. On failure, returns `false` and sets
 `input_ok()` to `false`.

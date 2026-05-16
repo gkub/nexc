@@ -1,0 +1,12 @@
+// Nested fixed-size arrays: ranked memrefs, chained indexing, and element stores.
+
+fn main() -> i32 {
+    let mut a: [[i32; 2]; 2];
+    a[0][0] = 1;
+    a[0][1] = 2;
+    a[1][0] = 3;
+    a[1][1] = 4;
+
+    let b: [[i32; 2]; 2] = [[5, 6], [7, 8]];
+    return a[1][1] + b[0][1];
+}

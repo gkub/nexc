@@ -1,3 +1,6 @@
 tests/semantic_use_before_assign.nexs:3:12: error: local `x` may be read before assignment
   |     return x;
   |            ^
+tests/semantic_use_before_assign.nexs:2:13: note: binding declared here without an initializer
+  |     let mut x: i32;
+  |             ^

@@ -11,6 +11,7 @@
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/MemRef/Transforms/Passes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Pass/Pass.h"
@@ -60,6 +61,7 @@ void lowerToLlvmDialect(::mlir::ModuleOp module) {
 #else
     passes.addPass(::mlir::createConvertSCFToCFPass());
 #endif
+    passes.addPass(::mlir::memref::createExpandStridedMetadataPass());
     passes.addPass(::mlir::createFinalizeMemRefToLLVMConversionPass());
     passes.addPass(::mlir::createConvertFuncToLLVMPass());
     passes.addPass(::mlir::createArithToLLVMConversionPass());

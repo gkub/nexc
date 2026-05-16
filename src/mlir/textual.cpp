@@ -287,6 +287,53 @@ void copyRankedMemRef(::mlir::OpBuilder& builder, ::mlir::Location loc,
         .getResult();
 }
 
+llvm::SmallVector<int64_t, 4> rankedArrayShape(ir::Type arrayType) {
+    llvm::SmallVector<int64_t, 4> shape;
+    shape.reserve(arrayType.arrayDimensions.size());
+    for (std::uint64_t d : arrayType.arrayDimensions) {
+        shape.push_back(static_cast<int64_t>(d));
+    }
+    return shape;
+}
+
+::mlir::Value firstDimSubview(::mlir::OpBuilder& builder, ::mlir::Location loc,
+                              ::mlir::Value source, ::mlir::Value index,
+                              ir::Type sourceArrayType) {
+    if (!sourceArrayType.isFixedArray() || sourceArrayType.arrayDimensions.size() < 2) {
+        throw std::logic_error("firstDimSubview expects a ranked array with inner dimensions");
+    }
+
+    llvm::SmallVector<::mlir::OpFoldResult, 4> offsets;
+    llvm::SmallVector<::mlir::OpFoldResult, 4> sizes;
+    llvm::SmallVector<::mlir::OpFoldResult, 4> strides;
+    offsets.reserve(sourceArrayType.arrayDimensions.size());
+    sizes.reserve(sourceArrayType.arrayDimensions.size());
+    strides.reserve(sourceArrayType.arrayDimensions.size());
+
+    offsets.push_back(index);
+    sizes.push_back(builder.getIndexAttr(1));
+    strides.push_back(builder.getIndexAttr(1));
+    for (std::size_t dim = 1; dim < sourceArrayType.arrayDimensions.size(); ++dim) {
+        offsets.push_back(builder.getIndexAttr(0));
+        sizes.push_back(builder.getIndexAttr(
+            static_cast<int64_t>(sourceArrayType.arrayDimensions[dim])));
+        strides.push_back(builder.getIndexAttr(1));
+    }
+
+    // MLIR subview operands describe the full source rank. The result drops the
+    // leading size-1 dimension so a Nex `[[T; N]; M]` index has type `[T; N]`.
+    const ::mlir::MemRefType sourceTy = ::mlir::cast<::mlir::MemRefType>(source.getType());
+    const llvm::SmallVector<int64_t, 4> resultShape =
+        rankedArrayShape(sourceArrayType.afterIndex());
+    const ::mlir::MemRefType resultTy =
+        ::mlir::cast<::mlir::MemRefType>(
+            ::mlir::memref::SubViewOp::inferRankReducedResultType(
+                resultShape, sourceTy, offsets, sizes, strides));
+    auto sub = builder.create<::mlir::memref::SubViewOp>(loc, resultTy, source, offsets,
+                                                         sizes, strides);
+    return sub.getResult();
+}
+
 // Map a nex comparison token to MLIR's integer comparison predicate enum.
 //
 // This first lowering slice only supports i32 comparisons, so relational
@@ -811,27 +858,15 @@ private:
         auto slot = builder_.create<::mlir::memref::AllocaOp>(
             loc_, rankedArrayMemRefType(builder_, result.type));
 
-        const ir::Type innerTy = result.type.afterIndex();
         for (std::size_t i = 0; i < operation.arguments.size(); ++i) {
             auto idx =
                 builder_.create<::mlir::arith::ConstantIndexOp>(loc_, static_cast<int64_t>(i));
             const ::mlir::Value elem = lookupValue(operation.arguments[i]);
             const ir::Type argTy = operation.arguments[i].type;
             if (argTy.isFixedArray()) {
-                llvm::SmallVector<::mlir::OpFoldResult> offsets;
-                offsets.push_back(idx.getResult());
-                llvm::SmallVector<::mlir::OpFoldResult> sizes;
-                llvm::SmallVector<::mlir::OpFoldResult> strides;
-                for (std::size_t d = 1; d < result.type.arrayDimensions.size(); ++d) {
-                    sizes.push_back(builder_.getIndexAttr(
-                        static_cast<int64_t>(result.type.arrayDimensions[d])));
-                    strides.push_back(builder_.getIndexAttr(1));
-                }
-                const ::mlir::MemRefType sliceTy =
-                    rankedArrayMemRefType(builder_, innerTy);
-                auto sub = builder_.create<::mlir::memref::SubViewOp>(loc_, sliceTy, slot.getResult(),
-                                                                       offsets, sizes, strides);
-                copyRankedMemRef(builder_, loc_, elem, sub.getResult(), argTy);
+                const ::mlir::Value sub =
+                    firstDimSubview(builder_, loc_, slot.getResult(), idx.getResult(), result.type);
+                copyRankedMemRef(builder_, loc_, elem, sub, argTy);
             } else {
                 builder_.create<::mlir::memref::StoreOp>(loc_, elem, slot.getResult(),
                                                          idx.getResult());
@@ -860,25 +895,7 @@ private:
             bindValue(result, loaded.getResult());
             return;
         }
-        llvm::SmallVector<::mlir::OpFoldResult> offsets;
-        offsets.push_back(idx);
-        llvm::SmallVector<::mlir::OpFoldResult> sizes;
-        llvm::SmallVector<::mlir::OpFoldResult> strides;
-        for (std::size_t i = 1; i < baseTy.arrayDimensions.size(); ++i) {
-            sizes.push_back(builder_.getIndexAttr(
-                static_cast<int64_t>(baseTy.arrayDimensions[i])));
-            strides.push_back(builder_.getIndexAttr(1));
-        }
-        auto srcTy = ::mlir::cast<::mlir::MemRefType>(baseVal.getType());
-        const ::mlir::Type elemTy = srcTy.getElementType();
-        llvm::SmallVector<int64_t> resShape;
-        for (std::size_t i = 1; i < baseTy.arrayDimensions.size(); ++i) {
-            resShape.push_back(static_cast<int64_t>(baseTy.arrayDimensions[i]));
-        }
-        const ::mlir::MemRefType resTy = ::mlir::MemRefType::get(resShape, elemTy);
-        auto sub = builder_.create<::mlir::memref::SubViewOp>(loc_, resTy, baseVal, offsets,
-                                                               sizes, strides);
-        bindValue(result, sub.getResult());
+        bindValue(result, firstDimSubview(builder_, loc_, baseVal, idx, baseTy));
     }
 
     void lowerIndexStore(const ir::Operation& operation) {

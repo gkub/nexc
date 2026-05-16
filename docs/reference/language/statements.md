@@ -28,7 +28,8 @@ Current statement forms include:
 
 - block: `{ ... }`
 - local declaration: `let` / `let mut`
-- assignment: `name = expr;` or `name[index] = expr;` (array element update)
+- assignment: `name = expr;` or `name[index] = expr;` / `name[i][j] = expr;`
+  (array element update)
 - return: `return;` or `return expr;`
 - conditional: `if (...) stmt [else stmt]`
 - loops: `while (...) stmt`, **`for (init; condition; step) stmt`** (C-style; see below)
@@ -62,10 +63,12 @@ let mut name: Type;
 ```text
 name = expr;
 name[index] = expr;
+name[index][...] = expr;
 ```
 
 - Assignment targets are either a **mutable local name** or an **indexed mutable
-  array** (`arr[i] = …`) where `arr` was declared with `let mut`.
+  array** (`arr[i] = …`, `grid[i][j] = ...`) where the root array binding was
+  declared with `let mut`.
 - Assigning to immutable `let` or through an immutable array binding is a diagnostic
   error.
 

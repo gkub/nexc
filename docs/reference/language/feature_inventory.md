@@ -21,19 +21,18 @@ Succinct checklist of **implemented surface** (and a few prominent gaps). Normat
 
 - **Scalars:** `i8` … `u64`, `bool`, `void`. [types.md](types.md)
 - **`str`:** string type with runtime support; literals; some builtins. [types.md](types.md)
-- **Fixed arrays `[T; N]`:** locals, **`fn` parameters and returns**, module **`const`** (full array literal initializer); indexing and `let mut` element assign. **`main`** may not return an array type. Uninitialized `let mut a: [T; N];` is still rejected. [types.md](types.md)
+- **Fixed arrays `[T; N]`:** locals, **`fn` parameters and returns**, module **`const`** (full array literal initializer), nested arrays, indexing, and `let mut` element assign. **`main`** may not return an array type. [types.md](types.md)
 
 ## Locals and definite assignment
 
 - **`let name: T = expr;`** — immutable; must have initializer.
 - **`let mut name: T = expr;`** — mutable with initial value.
-- **`let mut name: T;`** — **scalar** mutable storage, no `=`; readable only after **flow-sensitive definite assignment** (`if`/`else` joins, conservative `while`/`for`). [statements.md](statements.md), [definite_assignment.md](../../design/definite_assignment.md)
-- **Fixed arrays:** uninitialized `let mut a: [T; N];` **not** accepted yet (semantic reject).
+- **`let mut name: T;`** — mutable storage, no `=`; readable only after **flow-sensitive definite assignment** (`if`/`else` joins, conservative `while`/`for`). Fixed arrays also track per-element assignment for compile-time-known indices. [statements.md](statements.md), [definite_assignment.md](../../design/definite_assignment.md)
 
 ## Assignment
 
 - **`name = expr;`** — `let mut` names only. [statements.md](statements.md)
-- **`arr[i] = expr;`** — `let mut` array binding. [statements.md](statements.md), [expressions.md](expressions.md)
+- **`arr[i] = expr;`, `grid[i][j] = expr;`** — `let mut` array binding. [statements.md](statements.md), [expressions.md](expressions.md)
 
 ## Control flow
 
@@ -50,7 +49,7 @@ Succinct checklist of **implemented surface** (and a few prominent gaps). Normat
 - **`&&` / `||`** — short-circuit; condition-like operands in runtime code; module `const` folding uses distinct lowering detail. [expressions.md](expressions.md)
 - **Unary `-`, `!`, `~`** — where supported. [expressions.md](expressions.md)
 - **Calls** — user functions and builtins; `void` only as statement. [functions_and_calls.md](functions_and_calls.md)
-- **Indexing** — fixed arrays. [expressions.md](expressions.md)
+- **Indexing** — fixed arrays, including chained indexing for nested arrays. [expressions.md](expressions.md)
 
 ## Built-ins and I/O
 
@@ -68,11 +67,11 @@ Succinct checklist of **implemented surface** (and a few prominent gaps). Normat
 - Heap allocation, ownership, **pointers**.
 - Type inference (`let x = expr` without `: T`).
 - **`Option` / `Result`**, richer file I/O.
-- Arrays in function signatures and module `const` (see backlog).
 
 ---
 
 ## See also
 
+- [Language quick reference](quick_reference.md)
 - [Language reference index](README.md)
 - [Implementation backlog](../../IMPLEMENTATION_BACKLOG.md)

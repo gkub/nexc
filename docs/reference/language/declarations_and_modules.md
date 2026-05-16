@@ -86,7 +86,6 @@ Not currently implemented:
 - imports/modules across multiple files
 - package/module namespace system
 - user-defined type declarations at top level
-- array-typed module constants
 
 ## Examples
 

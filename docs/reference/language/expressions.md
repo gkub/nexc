@@ -46,8 +46,8 @@ index-expression ::= expression "[" expression "]"
 | unary operator | `-x`, `!ok` | `-` negates integers; `!` accepts `bool` or integer condition values. |
 | binary operator | `a + b`, `x == y` | Arithmetic, comparison, equality, and logical operators. |
 | parenthesized expression | `(a + b) * c` | Overrides default precedence. |
-| array literal | `[1, 2, 3]` | Length must match the contextual `[T; N]` type, or element types must agree for inference. |
-| indexing | `items[i]` | Base expression must have fixed array type. |
+| array literal | `[1, 2, 3]`, `[[1, 2], [3, 4]]` | Length and nested shape must match the contextual fixed-array type, or element types/shapes must agree for inference. |
+| indexing | `items[i]`, `grid[i][j]` | Base expression must have fixed array type. |
 
 ## Operator Precedence
 
@@ -93,10 +93,16 @@ if (y != 0 && x / y > 1) {
 }
 ```
 
+## Arrays And Indexing
+
 - An array **literal** lists element expressions separated by commas inside `[` `]`.
+- Nested array literals are written by nesting array literals, for example
+  `[[1, 2], [3, 4]]`.
 - An array **load** is postfix: the base expression must have a fixed array type;
   the index must be an integer type (`i32` is typical).
-- Assignment to `name[index]` requires `let mut` on the array binding.
+- Chained indexing walks nested arrays one dimension at a time: `grid[1][0]`.
+- Assignment to `name[index]` or `name[index][...]` requires `let mut` on the
+  root array binding.
 
 ## Type Rules
 

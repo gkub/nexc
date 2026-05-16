@@ -18,6 +18,17 @@ Functions are top-level declarations with typed parameters and a typed return.
 Calls can appear as expressions when they return a value, or as statements when
 the callee returns `void`.
 
+## Quick Reference
+
+```nex
+fn name(param: Type, ...) -> ReturnType {
+    statements
+}
+
+let value: i32 = callee(arg1, arg2);
+callee_returning_void();
+```
+
 ## Function Declaration Form
 
 ```text
@@ -36,7 +47,7 @@ Top-level placement rules are covered in [declarations_and_modules.md](declarati
 
 ## Return Types
 
-- Functions return either scalar types or `void`.
+- Functions return scalar types, fixed arrays, or `void`.
 - `void` functions use `return;`.
 - Non-`void` functions return typed expressions.
 - Current semantic analysis enforces return-path requirements for non-`void`
@@ -69,9 +80,9 @@ Current built-in signatures:
 print(fmt: str, ...) -> void
 println(fmt: str, ...) -> void
 readln() -> str
-parse_i32(str) -> i32
-parse_u64(str) -> u64
-parse_bool(str) -> bool
+parse_i32(text: str) -> i32
+parse_u64(text: str) -> u64
+parse_bool(text: str) -> bool
 input_ok() -> bool
 ```
 

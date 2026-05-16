@@ -318,6 +318,7 @@ if(MLIR_FOUND)
             MLIRFuncToLLVM
             MLIRLLVMDialect
             MLIRMemRefToLLVM
+            MLIRMemRefTransforms
             MLIRReconcileUnrealizedCasts
             MLIRSCFToControlFlow
             MLIRTargetLLVMIRExport
@@ -747,6 +748,11 @@ add_nexc_mlir_validation_test(
     examples/array_abi.nexs
 )
 
+add_nexc_mlir_validation_test(
+    validate_mlir_array_nested
+    examples/array_nested.nexs
+)
+
 add_nexc_llvm_validation_test(
     validate_llvm_return_42
     examples/return_42.nexs
@@ -847,6 +853,12 @@ add_nexc_executable_test(
     36
 )
 
+add_nexc_executable_test(
+    run_executable_array_nested
+    examples/array_nested.nexs
+    10
+)
+
 add_nexc_executable_stdout_test(
     run_executable_hello_stdout
     examples/hello.nexs
@@ -885,6 +897,11 @@ add_test(
 add_test(
     NAME semantic_check_array_abi
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/array_abi.nexs
+)
+
+add_test(
+    NAME semantic_check_array_nested
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/array_nested.nexs
 )
 
 add_test(

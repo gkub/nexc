@@ -16,7 +16,8 @@ Implemented today:
 - selected input helpers such as `readln`, `parse_i32`, `parse_u64`,
   `parse_bool`, and `input_ok`
 - `if` / `else`, `while`, C-style `for`, `break`, and `continue`
-- fixed-size local arrays with literals, indexing, and mutable element assignment
+- fixed-size arrays for locals, function ABI, module constants, nested literals,
+  indexing, and mutable element assignment
 
 See [`docs/reference/language`](./docs/reference/language/README.md) if you want to learn how to write nex code, and
 [`NEXC_HOLY_BOOK.md`](./NEXC_HOLY_BOOK.md) for an educational tour of how the nex compiler works.
@@ -144,8 +145,7 @@ docs/      reference docs, design notes, tutorials, backlog
 ## Forward Priorities
 
 Near-term work is tracked in [`docs/IMPLEMENTATION_BACKLOG.md`](./docs/IMPLEMENTATION_BACKLOG.md).
-The current focus is definite assignment and uninitialized locals, followed by a
-tighter fixed-array story and later pointer work.
+That file is the source of truth for implementation order.
 
 ## License
 

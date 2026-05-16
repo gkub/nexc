@@ -4,14 +4,14 @@ This is the beginner-facing guide for writing the nex that exists today. Prefer
 **`docs/reference/`** for exact rules.
 
 This tutorial stays close to what the compiler accepts today. You can write scalar functions, constants,
-variables, arithmetic, `if` / `else`, `while` and **`for`** loops, **fixed-size array locals**
-(`[T; N]`) with literals and indexing, string literals, and **`print` /
+variables, arithmetic, `if` / `else`, `while` and **`for`** loops, **fixed-size arrays**
+(`[T; N]`) with literals, nesting, indexing, and function/module-constant use, string literals, and **`print` /
 `println`** (including Rust-style `` `"x={}"`, value `` formatting—see
 [`docs/reference/language/builtins_and_io.md`](../reference/language/builtins_and_io.md)).
-You cannot declare locals **without** an initializer, import other files, spawn
+You can declare `let mut` locals without an initializer when definite-assignment
+rules prove they are written before use. You cannot import other files, spawn
 tasks, or do general file/pipe I/O yet.
-The **ordered list of what we implement next** (e.g. `for`, then uninitialized
-locals + definite assignment, then tightening array rules) is maintained in
+The **ordered list of what we implement next** is maintained in
 [`docs/IMPLEMENTATION_BACKLOG.md`](../IMPLEMENTATION_BACKLOG.md).
 
 The current compiler frontend can **check** nex programs:
@@ -408,9 +408,9 @@ fn main() -> i32 {
 
 Current parse helpers:
 
-- `parse_i32(str) -> i32`
-- `parse_u64(str) -> u64`
-- `parse_bool(str) -> bool` (`true`, `false`, `1`, `0`)
+- `parse_i32(text: str) -> i32`
+- `parse_u64(text: str) -> u64`
+- `parse_bool(text: str) -> bool` (`true`, `false`, `1`, `0`)
 
 Use `input_ok()` after `readln()`/parse calls to check success.
 
@@ -464,8 +464,6 @@ error: integer literal `128` does not fit in type `i8`
 
 Not everything in the long-term vision is implemented yet. Examples:
 
-- C-style **`for`** loops (use `while` today)
-- Locals **without** `= initializer` and **definite-assignment** checking
 - Slices, growable vectors, and richer array initialization stories
 - User-defined types beyond builtin scalars and fixed arrays
 - Imports / `.nexh` modules

@@ -3,7 +3,7 @@
 ## Table of Contents
 
 - [Purpose](#purpose)
-- [Status](#status)
+- [Quick Reference](#quick-reference)
 - [Definitions](#definitions)
 - [Rules / Contract](#rules--contract)
 - [Examples](#examples)
@@ -15,11 +15,14 @@
 
 Describe exactly what this page defines and what is out of scope.
 
-## Status
+## Quick Reference
 
-- Stability: draft | provisional | stable
-- Applies to: current compiler | planned feature | historical note
-- Last behavior change: <date or commit>
+```text
+syntax-or-signature ::= ...
+```
+
+- One-line rule or caveat.
+- Link to another page for adjacent concepts.
 
 ## Definitions
 
@@ -28,6 +31,10 @@ Define important terms before using them in rules.
 ## Rules / Contract
 
 List the normative behavior in precise, testable language.
+
+Do not put roadmap sequencing here. Link to
+[`docs/IMPLEMENTATION_BACKLOG.md`](../IMPLEMENTATION_BACKLOG.md) for planned
+work.
 
 ## Examples
 

@@ -48,22 +48,26 @@ fails. They do **not** belong on **`[T; N]`** without lying about the type
 learners: “fixed array `xs` has length `N` known at compile time; to append
 elements you need …” with a doc link — same spirit as definite-assignment hints.
 
-## Recommended Order
+## Design Staging Rationale
 
-1. Add fixed-size arrays first.
+This rationale explains why the backlog starts with fixed arrays before slices
+or vectors. Sequencing itself lives in
+[`docs/IMPLEMENTATION_BACKLOG.md`](../IMPLEMENTATION_BACKLOG.md).
+
+1. Fixed-size arrays:
    - They need no allocator.
    - They fit stack/realtime constraints.
    - They teach indexing, length, and aggregate layout.
 
-2. Add slices/views second.
+2. Slices/views:
    - They are the natural bridge from arrays to strings and file buffers.
    - They make pointer/length explicit in the language instead of only in MLIR.
 
-3. Add growable vectors after allocation exists.
+3. Growable vectors:
    - `Vec<T>` needs heap allocation, capacity, reallocation, and failure policy.
    - It should not appear before the runtime has an allocation story.
 
-4. Add math vectors/matrices as distinct shape-aware types.
+4. Math vectors/matrices:
    - A math `vec4<f32>` should be optimizable as a numeric value.
    - It should not inherit all behavior from a growable `Vec<T>`.
 
@@ -75,47 +79,48 @@ elements you need …” with a doc link — same spirit as definite-assignment 
 - How do mutable slices interact with aliasing and realtime regions?
 - What is the explicit cost model for copying an array versus borrowing a slice?
 
-## Working Recommendation
+## Current Fixed-Array Status
 
-For the next implementation slice, prefer fixed-size arrays over vectors:
+The implemented fixed-array surface is documented normatively in
+[`types.md`](../reference/language/types.md). Small example:
 
 ```nex
 let xs: [i32; 4] = [1, 2, 3, 4];
 return xs[0];
 ```
 
-That gives the compiler a concrete layout problem without dragging in heap
-allocation. Growable vectors can wait until the language has ownership,
-allocation, and error handling.
-
-## What `[T; N]` Means (Normative For This Repo)
+## What `[T; N]` Means
 
 `[T; N]` is the **type** of a fixed-length array: `N` identical slots of type `T`,
 where `N` is a **compile-time** integer literal (and eventually other `const`
 expressions). It is **not** a growable buffer and **not** a slice; those are
-separate concepts (see [Recommended Order](#recommended-order)).
+separate concepts (see [Design Staging Rationale](#design-staging-rationale)).
 
-Surface syntax (target shape, not all implemented yet):
+Surface syntax:
 
 - **Array type:** `[` element-type `;` length `]` — example `[i32; 4]`.
 - **Array literal:** `[` expr `,` expr `,` … `]` — length must match the context
   type when one is known.
 - **Index:** `primary `[` index-expr `]`** — loads one element.
 
-**Locals path is implemented** (ranked `memref`, `arith.index_cast` for dynamic
-indices, `run_executable_array_fixed`). **Function parameters, returns, and module
-`const` arrays** use the same ranked `memref` ABI (`examples/array_abi.nexs`).
-Nested arrays, **`str`** arrays, and uninitialized local arrays remain future work.
+**Fixed arrays are implemented** for locals, function parameters, function
+returns, and module `const` values (`examples/array_fixed.nexs`,
+`examples/array_abi.nexs`). Nested fixed arrays use ranked `memref` shapes
+(`examples/array_nested.nexs`). **`str`** arrays remain future work.
+Uninitialized `let mut` fixed arrays are accepted with per-element definite
+assignment.
 
 ## Implementation Handoff Checklist (Arrays)
 
-**Fixed arrays (locals + `fn` ABI + `const`)** are implemented in `nexc`. Keep this list when extending the surface:
+**Fixed arrays (locals + `fn` ABI + `const` + nesting + per-element DA)** are implemented in `nexc`. Keep this list when extending the surface:
 
 1. **Language reference:** `docs/reference/language/types.md`,
    `docs/reference/language/expressions.md`, `docs/reference/language/statements.md`.
-2. **Future:** nested `[ [T; N]; M ]`, **`str`** arrays, **`let mut a: [T; N];`**
-   with per-element definite assignment.
-3. **Tests:** `examples/array_fixed.nexs`, `examples/array_abi.nexs`, CTest
-   `run_executable_array_fixed`, `run_executable_array_abi`, `semantic_check_array_*`,
-   `validate_mlir_array_abi`.
+2. **Future:** **`str`** arrays, slices, vectors, and explicit copy/borrow
+   semantics when those concepts exist.
+3. **Tests:** `examples/array_fixed.nexs`, `examples/array_abi.nexs`,
+   `examples/array_nested.nexs`, CTest `run_executable_array_fixed`,
+   `run_executable_array_abi`, `run_executable_array_nested`,
+   `semantic_check_array_*`, `validate_mlir_array_abi`,
+   `validate_mlir_array_nested`.
 4. **This file:** update open questions when slices/vectors split from `[T; N]`.

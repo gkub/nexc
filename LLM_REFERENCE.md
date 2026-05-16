@@ -25,7 +25,7 @@ Inspection and compile modes (details and flags: [compiler_cli.md](./docs/refere
 
 **I/O and built-ins:** formatted **`print` / `println`** (literal format string with `{}` placeholders), legacy-style `println` with a `str` argument where still allowed, **`readln() -> str`**, **`parse_*`**, **`input_ok()`**. Full rules: [builtins_and_io.md](./docs/reference/language/builtins_and_io.md). Runtime implementation: [runtime/nex_runtime.c](./runtime/nex_runtime.c) (today Linux-oriented syscalls for I/O helpers).
 
-**Types and data:** scalars (`i8`…`u64`, `bool`, `void`, `str`), `let` / `let mut`, calls, assignments. **Fixed-size arrays** `[T; N]` for **locals**, **`fn` parameters and returns**, and **module `const`** (full literal initializer); not nested `[…]` inside `[T; N]` yet, and **`main`** may not return an array type ([types.md](./docs/reference/language/types.md)).
+**Types and data:** scalars (`i8`…`u64`, `bool`, `void`, `str`), `let` / `let mut`, calls, assignments. **Fixed-size arrays** `[T; N]` for **locals**, **`fn` parameters and returns**, and **module `const`** (full literal initializer), including nested fixed arrays like `[[i32; 2]; 2]`; **`let mut a: [T; N];`** is allowed with per-element definite assignment, and **`main`** may not return an array type ([types.md](./docs/reference/language/types.md)).
 
 **Logical operators:** `&&` and `||` **short-circuit**; operands use the same bool-or-integer condition rules as `if`. Module `const` initializers use an eager IR representation for lowering but the language still folds constants with short-circuit rules (details in [expressions.md](./docs/reference/language/expressions.md)).
 
@@ -71,7 +71,9 @@ Registered in [CMakeLists.txt](./CMakeLists.txt): golden dumps (tokens through L
 
 ## Near-term direction
 
-Follow the ordered checklist in **`docs/IMPLEMENTATION_BACKLOG.md`** (living list: arrays/next scope, optional DA diagnostics, deferred inference/I/O/pointers). Prefer updating **`docs/reference/`** and goldens with each behavior change. High-level roadmap bullets also appear under [README.md § Forward Priorities](./README.md#forward-priorities).
+Follow the ordered checklist in **`docs/IMPLEMENTATION_BACKLOG.md`**; it is the
+central implementation queue. Prefer updating **`docs/reference/`** and goldens
+with each behavior change.
 
 When editing docs:
 

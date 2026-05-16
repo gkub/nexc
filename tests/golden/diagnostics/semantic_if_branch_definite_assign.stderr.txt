@@ -1,3 +1,6 @@
 tests/semantic_if_branch_definite_assign.nexs:6:12: error: local `x` may be read before assignment
   |     return x;
   |            ^
+tests/semantic_if_branch_definite_assign.nexs:3:5: note: assignment may be skipped because this `if` has no `else`
+  |     if (1) {
+  |     ^~~~~~~~

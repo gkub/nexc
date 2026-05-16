@@ -16,8 +16,8 @@
 ## Summary
 
 nex currently has fixed-width integers, `bool`, `str`, `void`, and fixed-size
-arrays for local bindings. Types appear in function signatures, local
-declarations, module constants, and array declarations where supported.
+arrays. Types appear in function signatures, local declarations, module
+constants, and array declarations where supported.
 
 ## Syntax
 
@@ -70,32 +70,43 @@ Built-in scalar types:
 
 Fixed arrays are implemented for **locals**, **function parameters**, **function
 return types**, and **module `const`** (initializer must be a compile-time
-full array literal, same rules as locals). Element types are the usual scalar
-built-ins (`i8`–`u64`, `bool`). **`void`**, **`str`**, and nested `[…]` element
-types are rejected. **`N`** must be a positive decimal or hex integer literal in
-the type.
+full array literal, same rules as locals). Element types may be the usual scalar
+built-ins (`i8`–`u64`, `bool`) or another fixed array, so nested arrays such as
+`[[i32; 2]; 2]` are valid. **`void`** and **`str`** array elements are rejected.
+**`N`** must be a positive decimal or hex integer literal in the type.
 
-**Meaning:** `[T; N]` is **exactly `N` elements** of type `T`. Locals and
-array-typed `const` values lower as ranked `memref`s; parameters and returns use
-the same ranked `memref<NxT>` ABI at the MLIR boundary. This is not a growable
-vector and not a slice; see [arrays_vectors_linalg.md](../../design/arrays_vectors_linalg.md).
+**Meaning:** `[T; N]` is **exactly `N` elements** of type `T`. Nested array
+dimensions are ordered outer-to-inner: `[[i32; 3]; 2]` has shape `2 x 3`.
+Locals and array-typed `const` values lower as ranked `memref`s; parameters and
+returns use the same ranked `memref<Nx...xT>` ABI at the MLIR boundary. This is
+not a growable vector and not a slice; see
+[arrays_vectors_linalg.md](../../design/arrays_vectors_linalg.md).
 
 **`main`:** the entry function may still only return `void` or `i32` (not an
 array type).
 
-**Uninitialized locals:** `let mut a: [T; N];` without `=` remains **rejected**
-until per-element definite assignment is implemented; see
-[`docs/IMPLEMENTATION_BACKLOG.md`](../../IMPLEMENTATION_BACKLOG.md).
+**Uninitialized locals:** `let mut a: [T; N];` without `=` is accepted for fixed
+arrays. The compiler tracks definite assignment per element up to 65536 flat
+elements. A scalar element read with compile-time-known indices requires that
+exact element to be assigned on every path; a subarray read requires every
+element in that slice to be assigned. Reads with non-constant indices require
+the whole array binding to be definitely assigned. An indexed store with any
+non-constant index pessimistically clears the per-element proof for that array.
 
 **Initialization:** a `let` / `let mut` array binding **must** provide a **full**
-array literal of length `N` on the declaration. Module `const` arrays use the
-same rule.
+array literal of length `N` when it has an initializer. Nested arrays require
+full nested literals. Module `const` arrays use the same rule.
 
 ```nex
 let xs: [i32; 4] = [1, 2, 3, 4];
 let mut ys: [i32; 2] = [10, 20];
 ys[0] = 5;
-return xs[0] + ys[1];
+let mut grid: [[i32; 2]; 2];
+grid[0][0] = 1;
+grid[0][1] = 2;
+grid[1][0] = 3;
+grid[1][1] = 4;
+return xs[0] + ys[1] + grid[1][1];
 ```
 
 ## Type Rules
@@ -104,10 +115,12 @@ return xs[0] + ys[1];
 - Comparison/equality produce `bool`.
 - Function call arguments must match declared parameter types.
 - `main` currently must return `void` or `i32`.
-- Array literals must match a contextual `[T; N]` type (from a `let` binding), or
-  every element must agree so the compiler can infer one `[T; N]` type.
-- Indexing requires an integer index; constant indices are checked against `N` when
-  the index is compile-time known.
+- Array literals must match a contextual `[T; N]` type, or every element must
+  agree so the compiler can infer one `[T; N]` type.
+- Nested array literals infer nested fixed-array types when all element shapes
+  and element scalar types agree.
+- Indexing requires an integer index; constant indices are checked against the
+  current dimension when the index is compile-time known.
 
 ## Examples
 
