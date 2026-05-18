@@ -571,6 +571,24 @@ private:
             return result;
         }
 
+        if (const auto* floating = dynamic_cast<const FloatLiteralExpr*>(&expr)) {
+            Type type = expected.value_or(Type{.kind = BuiltinTypeKind::F64, .arrayDimensions = {}});
+            if (!type.isFloat()) {
+                // Semantic analysis rejects mismatched numeric literals first.
+                type = Type{};
+            }
+
+            Operation op{
+                .kind = Operation::Kind::FloatLiteral,
+                .span = floating->span,
+                .result = makeValue(type),
+                .text = floating->raw,
+            };
+            const ValueRef result = *op.result;
+            append(std::move(op));
+            return result;
+        }
+
         if (const auto* boolean = dynamic_cast<const BoolLiteralExpr*>(&expr)) {
             Operation op{
                 .kind = Operation::Kind::BoolLiteral,
@@ -639,8 +657,7 @@ private:
                 return result;
             }
 
-            const Type type = expected.value_or(Type{.kind = BuiltinTypeKind::I32, .arrayDimensions = {}});
-            const ValueRef operand = buildExpr(*unary->operand, type);
+            const ValueRef operand = buildExpr(*unary->operand, expected);
             Operation op{
                 .kind = Operation::Kind::Unary,
                 .span = unary->span,

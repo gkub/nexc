@@ -3,8 +3,11 @@
 #include "nexc/frontend/string_literal_decode.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <charconv>
+#include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <optional>
 #include <string>
@@ -73,6 +76,8 @@ struct Type {
         case BuiltinTypeKind::U32:
         case BuiltinTypeKind::U64:
             return true;
+        case BuiltinTypeKind::F32:
+        case BuiltinTypeKind::F64:
         case BuiltinTypeKind::Bool:
         case BuiltinTypeKind::Str:
         case BuiltinTypeKind::Void:
@@ -80,6 +85,13 @@ struct Type {
             return false;
         }
         return false;
+    }
+
+    bool isFloat() const {
+        if (isFixedArray()) {
+            return false;
+        }
+        return kind == BuiltinTypeKind::F32 || kind == BuiltinTypeKind::F64;
     }
 };
 
@@ -153,7 +165,8 @@ struct ValueSymbol {
 //
 // It carries the expression type and the tiny amount of constant-evaluation
 // state needed for current checks. This is not yet a full constant-value
-// model; it only tracks unsigned integer payloads where that is enough.
+// model; it only tracks unsigned integer payloads where that is enough. Float
+// constants are marked constant for module `const` eligibility and replayed by IR.
 struct ExprInfo {
     Type type;
     bool isConstant = false;
@@ -320,6 +333,21 @@ std::optional<unsigned long long> parseUnsignedInteger(std::string_view raw) {
     return value;
 }
 
+bool parseFiniteFloatLiteral(std::string_view raw, Type type) {
+    const std::string spelling(raw);
+    char* end = nullptr;
+    errno = 0;
+    if (type.kind == BuiltinTypeKind::F32) {
+        const float value = std::strtof(spelling.c_str(), &end);
+        return end == spelling.c_str() + spelling.size() &&
+               !(errno == ERANGE && !std::isfinite(value));
+    }
+
+    const double value = std::strtod(spelling.c_str(), &end);
+    return end == spelling.c_str() + spelling.size() &&
+           !(errno == ERANGE && !std::isfinite(value));
+}
+
 // Return the number of bits in a fixed-width integer type.
 //
 // Non-integer types return 0 so callers can use that as "not applicable" after
@@ -343,6 +371,8 @@ unsigned bitWidth(Type type) {
     case BuiltinTypeKind::I64:
     case BuiltinTypeKind::U64:
         return 64;
+    case BuiltinTypeKind::F32:
+    case BuiltinTypeKind::F64:
     case BuiltinTypeKind::Bool:
     case BuiltinTypeKind::Str:
     case BuiltinTypeKind::Void:
@@ -373,6 +403,8 @@ bool isSigned(Type type) {
     case BuiltinTypeKind::U16:
     case BuiltinTypeKind::U32:
     case BuiltinTypeKind::U64:
+    case BuiltinTypeKind::F32:
+    case BuiltinTypeKind::F64:
     case BuiltinTypeKind::Bool:
     case BuiltinTypeKind::Str:
     case BuiltinTypeKind::Void:
@@ -785,7 +817,9 @@ private:
         if (n64 == 0 || n64 > kMaxArrayElemsForDA) {
             diagnostics_.error(span,
                                "fixed array is too large for per-element definite assignment "
-                               "tracking in this compiler version");
+                               "tracking in this compiler version (" +
+                                   std::to_string(n64) + " elements; limit is " +
+                                   std::to_string(kMaxArrayElemsForDA) + ")");
             return;
         }
         arrayElemAssign_.insert_or_assign(bindingId,
@@ -799,7 +833,8 @@ private:
     }
 
     void noteIndexedStoreToLocal(std::size_t bindingId, const Type& rootArrayTy,
-                                 const std::vector<ExprInfo>& indexInfos) {
+                                 const std::vector<ExprInfo>& indexInfos,
+                                 const std::vector<const Expr*>& indexExprs) {
         if (!rootArrayTy.isFixedArray()) {
             return;
         }
@@ -808,10 +843,16 @@ private:
             return;
         }
         const std::size_t n = static_cast<std::size_t>(n64);
-        for (const ExprInfo& ii : indexInfos) {
+        for (std::size_t i = 0; i < indexInfos.size(); ++i) {
+            const ExprInfo& ii = indexInfos[i];
             if (!ii.type.isInteger() || !ii.isConstant || !ii.integerValue) {
                 arrayElemAssign_.insert_or_assign(bindingId, std::vector<std::uint8_t>(n, 0));
                 definiteAssign_.erase(bindingId);
+                const SourceSpan span =
+                    i < indexExprs.size() ? indexExprs[i]->span : SourceSpan{};
+                rememberDefAssignReason(
+                    bindingId, span,
+                    "non-constant index here prevents proving which array element was assigned");
                 return;
             }
         }
@@ -1413,7 +1454,8 @@ private:
                 }
 
                 if (!symbol->isConst) {
-                    noteIndexedStoreToLocal(symbol->bindingId, symbol->type, idxInfos);
+                    noteIndexedStoreToLocal(symbol->bindingId, symbol->type, idxInfos,
+                                            chain.indices);
                 }
                 return false;
             }
@@ -1620,6 +1662,26 @@ private:
                 .type = type,
                 .isConstant = true,
                 .integerValue = parseUnsignedInteger(integer->raw),
+            };
+        }
+
+        if (const auto* floating = dynamic_cast<const FloatLiteralExpr*>(&expr)) {
+            Type type = expected.value_or(builtinScalar(BuiltinTypeKind::F64));
+            if (!type.isFloat()) {
+                diagnostics_.error(expr.span,
+                                   "float literal cannot be used as `" +
+                                       typeName(type) + "`");
+                return ExprInfo{.type = Type{}, .isConstant = true};
+            }
+            if (!parseFiniteFloatLiteral(floating->raw, type)) {
+                diagnostics_.error(expr.span,
+                                   "float literal `" + floating->raw +
+                                       "` does not fit in type `" + typeName(type) +
+                                       "`");
+            }
+            return ExprInfo{
+                .type = type,
+                .isConstant = true,
             };
         }
 
@@ -1833,7 +1895,7 @@ private:
     }
 
     static bool isFormatSubstitutionType(Type type) {
-        return type.isInteger() || type.isBool() || type.isString();
+        return type.isInteger() || type.isFloat() || type.isBool() || type.isString();
     }
 
     // `print("…{}…", …)` / `println`: Rust-style placeholders, checked against
@@ -1883,9 +1945,9 @@ private:
             return ExprInfo{.type = voidType, .isConstant = false};
         }
 
-        std::vector<std::string> literals;
+        FormatParts parts;
         std::string splitErr;
-        if (!splitFormatString(decoded, literals, splitErr)) {
+        if (!parseFormatString(decoded, parts, splitErr)) {
             diagnostics_.error(fmtLit->span, splitErr);
             for (std::size_t i = 1; i < call.arguments.size(); ++i) {
                 analyzeExpr(*call.arguments[i], std::nullopt);
@@ -1893,7 +1955,7 @@ private:
             return ExprInfo{.type = voidType, .isConstant = false};
         }
 
-        const std::size_t holes = literals.size() - 1;
+        const std::size_t holes = parts.holes.size();
         if (call.arguments.size() != 1 + holes) {
             diagnostics_.error(call.span,
                                "`" + builtinName + "` format string has " +
@@ -1910,7 +1972,12 @@ private:
             if (!arg.type.isInvalid() && !isFormatSubstitutionType(arg.type)) {
                 diagnostics_.error(call.arguments[i + 1]->span,
                                    "format argument has type `" + typeName(arg.type) +
-                                       "`; supported types are integers, bool, and str");
+                                       "`; supported types are integers, floats, bool, and str");
+            }
+            if (parts.holes[i].precision && !arg.type.isFloat() &&
+                !arg.type.isInvalid()) {
+                diagnostics_.error(call.arguments[i + 1]->span,
+                                   "format precision is only supported for floating-point arguments");
             }
         }
         for (std::size_t i = 1 + toCheck; i < call.arguments.size(); ++i) {
@@ -1989,8 +2056,8 @@ private:
 
     // Analyze a unary expression.
     //
-    // `!` is condition-like and always produces bool. Unary `-` is integer-only
-    // and keeps the operand type.
+    // `!` is condition-like and always produces bool. Unary `-` accepts integer
+    // and floating-point operands and keeps the operand type.
     ExprInfo analyzeUnaryExpr(const UnaryExpr& unary, std::optional<Type> expected) {
         if (unary.op == TokenKind::Bang) {
             // `!` always produces bool. nex accepts either bool or integer
@@ -2006,13 +2073,12 @@ private:
         }
 
         if (unary.op == TokenKind::Minus) {
-            // Unary minus defaults integer literals to i32 unless an outer
-            // expression or declaration provides a more specific expected type.
-            Type expectedInteger = expected.value_or(builtinScalar(BuiltinTypeKind::I32));
-            ExprInfo operand = analyzeExpr(*unary.operand, expectedInteger);
-            if (!operand.type.isInteger()) {
+            // Let literals choose their natural default (`i32` or `f64`) when no
+            // outer expression/declaration provides a more specific type.
+            ExprInfo operand = analyzeExpr(*unary.operand, expected);
+            if (!operand.type.isInteger() && !operand.type.isFloat()) {
                 diagnostics_.error(unary.operand->span,
-                                   "`-` operand must be an integer type, not `" +
+                                   "`-` operand must be an integer or floating-point type, not `" +
                                        typeName(operand.type) + "`");
             }
             return ExprInfo{.type = operand.type, .isConstant = operand.isConstant};
@@ -2024,8 +2090,8 @@ private:
     // Analyze a binary expression.
     //
     // This is where operator-specific type rules live: arithmetic requires
-    // integers and returns the operand type; comparison/equality returns bool;
-    // logical operators accept condition-like operands and return bool.
+    // integers or floats and returns the operand type; comparison/equality
+    // returns bool; logical operators accept condition-like operands and return bool.
     ExprInfo analyzeBinaryExpr(const BinaryExpr& binary, std::optional<Type> expected) {
         if (binary.op == TokenKind::AmpAmp || binary.op == TokenKind::PipePipe) {
             // Logical operators accept condition-like operands and produce bool.
@@ -2101,13 +2167,18 @@ private:
                               binary.op == TokenKind::BangEqual;
 
         if (arithmetic || comparison) {
-            if (!left.type.isInteger()) {
+            if (!left.type.isInteger() && !left.type.isFloat()) {
                 diagnostics_.error(binary.left->span,
-                                   "left operand must be an integer type");
+                                   "left operand must be an integer or floating-point type");
             }
-            if (!right.type.isInteger()) {
+            if (!right.type.isInteger() && !right.type.isFloat()) {
                 diagnostics_.error(binary.right->span,
-                                   "right operand must be an integer type");
+                                   "right operand must be an integer or floating-point type");
+            }
+            if (binary.op == TokenKind::Percent &&
+                (left.type.isFloat() || right.type.isFloat())) {
+                diagnostics_.error(binary.span,
+                                   "`%` operands must be integer types");
             }
         }
 

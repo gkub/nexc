@@ -29,6 +29,7 @@ See [declarations_and_modules.md](declarations_and_modules.md) and
 ```text
 i8 i16 i32 i64
 u8 u16 u32 u64
+f32 f64
 bool
 str
 void
@@ -39,6 +40,8 @@ Examples:
 
 ```nex
 let n: i32 = 42;
+let ratio: f64 = 3.5 / 2.0;
+let sample: f32 = 1.25;
 let ok: bool = true;
 let xs: [i32; 3] = [1, 2, 3];
 let grid: [[i32; 2]; 2] = [[1, 2], [3, 4]];
@@ -73,6 +76,7 @@ See [statements.md](statements.md) and
 
 ```nex
 let z: i32 = (a + b) * 2;
+let f: f64 = (3.0 + 4.0) / 2.0;
 let same: bool = z == 10;
 let guarded: bool = denom != 0 && z / denom > 1;
 let item: i32 = grid[1][0];
@@ -143,6 +147,12 @@ fn main() -> i32 {
     }
     return 0 - 1;
 }
+```
+
+Float formatting supports fixed decimal precision:
+
+```nex
+println("pi-ish={:.2}", 3.14159);
 ```
 
 See [builtins_and_io.md](builtins_and_io.md).

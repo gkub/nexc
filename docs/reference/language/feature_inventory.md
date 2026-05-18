@@ -19,7 +19,7 @@ Succinct checklist of **implemented surface** (and a few prominent gaps). Normat
 
 ## Types (implemented)
 
-- **Scalars:** `i8` … `u64`, `bool`, `void`. [types.md](types.md)
+- **Scalars:** `i8` … `u64`, `f32`, `f64`, `bool`, `void`. [types.md](types.md)
 - **`str`:** string type with runtime support; literals; some builtins. [types.md](types.md)
 - **Fixed arrays `[T; N]`:** locals, **`fn` parameters and returns**, module **`const`** (full array literal initializer), nested arrays, indexing, and `let mut` element assign. **`main`** may not return an array type. [types.md](types.md)
 
@@ -44,16 +44,16 @@ Succinct checklist of **implemented surface** (and a few prominent gaps). Normat
 
 ## Expressions
 
-- **Literals:** integers (typed), `true`/`false`, string literals. [expressions.md](expressions.md)
-- **Arithmetic / compare / bitwise** — as in reference; integer-focused. [expressions.md](expressions.md)
+- **Literals:** integers (typed), floats (typed/default `f64`), `true`/`false`, string literals. [expressions.md](expressions.md)
+- **Arithmetic / compare** — integers and floats; `%` remains integer-only; no implicit int/float coercions. [expressions.md](expressions.md)
 - **`&&` / `||`** — short-circuit; condition-like operands in runtime code; module `const` folding uses distinct lowering detail. [expressions.md](expressions.md)
-- **Unary `-`, `!`, `~`** — where supported. [expressions.md](expressions.md)
+- **Unary `-`, `!`** — numeric negation for integers/floats; logical not for `bool`/integer conditions. [expressions.md](expressions.md)
 - **Calls** — user functions and builtins; `void` only as statement. [functions_and_calls.md](functions_and_calls.md)
 - **Indexing** — fixed arrays, including chained indexing for nested arrays. [expressions.md](expressions.md)
 
 ## Built-ins and I/O
 
-- **`print` / `println`** — format string with `{}` placeholders + typed args; legacy forms where still allowed. [builtins_and_io.md](builtins_and_io.md)
+- **`print` / `println`** — format string with `{}` placeholders + typed args; float precision placeholders `{:.N}` / `{:.Nf}`; legacy forms where still allowed. [builtins_and_io.md](builtins_and_io.md)
 - **`readln() -> str`**, **`parse_*`**, **`input_ok()`** — stdin helpers. [builtins_and_io.md](builtins_and_io.md)
 
 ## Statements (other)

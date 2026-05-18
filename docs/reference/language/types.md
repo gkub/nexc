@@ -5,6 +5,7 @@
 - [Summary](#summary)
 - [Syntax](#syntax)
 - [Integer Types](#integer-types)
+- [Floating-Point Types](#floating-point-types)
 - [Boolean Type](#boolean-type)
 - [String Type](#string-type)
 - [Void Type](#void-type)
@@ -15,14 +16,15 @@
 
 ## Summary
 
-nex currently has fixed-width integers, `bool`, `str`, `void`, and fixed-size
-arrays. Types appear in function signatures, local declarations, module
-constants, and array declarations where supported.
+nex currently has fixed-width integers, IEEE-754 floats, `bool`, `str`, `void`,
+and fixed-size arrays. Types appear in function signatures, local declarations,
+module constants, and array declarations where supported.
 
 ## Syntax
 
 ```text
 type ::= integer-type
+       | float-type
        | "bool"
        | "str"
        | "void"
@@ -30,12 +32,15 @@ type ::= integer-type
 
 integer-type ::= "i8" | "i16" | "i32" | "i64"
                | "u8" | "u16" | "u32" | "u64"
+
+float-type ::= "f32" | "f64"
 ```
 
 Built-in scalar types:
 
 - signed integers: `i8`, `i16`, `i32`, `i64`
 - unsigned integers: `u8`, `u16`, `u32`, `u64`
+- floats: `f32`, `f64`
 - boolean: `bool`
 - string: `str`
 - no-value return type: `void`
@@ -47,6 +52,15 @@ Built-in scalar types:
 - Signed arithmetic follows two's-complement wrapping behavior.
 - Integer literals are type-checked against expected context and diagnosed when
   out of range.
+
+## Floating-Point Types
+
+- `f32` and `f64` are IEEE-754 single- and double-precision scalar types.
+- Float literals use decimal syntax such as `1.0`, `0.5`, `6.02e23`; without
+  context they default to `f64`.
+- Context can choose `f32`, for example `let x: f32 = 1.25;`.
+- There are no implicit integer/float coercions: write matching literal forms
+  and parameter types explicitly.
 
 ## Boolean Type
 
@@ -71,7 +85,7 @@ Built-in scalar types:
 Fixed arrays are implemented for **locals**, **function parameters**, **function
 return types**, and **module `const`** (initializer must be a compile-time
 full array literal, same rules as locals). Element types may be the usual scalar
-built-ins (`i8`–`u64`, `bool`) or another fixed array, so nested arrays such as
+built-ins (`i8`–`u64`, `f32`, `f64`, `bool`) or another fixed array, so nested arrays such as
 `[[i32; 2]; 2]` are valid. **`void`** and **`str`** array elements are rejected.
 **`N`** must be a positive decimal or hex integer literal in the type.
 
@@ -111,7 +125,8 @@ return xs[0] + ys[1] + grid[1][1];
 
 ## Type Rules
 
-- Arithmetic operators require integer operands.
+- Arithmetic operators require integer or floating-point operands; `%` is
+  integer-only.
 - Comparison/equality produce `bool`.
 - Function call arguments must match declared parameter types.
 - `main` currently must return `void` or `i32`.

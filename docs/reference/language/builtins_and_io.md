@@ -42,8 +42,11 @@ Writes formatted bytes to stdout.
 
 Formatting applies when the first argument is a string literal:
 
-- Placeholders are exactly `{}` (one pair of braces). Literal `{` / `}` escapes may be added later.
-- Each `{}` matches one following argument, in order. Supported argument types: integers (`i*`/`u*`), `bool`, and `str`.
+- Placeholders are `{}` for default formatting, or `{:.N}` / `{:.Nf}` for
+  floating-point fixed precision (`N` digits after the decimal point).
+- Each placeholder matches one following argument, in order. Supported default
+  argument types: integers (`i*`/`u*`), floats (`f32`/`f64`), `bool`, and `str`.
+- Precision placeholders are only valid for `f32` / `f64`.
 - `print("...{}...", ...)` writes the formatted bytes only.
 
 Legacy convenience when there are **no** placeholders:
@@ -62,6 +65,12 @@ Legacy convenience when there are **no** placeholders:
   trailing newline.
 
 Escape sequences in string literals follow the usual rules (`\n`, `\t`, `\"`, `\\`, `\r`).
+
+Examples:
+
+```nex
+println("x={} rounded={:.2}", 2.5, 1.0 / 3.0);
+```
 
 ## Input
 

@@ -15,6 +15,8 @@ std::string_view tokenKindName(TokenKind kind) {
         return "Identifier";
     case TokenKind::IntegerLiteral:
         return "IntegerLiteral";
+    case TokenKind::FloatLiteral:
+        return "FloatLiteral";
     case TokenKind::StringLiteral:
         return "StringLiteral";
     case TokenKind::KwBool:
@@ -160,6 +162,7 @@ void dumpToken(std::ostream& out, const SourceFile& source, const Token& token) 
 
     if (token.kind == TokenKind::Identifier ||
         token.kind == TokenKind::IntegerLiteral ||
+        token.kind == TokenKind::FloatLiteral ||
         token.kind == TokenKind::StringLiteral) {
         // Only token kinds with useful source spellings print their text. Most
         // punctuation and keywords are already fully described by TokenKind.

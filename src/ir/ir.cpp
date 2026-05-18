@@ -25,6 +25,8 @@ bool Type::isInteger() const {
     case BuiltinTypeKind::U32:
     case BuiltinTypeKind::U64:
         return true;
+    case BuiltinTypeKind::F32:
+    case BuiltinTypeKind::F64:
     case BuiltinTypeKind::Bool:
     case BuiltinTypeKind::Str:
     case BuiltinTypeKind::Void:
@@ -33,6 +35,11 @@ bool Type::isInteger() const {
     }
 
     return false;
+}
+
+bool Type::isFloat() const {
+    return !isFixedArray() &&
+           (kind == BuiltinTypeKind::F32 || kind == BuiltinTypeKind::F64);
 }
 
 // The IR currently reuses the frontend spelling for built-in type names. That

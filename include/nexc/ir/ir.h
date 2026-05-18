@@ -50,6 +50,9 @@ struct Type {
     // level, bool is its own scalar type with condition semantics, not an integer
     // arithmetic type.
     bool isInteger() const;
+
+    // Return true for IEEE-754 floating-point scalar types.
+    bool isFloat() const;
 };
 
 // A ValueRef names a temporary value produced by an operation inside one const
@@ -88,6 +91,7 @@ struct Operation {
 
         // Value-producing literals.
         IntegerLiteral,
+        FloatLiteral,
         BoolLiteral,
         StringLiteral,
 

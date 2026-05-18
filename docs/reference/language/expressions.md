@@ -39,11 +39,12 @@ index-expression ::= expression "[" expression "]"
 | Form | Example | Notes |
 | ---- | ------- | ----- |
 | integer literal | `42`, `0xff` | Checked against the expected integer type. |
+| float literal | `1.0`, `0.5`, `6.02e23` | Checked against `f32`/`f64`; defaults to `f64` without context. |
 | boolean literal | `true`, `false` | Type is `bool`. |
 | string literal | `"hello"` | Type is `str`. |
 | name reference | `count` | Resolves to a local, parameter, function, or module constant. |
 | function call | `add(a, b)` | Arguments are checked against the callee signature. |
-| unary operator | `-x`, `!ok` | `-` negates integers; `!` accepts `bool` or integer condition values. |
+| unary operator | `-x`, `!ok` | `-` negates integers and floats; `!` accepts `bool` or integer condition values. |
 | binary operator | `a + b`, `x == y` | Arithmetic, comparison, equality, and logical operators. |
 | parenthesized expression | `(a + b) * c` | Overrides default precedence. |
 | array literal | `[1, 2, 3]`, `[[1, 2], [3, 4]]` | Length and nested shape must match the contextual fixed-array type, or element types/shapes must agree for inference. |
@@ -106,10 +107,12 @@ if (y != 0 && x / y > 1) {
 
 ## Type Rules
 
-- arithmetic operators currently require integer operands
+- arithmetic operators require integer or floating-point operands; `%` is
+  integer-only
 - comparison/equality produce `bool`
 - `!` accepts `bool` or integer-like condition values
 - call argument count/types are checked against resolved callee signature
+- there are no implicit integer/float coercions
 
 ## Examples
 

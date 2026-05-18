@@ -587,6 +587,13 @@ add_nexc_golden_test(
 )
 
 add_nexc_golden_test(
+    dump_ir_float_scalar_golden
+    --dump-ir
+    examples/float_scalar.nexs
+    tests/golden/dump_ir/float_scalar.ir.txt
+)
+
+add_nexc_golden_test(
     dump_mlir_return_42_golden
     --dump-mlir
     examples/return_42.nexs
@@ -753,6 +760,11 @@ add_nexc_mlir_validation_test(
     examples/array_nested.nexs
 )
 
+add_nexc_mlir_validation_test(
+    validate_mlir_float_scalar
+    examples/float_scalar.nexs
+)
+
 add_nexc_llvm_validation_test(
     validate_llvm_return_42
     examples/return_42.nexs
@@ -791,6 +803,11 @@ add_nexc_llvm_validation_test(
 add_nexc_llvm_validation_test(
     validate_llvm_short_circuit
     examples/short_circuit.nexs
+)
+
+add_nexc_llvm_validation_test(
+    validate_llvm_float_scalar
+    examples/float_scalar.nexs
 )
 
 add_nexc_executable_test(
@@ -859,6 +876,12 @@ add_nexc_executable_test(
     10
 )
 
+add_nexc_executable_test(
+    run_executable_float_scalar
+    examples/float_scalar.nexs
+    42
+)
+
 add_nexc_executable_stdout_test(
     run_executable_hello_stdout
     examples/hello.nexs
@@ -871,6 +894,13 @@ add_nexc_executable_stdout_test(
     examples/format_print.nexs
     0
     "x=42\n"
+)
+
+add_nexc_executable_stdout_test(
+    run_executable_float_format_print_stdout
+    examples/float_format_print.nexs
+    0
+    "a=0.33 b=2.500 raw=2.500000\n"
 )
 
 add_nexc_executable_stdin_stdout_test(
@@ -905,6 +935,11 @@ add_test(
 )
 
 add_test(
+    NAME semantic_check_float_scalar
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/float_scalar.nexs
+)
+
+add_test(
     NAME semantic_check_add
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/add.nexs
 )
@@ -927,6 +962,11 @@ add_test(
 add_test(
     NAME semantic_check_format_print
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/format_print.nexs
+)
+
+add_test(
+    NAME semantic_check_float_format_print
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/float_format_print.nexs
 )
 
 add_test(
@@ -1040,6 +1080,13 @@ add_nexc_golden_diagnostic_test(
     tests/golden/diagnostics/semantic_use_before_assign.stderr.txt
 )
 
+add_nexc_golden_diagnostic_test(
+    semantic_float_no_implicit_coercion_golden
+    --check
+    tests/semantic_float_no_implicit_coercion.nexs
+    tests/golden/diagnostics/semantic_float_no_implicit_coercion.stderr.txt
+)
+
 add_test(
     NAME semantic_if_branch_definite_assign
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_if_branch_definite_assign.nexs
@@ -1051,6 +1098,32 @@ add_nexc_golden_diagnostic_test(
     --check
     tests/semantic_if_branch_definite_assign.nexs
     tests/golden/diagnostics/semantic_if_branch_definite_assign.stderr.txt
+)
+
+add_test(
+    NAME semantic_array_dynamic_index_da
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_array_dynamic_index_da.nexs
+)
+set_tests_properties(semantic_array_dynamic_index_da PROPERTIES WILL_FAIL TRUE)
+
+add_nexc_golden_diagnostic_test(
+    semantic_array_dynamic_index_da_golden
+    --check
+    tests/semantic_array_dynamic_index_da.nexs
+    tests/golden/diagnostics/semantic_array_dynamic_index_da.stderr.txt
+)
+
+add_test(
+    NAME semantic_array_da_too_large
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_array_da_too_large.nexs
+)
+set_tests_properties(semantic_array_da_too_large PROPERTIES WILL_FAIL TRUE)
+
+add_nexc_golden_diagnostic_test(
+    semantic_array_da_too_large_golden
+    --check
+    tests/semantic_array_da_too_large.nexs
+    tests/golden/diagnostics/semantic_array_da_too_large.stderr.txt
 )
 
 add_test(
@@ -1115,6 +1188,13 @@ add_test(
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_print_wrong_type.nexs
 )
 set_tests_properties(semantic_print_wrong_type PROPERTIES WILL_FAIL TRUE)
+
+add_nexc_golden_diagnostic_test(
+    semantic_format_precision_non_float_golden
+    --check
+    tests/semantic_format_precision_non_float.nexs
+    tests/golden/diagnostics/semantic_format_precision_non_float.stderr.txt
+)
 
 add_test(
     NAME semantic_break_outside

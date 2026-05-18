@@ -12,7 +12,10 @@ Implemented today:
 - typed IR, MLIR, and LLVM IR dumps
 - native executable generation through `build/nexc <file.nexs> -o <output>` on
   configured Linux and macOS hosts
-- runtime-backed `print` / `println` with `{}` formatting
+- fixed-width integers, IEEE-754 `f32` / `f64`, `bool`, `str`, `void`, and
+  fixed-size arrays
+- runtime-backed `print` / `println` with `{}` formatting and float precision
+  placeholders such as `{:.2}`
 - selected input helpers such as `readln`, `parse_i32`, `parse_u64`,
   `parse_bool`, and `input_ok`
 - `if` / `else`, `while`, C-style `for`, `break`, and `continue`
@@ -45,6 +48,13 @@ Build and run a program:
 ```sh
 build/nexc examples/hello.nexs -o build/hello
 ./build/hello
+```
+
+Try a float/formatting example:
+
+```sh
+build/nexc examples/float_format_print.nexs -o build/float_format_print
+./build/float_format_print
 ```
 
 Useful inspection commands:

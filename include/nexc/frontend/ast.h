@@ -24,6 +24,8 @@ enum class BuiltinTypeKind {
     U16,
     U32,
     U64,
+    F32,
+    F64,
     Bool,
     Str,
     Void,
@@ -67,6 +69,15 @@ struct Expr {
 // semantic analysis knows the expected type.
 struct IntegerLiteralExpr final : Expr {
     IntegerLiteralExpr(SourceSpan span, std::string raw)
+        : Expr(span), raw(std::move(raw)) {}
+
+    std::string raw;
+};
+
+// Float literals also preserve their source spelling. Their concrete type is
+// contextual (`f32`/`f64`) or defaults to `f64` when no context exists.
+struct FloatLiteralExpr final : Expr {
+    FloatLiteralExpr(SourceSpan span, std::string raw)
         : Expr(span), raw(std::move(raw)) {}
 
     std::string raw;

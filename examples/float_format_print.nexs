@@ -1,0 +1,6 @@
+fn main() -> void {
+    let a: f64 = 1.0 / 3.0;
+    let b: f32 = 2.5;
+    println("a={:.2} b={:.3f} raw={}", a, b, b);
+    return;
+}

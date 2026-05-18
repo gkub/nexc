@@ -133,6 +133,10 @@ private:
             dumpResultPrefix(operation);
             out_ << "IntegerLiteral " << operation.text << '\n';
             return;
+        case Operation::Kind::FloatLiteral:
+            dumpResultPrefix(operation);
+            out_ << "FloatLiteral " << operation.text << '\n';
+            return;
         case Operation::Kind::BoolLiteral:
             dumpResultPrefix(operation);
             out_ << "BoolLiteral " << (operation.boolValue ? "true" : "false")

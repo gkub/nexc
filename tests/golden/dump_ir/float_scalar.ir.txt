@@ -1,0 +1,60 @@
+Module
+  Const @SCALE: f64
+    Block
+      %0: f64 = FloatLiteral 1.5
+      InitValue %0
+  Function @half($0 x: f64) -> f64
+    Locals
+      $0 x: f64 parameter
+    Block
+      %0: f64 = LoadLocal $0
+      %1: f64 = FloatLiteral 2.0
+      %2: f64 = Binary Slash %0, %1
+      ReturnValue %2
+  Function @add32($0 a: f32, $1 b: f32) -> f32
+    Locals
+      $0 a: f32 parameter
+      $1 b: f32 parameter
+    Block
+      %0: f32 = LoadLocal $0
+      %1: f32 = LoadLocal $1
+      %2: f32 = Binary Plus %0, %1
+      ReturnValue %2
+  Function @main() -> i32
+    Locals
+      $0 wide: f64
+      $1 narrow: f32
+      $2 status: i32 mutable
+    Block
+      %0: f64 = FloatLiteral 6.0
+      %1: f64 = Call @half(%0)
+      %2: f64 = LoadConst @SCALE
+      %3: f64 = Binary Plus %1, %2
+      DeclareLocal $0 = %3
+      %4: f32 = FloatLiteral 1.25
+      %5: f32 = FloatLiteral 2.75
+      %6: f32 = Call @add32(%4, %5)
+      DeclareLocal $1 = %6
+      %7: i32 = IntegerLiteral 1
+      DeclareLocal $2 mutable = %7
+      %8: f64 = LoadLocal $0
+      %9: f64 = FloatLiteral 4.5
+      %10: bool = Binary EqualEqual %8, %9
+      %12: bool = ShortCircuitAnd %10
+        Then
+          Block
+            %13: f32 = LoadLocal $1
+            %14: f32 = FloatLiteral 4.0
+            %15: bool = Binary EqualEqual %13, %14
+            ReturnValue %15
+        Else
+          Block
+            %11: bool = BoolLiteral false
+            ReturnValue %11
+      If %12
+        Then
+          Block
+            %16: i32 = IntegerLiteral 42
+            StoreLocal $2 = %16
+      %17: i32 = LoadLocal $2
+      ReturnValue %17

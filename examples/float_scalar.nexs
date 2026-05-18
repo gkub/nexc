@@ -1,0 +1,21 @@
+const SCALE: f64 = 1.5;
+
+fn half(x: f64) -> f64 {
+    return x / 2.0;
+}
+
+fn add32(a: f32, b: f32) -> f32 {
+    return a + b;
+}
+
+fn main() -> i32 {
+    let wide: f64 = half(6.0) + SCALE;
+    let narrow: f32 = add32(1.25, 2.75);
+    let mut status: i32 = 1;
+
+    if (wide == 4.5 && narrow == 4.0) {
+        status = 42;
+    }
+
+    return status;
+}

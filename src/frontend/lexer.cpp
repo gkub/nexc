@@ -40,6 +40,10 @@ bool isHexDigit(char c) {
            (c >= 'A' && c <= 'F');
 }
 
+bool isDecimalDigit(char c) {
+    return c >= '0' && c <= '9';
+}
+
 // Detect bytes outside ASCII so diagnostics can explain why the lexer rejected a
 // character in nex syntax.
 bool isNonAscii(char c) {
@@ -189,7 +193,7 @@ Token Lexer::lexToken() {
         return lexIdentifierOrKeyword();
     }
 
-    if (c >= '0' && c <= '9') {
+    if (isDecimalDigit(c)) {
         return lexIntegerLiteral();
     }
 
@@ -315,12 +319,37 @@ Token Lexer::lexIntegerLiteral() {
         };
     }
 
-    while (!isAtEnd() && peek() >= '0' && peek() <= '9') {
+    while (!isAtEnd() && isDecimalDigit(peek())) {
         advance();
     }
 
+    bool isFloat = false;
+    if (peek() == '.' && isDecimalDigit(peek(1))) {
+        isFloat = true;
+        advance();
+        while (!isAtEnd() && isDecimalDigit(peek())) {
+            advance();
+        }
+    }
+
+    if (peek() == 'e' || peek() == 'E') {
+        isFloat = true;
+        advance();
+        if (peek() == '+' || peek() == '-') {
+            advance();
+        }
+        const std::size_t firstExponentDigit = current_;
+        while (!isAtEnd() && isDecimalDigit(peek())) {
+            advance();
+        }
+        if (current_ == firstExponentDigit) {
+            diagnostics_.error(SourceSpan{.start = start, .end = current_},
+                               "expected at least one exponent digit in float literal");
+        }
+    }
+
     return Token{
-        .kind = TokenKind::IntegerLiteral,
+        .kind = isFloat ? TokenKind::FloatLiteral : TokenKind::IntegerLiteral,
         .span = SourceSpan{.start = start, .end = current_},
     };
 }

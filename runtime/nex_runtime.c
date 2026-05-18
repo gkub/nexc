@@ -258,3 +258,73 @@ void nex_runtime_print_bool(_Bool v) {
         nex_runtime_print_str("false", 5);
     }
 }
+
+static uint64_t pow10_u64(uint64_t precision) {
+    uint64_t scale = 1;
+    while (precision > 0) {
+        scale *= 10;
+        --precision;
+    }
+    return scale;
+}
+
+static void print_zero_padded_u64(uint64_t value, uint64_t width) {
+    char buf[32];
+    for (uint64_t i = 0; i < width; ++i) {
+        buf[width - 1 - i] = (char)('0' + (value % 10));
+        value /= 10;
+    }
+    nex_runtime_print_str(buf, width);
+}
+
+static void print_f64_fixed(double value, uint64_t precision) {
+    if (value != value) {
+        nex_runtime_print_str("nan", 3);
+        return;
+    }
+    const double inf = 1.0 / 0.0;
+    if (value == inf) {
+        nex_runtime_print_str("inf", 3);
+        return;
+    }
+    if (value == -inf) {
+        nex_runtime_print_str("-inf", 4);
+        return;
+    }
+
+    if (precision > 18) {
+        precision = 18;
+    }
+
+    if (value < 0.0) {
+        nex_runtime_print_str("-", 1);
+        value = 0.0 - value;
+    }
+
+    const uint64_t scale = pow10_u64(precision);
+    const double rounded = value * (double)scale + 0.5;
+    const uint64_t scaled = (uint64_t)rounded;
+    print_u64_decimal(scaled / scale);
+
+    if (precision == 0) {
+        return;
+    }
+    nex_runtime_print_str(".", 1);
+    print_zero_padded_u64(scaled % scale, precision);
+}
+
+void nex_runtime_print_f64(double value) {
+    print_f64_fixed(value, 6);
+}
+
+void nex_runtime_print_f32(float value) {
+    print_f64_fixed((double)value, 6);
+}
+
+void nex_runtime_print_f64_fixed(double value, uint64_t precision) {
+    print_f64_fixed(value, precision);
+}
+
+void nex_runtime_print_f32_fixed(float value, uint64_t precision) {
+    print_f64_fixed((double)value, precision);
+}

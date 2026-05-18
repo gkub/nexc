@@ -19,23 +19,25 @@ Ordered **checklist** for near-term compiler and language work. Prefer **removin
 
 Work **top to bottom** unless a dependency forces a swap (note it inline next to the item).
 
-1. [ ] **Array diagnostics polish** — Improve diagnostics for dynamic-index fallbacks and too-large per-element tracking. Keep fixed-array `push`/`pop` diagnostics pointed toward the future vector story (see [arrays_vectors_linalg.md](design/arrays_vectors_linalg.md)).
+1. [ ] **Integer bitwise and shifts** — Add `&`, `|`, `^`, `~`, `<<`, `>>` for integer types only. Specify signed/unsigned shift behavior, shift-count typing, constant folding, diagnostics, and precedence before implementation.
 
-2. [ ] **`builtins_and_io.md`** — Short cross-link or example for “read in a loop, then use” using `let mut` + definite assignment, if it fits naturally.
+2. [ ] **Const array global lowering (optional optimization)** — Consider `memref.global` / LLVM global constant lowering for small immutable module `const` arrays; keep repeated materialization as the simple fallback. See [const_array_lowering.md](design/const_array_lowering.md).
 
-3. [ ] **Const array global lowering (optional optimization)** — Consider `memref.global` / LLVM global constant lowering for small immutable module `const` arrays; keep repeated materialization as the simple fallback. See [const_array_lowering.md](design/const_array_lowering.md).
+3. [ ] **Type inference** — `let x = expr` without `: T` when `=` is present (grammar + semantic); explicitly deferred until we want the complexity.
 
-4. [ ] **Type inference** — `let x = expr` without `: T` when `=` is present (grammar + semantic); explicitly deferred until we want the complexity.
+4. [ ] **Richer I/O** — Files, errors; see [io_v1_spitball.md](design/io_v1_spitball.md); pairs with `Option`/`Result`-style types later.
 
-5. [ ] **Richer I/O** — Files, errors; see [io_v1_spitball.md](design/io_v1_spitball.md); pairs with `Option`/`Result`-style types later.
+5. [ ] **`Option` / `Result`** — After basic I/O patterns stabilize.
 
-6. [ ] **`Option` / `Result`** — After basic I/O patterns stabilize.
+6. [ ] **Toolchain `portability.md`** — Flesh out [toolchain/README.md](reference/toolchain/README.md) stub for cross-host stories.
 
-7. [ ] **Toolchain `portability.md`** — Flesh out [toolchain/README.md](reference/toolchain/README.md) stub for cross-host stories.
+7. [ ] **Pointers** — Large milestone: address-of / references or `*T`, provenance, `null`, arrays/`str` interaction, LLVM lowering, diagnostics. Split into sub-items when someone starts.
 
-8. [ ] **Pointers** — Large milestone: address-of / references or `*T`, provenance, `null`, arrays/`str` interaction, LLVM lowering, diagnostics. Split into sub-items when someone starts.
+8. [ ] **`str` arrays** — Revisit once the string storage/ownership model is less bootstrap-oriented.
 
-9. [ ] **`str` arrays** — Revisit once the string storage/ownership model is less bootstrap-oriented.
+9. [ ] **Hash maps / dictionaries design** — Design before implementing. Decide allocation, ownership, key equality, hashing, generics or monomorphization strategy, iteration order, failure behavior, and whether the first surface is closer to C++ `unordered_map` or Python `dict`.
+
+10. [ ] **`builtins_and_io.md`** — Short cross-link or example for “read in a loop, then use” using `let mut` + definite assignment, if it fits naturally.
 
 ---
 
@@ -55,6 +57,8 @@ arrays — see [feature_inventory.md](reference/language/feature_inventory.md),
 | Core fixed arrays: locals, `fn` ABI, module `const`, nested arrays, per-element DA | [types.md](reference/language/types.md), examples `array_fixed.nexs`, `array_abi.nexs`, `array_nested.nexs` |
 | Language reference quick-reference pass | [quick_reference.md](reference/language/quick_reference.md), [language README](reference/language/README.md) |
 | Definite-assignment diagnostic notes | golden diagnostics `semantic_use_before_assign`, `semantic_if_branch_definite_assign` |
+| Array definite-assignment diagnostics polish | golden diagnostics `semantic_array_dynamic_index_da`, `semantic_array_da_too_large` |
+| IEEE-754 floating-point scalars + print precision | [types.md](reference/language/types.md), [expressions.md](reference/language/expressions.md), [builtins_and_io.md](reference/language/builtins_and_io.md), examples `float_scalar.nexs`, `float_format_print.nexs` |
 
 ---
 
@@ -67,3 +71,7 @@ arrays — see [feature_inventory.md](reference/language/feature_inventory.md),
 | 2026-05-16 | Shipped fixed-array `fn` ABI + module `const` arrays; backlog item narrowed to uninit locals / nested arrays. |
 | 2026-05-16 | Shipped nested arrays through native execution and `let mut` fixed arrays with per-element definite assignment; backlog narrowed to optional/global/diagnostic array follow-up. |
 | 2026-05-16 | Completed reference quick-reference pass and added definite-assignment diagnostic notes. |
+| 2026-05-18 | Reprioritized next language work around IEEE-754 floats, integer bitwise/shifts, and a later hash-map design item. |
+| 2026-05-18 | Completed array definite-assignment diagnostics polish for dynamic indices and tracking limits. |
+| 2026-05-18 | Shipped `f32` / `f64` literals, semantics, IR, MLIR/LLVM lowering, constants, ABI, docs, and executable/golden coverage. |
+| 2026-05-18 | Added float formatting for `print` / `println` with `{:.N}` / `{:.Nf}` fixed precision. |

@@ -20,7 +20,10 @@
 #include "nexc/frontend/string_literal_decode.h"
 
 #include <algorithm>
+#include <cerrno>
+#include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <optional>
 #include <ostream>
@@ -47,6 +50,18 @@ namespace {
     const std::int64_t value = std::stoll(std::string(text), &parsed, 0);
     if (parsed != text.size()) {
         throw std::logic_error("integer literal was not fully parsed during MLIR lowering");
+    }
+    return value;
+}
+
+[[maybe_unused]] double parseFloatLiteral(std::string_view text) {
+    const std::string spelling(text);
+    char* end = nullptr;
+    errno = 0;
+    const double value = std::strtod(spelling.c_str(), &end);
+    if (end != spelling.c_str() + spelling.size() ||
+        (errno == ERANGE && !std::isfinite(value))) {
+        throw std::logic_error("float literal was not fully parsed during MLIR lowering");
     }
     return value;
 }
@@ -166,6 +181,8 @@ unsigned integerBitWidth(ir::Type type) {
     case BuiltinTypeKind::I64:
     case BuiltinTypeKind::U64:
         return 64;
+    case BuiltinTypeKind::F32:
+    case BuiltinTypeKind::F64:
     case BuiltinTypeKind::Bool:
     case BuiltinTypeKind::Str:
     case BuiltinTypeKind::Void:
@@ -190,6 +207,8 @@ bool isUnsignedInteger(ir::Type type) {
     case BuiltinTypeKind::I32:
     case BuiltinTypeKind::I64:
     case BuiltinTypeKind::Bool:
+    case BuiltinTypeKind::F32:
+    case BuiltinTypeKind::F64:
     case BuiltinTypeKind::Str:
     case BuiltinTypeKind::Void:
     case BuiltinTypeKind::Invalid:
@@ -220,6 +239,10 @@ bool isUnsignedInteger(ir::Type type) {
     case BuiltinTypeKind::U32:
     case BuiltinTypeKind::U64:
         return builder.getIntegerType(integerBitWidth(type));
+    case BuiltinTypeKind::F32:
+        return builder.getF32Type();
+    case BuiltinTypeKind::F64:
+        return builder.getF64Type();
     case BuiltinTypeKind::Void:
         return {};
     default:
@@ -362,6 +385,25 @@ llvm::SmallVector<int64_t, 4> rankedArrayShape(ir::Type arrayType) {
     }
 }
 
+::mlir::arith::CmpFPredicate floatComparisonPredicate(TokenKind op) {
+    switch (op) {
+    case TokenKind::EqualEqual:
+        return ::mlir::arith::CmpFPredicate::OEQ;
+    case TokenKind::BangEqual:
+        return ::mlir::arith::CmpFPredicate::UNE;
+    case TokenKind::Less:
+        return ::mlir::arith::CmpFPredicate::OLT;
+    case TokenKind::LessEqual:
+        return ::mlir::arith::CmpFPredicate::OLE;
+    case TokenKind::Greater:
+        return ::mlir::arith::CmpFPredicate::OGT;
+    case TokenKind::GreaterEqual:
+        return ::mlir::arith::CmpFPredicate::OGE;
+    default:
+        throw std::logic_error("token is not a floating-point comparison operator");
+    }
+}
+
 class FunctionLowerer {
 public:
     // Lower exactly one typed IR function into the MLIR module currently being
@@ -453,6 +495,9 @@ private:
         case ir::Operation::Kind::IntegerLiteral:
             lowerIntegerLiteral(operation);
             return false;
+        case ir::Operation::Kind::FloatLiteral:
+            lowerFloatLiteral(operation);
+            return false;
         case ir::Operation::Kind::BoolLiteral:
             lowerBoolLiteral(operation);
             return false;
@@ -528,6 +573,16 @@ private:
                                     parseIntegerLiteralApInt(operation.text, width));
         auto constant =
             builder_.create<::mlir::arith::ConstantOp>(loc_, mlirIntegerType, value);
+        bindValue(result, constant.getResult());
+    }
+
+    void lowerFloatLiteral(const ir::Operation& operation) {
+        const ir::ValueRef result = requiredValue(operation.result, "float literal");
+        const ::mlir::Type type = mlirType(builder_, result.type);
+        const ::mlir::FloatAttr value =
+            builder_.getFloatAttr(type, parseFloatLiteral(operation.text));
+        auto constant =
+            builder_.create<::mlir::arith::ConstantOp>(loc_, type, value);
         bindValue(result, constant.getResult());
     }
 
@@ -629,6 +684,15 @@ private:
                 constValues.emplace(literal.id, value.getResult());
                 break;
             }
+            case ir::Operation::Kind::FloatLiteral: {
+                const ir::ValueRef literal = requiredValue(op.result, "const float");
+                const ::mlir::Type type = mlirType(builder_, literal.type);
+                auto value = builder_.create<::mlir::arith::ConstantOp>(
+                    loc_, type,
+                    builder_.getFloatAttr(type, parseFloatLiteral(op.text)));
+                constValues.emplace(literal.id, value.getResult());
+                break;
+            }
             case ir::Operation::Kind::BoolLiteral: {
                 const ir::ValueRef literal = requiredValue(op.result, "const bool");
                 auto value = builder_.create<::mlir::arith::ConstantIntOp>(
@@ -641,11 +705,16 @@ private:
                 const ir::ValueRef operandRef = requiredValue(op.value, "const unary operand");
                 const ::mlir::Value operand = lookupConstValue(operandRef);
                 if (op.op == TokenKind::Minus) {
-                    auto zero = builder_.create<::mlir::arith::ConstantIntOp>(
-                        loc_, 0, integerBitWidth(operandRef.type));
-                    auto value = builder_.create<::mlir::arith::SubIOp>(
-                        loc_, zero.getResult(), operand);
-                    constValues.emplace(result.id, value.getResult());
+                    ::mlir::Value value;
+                    if (operandRef.type.isFloat()) {
+                        value = builder_.create<::mlir::arith::NegFOp>(loc_, operand);
+                    } else {
+                        auto zero = builder_.create<::mlir::arith::ConstantIntOp>(
+                            loc_, 0, integerBitWidth(operandRef.type));
+                        value = builder_.create<::mlir::arith::SubIOp>(
+                            loc_, zero.getResult(), operand);
+                    }
+                    constValues.emplace(result.id, value);
                 } else if (op.op == TokenKind::Bang) {
                     const unsigned width = operandRef.type.kind == BuiltinTypeKind::Bool
                                                ? 1
@@ -666,6 +735,35 @@ private:
                 const ::mlir::Value right =
                     lookupConstValue(requiredValue(op.right, "const binary right"));
                 ::mlir::Value value;
+                if (leftRef.type.isFloat()) {
+                    switch (op.op) {
+                    case TokenKind::Plus:
+                        value = builder_.create<::mlir::arith::AddFOp>(loc_, left, right);
+                        break;
+                    case TokenKind::Minus:
+                        value = builder_.create<::mlir::arith::SubFOp>(loc_, left, right);
+                        break;
+                    case TokenKind::Star:
+                        value = builder_.create<::mlir::arith::MulFOp>(loc_, left, right);
+                        break;
+                    case TokenKind::Slash:
+                        value = builder_.create<::mlir::arith::DivFOp>(loc_, left, right);
+                        break;
+                    case TokenKind::EqualEqual:
+                    case TokenKind::BangEqual:
+                    case TokenKind::Less:
+                    case TokenKind::LessEqual:
+                    case TokenKind::Greater:
+                    case TokenKind::GreaterEqual:
+                        value = builder_.create<::mlir::arith::CmpFOp>(
+                            loc_, floatComparisonPredicate(op.op), left, right);
+                        break;
+                    default:
+                        throw std::logic_error("unsupported float binary operator in const lowering");
+                    }
+                    constValues.emplace(result.id, value);
+                    break;
+                }
                 switch (op.op) {
                 case TokenKind::Plus:
                     value = builder_.create<::mlir::arith::AddIOp>(loc_, left, right);
@@ -989,20 +1087,35 @@ private:
         bindValue(result, ifOp.getResult(0));
     }
 
-    // Lower a unary operation.
-    //
-    // The current MLIR slice only supports logical not. It is emitted as a
-    // comparison against zero/false, which is simple and works for both bool
-    // (`i1`) and the current integer type (`i32`).
+    // Lower a unary operation. `!` is a zero/false comparison; unary `-` uses
+    // integer subtraction from zero or the native floating-point negation op.
     void lowerUnary(const ir::Operation& operation) {
-        if (operation.op != TokenKind::Bang) {
-            throw std::logic_error("MLIR lowering only supports unary ! for now");
-        }
-
         const ir::ValueRef result = requiredValue(operation.result, "unary operation");
         const ir::ValueRef operandRef = requiredValue(operation.value, "unary operand");
         const ::mlir::Value operand =
             lookupValue(operandRef);
+
+        if (operation.op == TokenKind::Minus) {
+            if (operandRef.type.isFloat()) {
+                auto lowered = builder_.create<::mlir::arith::NegFOp>(loc_, operand);
+                bindValue(result, lowered.getResult());
+                return;
+            }
+            if (operandRef.type.isInteger()) {
+                auto zero = builder_.create<::mlir::arith::ConstantIntOp>(
+                    loc_, 0, integerBitWidth(operandRef.type));
+                auto lowered =
+                    builder_.create<::mlir::arith::SubIOp>(loc_, zero.getResult(), operand);
+                bindValue(result, lowered.getResult());
+                return;
+            }
+            throw std::logic_error("MLIR lowering only supports unary - for integers and floats");
+        }
+
+        if (operation.op != TokenKind::Bang) {
+            throw std::logic_error("unsupported unary operator in MLIR lowering");
+        }
+
         unsigned width = 0;
         if (operandRef.type.kind == BuiltinTypeKind::Bool) {
             width = 1;
@@ -1023,12 +1136,42 @@ private:
     // relational comparisons become `arith.cmpi`, producing an MLIR `i1`.
     void lowerBinary(const ir::Operation& operation) {
         const ir::ValueRef result = requiredValue(operation.result, "binary operation");
-        const ::mlir::Value left =
-            lookupValue(requiredValue(operation.left, "binary left operand"));
+        const ir::ValueRef leftRef = requiredValue(operation.left, "binary left operand");
+        const ::mlir::Value left = lookupValue(leftRef);
         const ::mlir::Value right =
             lookupValue(requiredValue(operation.right, "binary right operand"));
 
         ::mlir::Value lowered;
+        if (leftRef.type.isFloat()) {
+            switch (operation.op) {
+            case TokenKind::Plus:
+                lowered = builder_.create<::mlir::arith::AddFOp>(loc_, left, right);
+                break;
+            case TokenKind::Minus:
+                lowered = builder_.create<::mlir::arith::SubFOp>(loc_, left, right);
+                break;
+            case TokenKind::Star:
+                lowered = builder_.create<::mlir::arith::MulFOp>(loc_, left, right);
+                break;
+            case TokenKind::Slash:
+                lowered = builder_.create<::mlir::arith::DivFOp>(loc_, left, right);
+                break;
+            case TokenKind::EqualEqual:
+            case TokenKind::BangEqual:
+            case TokenKind::Less:
+            case TokenKind::LessEqual:
+            case TokenKind::Greater:
+            case TokenKind::GreaterEqual:
+                lowered = builder_.create<::mlir::arith::CmpFOp>(
+                    loc_, floatComparisonPredicate(operation.op), left, right);
+                break;
+            default:
+                throw std::logic_error("unsupported float binary operator in MLIR lowering");
+            }
+            bindValue(result, lowered);
+            return;
+        }
+
         switch (operation.op) {
         case TokenKind::Plus:
             lowered = builder_.create<::mlir::arith::AddIOp>(loc_, left, right);
@@ -1158,6 +1301,26 @@ private:
                                          {});
     }
 
+    void ensureRuntimePrintF32Declaration(bool fixedPrecision) {
+        llvm::SmallVector<::mlir::Type> args{builder_.getF32Type()};
+        if (fixedPrecision) {
+            args.push_back(builder_.getI64Type());
+        }
+        ensureRuntimeFunctionDeclaration(
+            fixedPrecision ? "nex_runtime_print_f32_fixed" : "nex_runtime_print_f32",
+            args, {});
+    }
+
+    void ensureRuntimePrintF64Declaration(bool fixedPrecision) {
+        llvm::SmallVector<::mlir::Type> args{builder_.getF64Type()};
+        if (fixedPrecision) {
+            args.push_back(builder_.getI64Type());
+        }
+        ensureRuntimeFunctionDeclaration(
+            fixedPrecision ? "nex_runtime_print_f64_fixed" : "nex_runtime_print_f64",
+            args, {});
+    }
+
     ::mlir::Value widenIntegerArgumentToI64(ir::ValueRef ref) {
         ::mlir::Value value = lookupValue(ref);
         const ir::Type type = ref.type;
@@ -1175,7 +1338,7 @@ private:
         return builder_.create<::mlir::arith::ExtSIOp>(loc_, i64Ty, value).getResult();
     }
 
-    void lowerOneFormatArgument(ir::ValueRef ref) {
+    void lowerOneFormatArgument(ir::ValueRef ref, FormatHole hole) {
         const ir::Type type = ref.type;
         if (type.kind == BuiltinTypeKind::Bool) {
             ensureRuntimePrintBoolDeclaration();
@@ -1201,6 +1364,28 @@ private:
                     loc_, "nex_runtime_print_i64", ::mlir::TypeRange{},
                     ::mlir::ValueRange{wide});
             }
+            return;
+        }
+        if (type.kind == BuiltinTypeKind::F32 || type.kind == BuiltinTypeKind::F64) {
+            const bool fixedPrecision = hole.precision.has_value();
+            const char* runtimeName = nullptr;
+            if (type.kind == BuiltinTypeKind::F32) {
+                ensureRuntimePrintF32Declaration(fixedPrecision);
+                runtimeName = fixedPrecision ? "nex_runtime_print_f32_fixed"
+                                             : "nex_runtime_print_f32";
+            } else {
+                ensureRuntimePrintF64Declaration(fixedPrecision);
+                runtimeName = fixedPrecision ? "nex_runtime_print_f64_fixed"
+                                             : "nex_runtime_print_f64";
+            }
+            llvm::SmallVector<::mlir::Value> args{lookupValue(ref)};
+            if (fixedPrecision) {
+                auto precision = builder_.create<::mlir::arith::ConstantIntOp>(
+                    loc_, static_cast<std::int64_t>(*hole.precision), 64);
+                args.push_back(precision.getResult());
+            }
+            builder_.create<::mlir::func::CallOp>(
+                loc_, runtimeName, ::mlir::TypeRange{}, args);
             return;
         }
 
@@ -1230,26 +1415,26 @@ private:
         }
 
         const std::string decoded = decodeStringLiteralOrThrow(*rawFmt);
-        std::vector<std::string> literals;
+        FormatParts parts;
         std::string splitErr;
-        if (!splitFormatString(decoded, literals, splitErr)) {
+        if (!parseFormatString(decoded, parts, splitErr)) {
             throw std::logic_error(splitErr);
         }
 
-        const std::size_t holes = literals.size() - 1;
+        const std::size_t holes = parts.holes.size();
         if (operation.arguments.size() != 1 + holes) {
             throw std::logic_error("internal error: format arity mismatch at lowering");
         }
 
         for (std::size_t i = 0; i < holes; ++i) {
-            if (!literals[i].empty()) {
-                emitRuntimePrintStr(emitGlobalFormatBytes(literals[i]));
+            if (!parts.literals[i].empty()) {
+                emitRuntimePrintStr(emitGlobalFormatBytes(parts.literals[i]));
             }
-            lowerOneFormatArgument(operation.arguments[i + 1]);
+            lowerOneFormatArgument(operation.arguments[i + 1], parts.holes[i]);
         }
 
-        if (!literals.empty() && !literals[holes].empty()) {
-            emitRuntimePrintStr(emitGlobalFormatBytes(literals[holes]));
+        if (!parts.literals.empty() && !parts.literals[holes].empty()) {
+            emitRuntimePrintStr(emitGlobalFormatBytes(parts.literals[holes]));
         }
 
         if (newlineAtEnd) {
@@ -1874,10 +2059,14 @@ std::string textualType(ir::Type type) {
         return "i1";
     case BuiltinTypeKind::I32:
         return "i32";
+    case BuiltinTypeKind::F32:
+        return "f32";
+    case BuiltinTypeKind::F64:
+        return "f64";
     case BuiltinTypeKind::Void:
         return "";
     default:
-        throw std::logic_error("textual MLIR lowering only supports bool, i32, and void in this slice");
+        throw std::logic_error("textual MLIR lowering only supports bool, i32, f32, f64, and void in this slice");
     }
 }
 
@@ -1939,6 +2128,21 @@ std::string textualBinaryOp(TokenKind op) {
     }
 }
 
+std::string textualFloatBinaryOp(TokenKind op) {
+    switch (op) {
+    case TokenKind::Plus:
+        return "arith.addf";
+    case TokenKind::Minus:
+        return "arith.subf";
+    case TokenKind::Star:
+        return "arith.mulf";
+    case TokenKind::Slash:
+        return "arith.divf";
+    default:
+        throw std::logic_error("token is not a floating-point arithmetic operator");
+    }
+}
+
 // Convert a nex comparison token into the textual `arith.cmpi` predicate.
 //
 // As in the real MLIR path, relational comparisons currently use signed
@@ -1959,6 +2163,25 @@ std::string textualComparisonPredicate(TokenKind op) {
         return "sge";
     default:
         throw std::logic_error("token is not an integer comparison operator");
+    }
+}
+
+std::string textualFloatComparisonPredicate(TokenKind op) {
+    switch (op) {
+    case TokenKind::EqualEqual:
+        return "oeq";
+    case TokenKind::BangEqual:
+        return "une";
+    case TokenKind::Less:
+        return "olt";
+    case TokenKind::LessEqual:
+        return "ole";
+    case TokenKind::Greater:
+        return "ogt";
+    case TokenKind::GreaterEqual:
+        return "oge";
+    default:
+        throw std::logic_error("token is not a floating-point comparison operator");
     }
 }
 
@@ -2036,6 +2259,9 @@ private:
         switch (operation.kind) {
         case ir::Operation::Kind::IntegerLiteral:
             dumpIntegerLiteral(operation);
+            return false;
+        case ir::Operation::Kind::FloatLiteral:
+            dumpFloatLiteral(operation);
             return false;
         case ir::Operation::Kind::BoolLiteral:
             dumpBoolLiteral(operation);
@@ -2119,12 +2345,98 @@ private:
                 vals.emplace(lit.id, name);
                 break;
             }
+            case ir::Operation::Kind::FloatLiteral: {
+                const ir::ValueRef lit = requiredValue(op.result, "const float literal");
+                const std::string name = nextValueName();
+                out_ << indent() << name << " = arith.constant " << op.text
+                     << " : " << textualType(lit.type) << "\n";
+                vals.emplace(lit.id, name);
+                break;
+            }
             case ir::Operation::Kind::BoolLiteral: {
                 const ir::ValueRef lit = requiredValue(op.result, "const bool literal");
                 const std::string name = op.boolValue ? "%true" : "%false";
                 out_ << indent() << name << " = arith.constant "
                      << (op.boolValue ? "true" : "false") << '\n';
                 vals.emplace(lit.id, name);
+                break;
+            }
+            case ir::Operation::Kind::Unary: {
+                const ir::ValueRef res = requiredValue(op.result, "const unary");
+                const ir::ValueRef operandRef = requiredValue(op.value, "const unary operand");
+                const std::string operand = lookupVal(operandRef);
+                const std::string name = nextValueName();
+                if (op.op == TokenKind::Minus && operandRef.type.isFloat()) {
+                    out_ << indent() << name << " = arith.negf " << operand
+                         << " : " << textualType(res.type) << "\n";
+                } else if (op.op == TokenKind::Minus && operandRef.type.kind == BuiltinTypeKind::I32) {
+                    out_ << indent() << "%c0_i32 = arith.constant 0 : i32\n";
+                    out_ << indent() << name << " = arith.subi %c0_i32, " << operand
+                         << " : i32\n";
+                } else if (op.op == TokenKind::Bang) {
+                    const std::string zero = operandRef.type.kind == BuiltinTypeKind::Bool
+                                                 ? "%false"
+                                                 : "%c0_i32";
+                    if (operandRef.type.kind == BuiltinTypeKind::Bool) {
+                        out_ << indent() << "%false = arith.constant false\n";
+                    } else {
+                        out_ << indent() << "%c0_i32 = arith.constant 0 : i32\n";
+                    }
+                    out_ << indent() << name << " = arith.cmpi eq, " << operand
+                         << ", " << zero << " : " << textualType(operandRef.type) << "\n";
+                } else {
+                    throw std::logic_error("textual const lowering hit an unsupported unary operation");
+                }
+                vals.emplace(res.id, name);
+                break;
+            }
+            case ir::Operation::Kind::Binary: {
+                const ir::ValueRef res = requiredValue(op.result, "const binary");
+                const ir::ValueRef leftRef = requiredValue(op.left, "const binary left");
+                const std::string left = lookupVal(leftRef);
+                const std::string right =
+                    lookupVal(requiredValue(op.right, "const binary right"));
+                const std::string name = nextValueName();
+                if (leftRef.type.isFloat()) {
+                    switch (op.op) {
+                    case TokenKind::EqualEqual:
+                    case TokenKind::BangEqual:
+                    case TokenKind::Less:
+                    case TokenKind::LessEqual:
+                    case TokenKind::Greater:
+                    case TokenKind::GreaterEqual:
+                        out_ << indent() << name << " = arith.cmpf "
+                             << textualFloatComparisonPredicate(op.op) << ", "
+                             << left << ", " << right << " : " << textualType(leftRef.type)
+                             << "\n";
+                        break;
+                    default:
+                        out_ << indent() << name << " = " << textualFloatBinaryOp(op.op)
+                             << ' ' << left << ", " << right << " : "
+                             << textualType(res.type) << "\n";
+                        break;
+                    }
+                } else {
+                    switch (op.op) {
+                    case TokenKind::EqualEqual:
+                    case TokenKind::BangEqual:
+                    case TokenKind::Less:
+                    case TokenKind::LessEqual:
+                    case TokenKind::Greater:
+                    case TokenKind::GreaterEqual:
+                        out_ << indent() << name << " = arith.cmpi "
+                             << textualComparisonPredicate(op.op) << ", "
+                             << left << ", " << right << " : " << textualType(leftRef.type)
+                             << "\n";
+                        break;
+                    default:
+                        out_ << indent() << name << " = " << textualBinaryOp(op.op)
+                             << ' ' << left << ", " << right << " : "
+                             << textualType(res.type) << "\n";
+                        break;
+                    }
+                }
+                vals.emplace(res.id, name);
                 break;
             }
             case ir::Operation::Kind::ArrayLiteral: {
@@ -2232,6 +2544,14 @@ private:
         out_ << indent() << name << " = arith.constant "
              << parseIntegerLiteral(operation.text) << " : "
              << textualType(result.type) << '\n';
+        bindValue(result, name);
+    }
+
+    void dumpFloatLiteral(const ir::Operation& operation) {
+        const ir::ValueRef result = requiredValue(operation.result, "float literal");
+        const std::string name = nextValueName();
+        out_ << indent() << name << " = arith.constant " << operation.text
+             << " : " << textualType(result.type) << '\n';
         bindValue(result, name);
     }
 
@@ -2436,14 +2756,32 @@ private:
     // This is intentionally the same boring lowering as the real MLIR path. It
     // avoids inventing a fallback-only representation for `!`.
     void dumpUnary(const ir::Operation& operation) {
-        if (operation.op != TokenKind::Bang) {
-            throw std::logic_error("textual MLIR lowering only supports unary ! for now");
-        }
-
         const ir::ValueRef result = requiredValue(operation.result, "unary operation");
         const ir::ValueRef operandRef = requiredValue(operation.value, "unary operand");
         const std::string operand = lookupValue(operandRef);
         const std::string name = nextValueName();
+
+        if (operation.op == TokenKind::Minus) {
+            if (operandRef.type.isFloat()) {
+                out_ << indent() << name << " = arith.negf " << operand
+                     << " : " << textualType(result.type) << "\n";
+                bindValue(result, name);
+                return;
+            }
+            if (operandRef.type.kind == BuiltinTypeKind::I32) {
+                out_ << indent() << "%c0_i32 = arith.constant 0 : i32\n";
+                out_ << indent() << name << " = arith.subi %c0_i32, " << operand
+                     << " : i32\n";
+                bindValue(result, name);
+                return;
+            }
+            throw std::logic_error("textual MLIR lowering only supports unary - for i32 and floats");
+        }
+
+        if (operation.op != TokenKind::Bang) {
+            throw std::logic_error("unsupported textual MLIR unary operator");
+        }
+
         if (operandRef.type.kind == BuiltinTypeKind::Bool) {
             out_ << indent() << "%false = arith.constant false\n";
             out_ << indent() << name << " = arith.cmpi eq, " << operand
@@ -2465,11 +2803,34 @@ private:
     // keeps golden files stable across real and fallback builds.
     void dumpBinary(const ir::Operation& operation) {
         const ir::ValueRef result = requiredValue(operation.result, "binary operation");
-        const std::string left =
-            lookupValue(requiredValue(operation.left, "binary left operand"));
+        const ir::ValueRef leftRef = requiredValue(operation.left, "binary left operand");
+        const std::string left = lookupValue(leftRef);
         const std::string right =
             lookupValue(requiredValue(operation.right, "binary right operand"));
         const std::string name = nextValueName();
+
+        if (leftRef.type.isFloat()) {
+            switch (operation.op) {
+            case TokenKind::EqualEqual:
+            case TokenKind::BangEqual:
+            case TokenKind::Less:
+            case TokenKind::LessEqual:
+            case TokenKind::Greater:
+            case TokenKind::GreaterEqual:
+                out_ << indent() << name << " = arith.cmpf "
+                     << textualFloatComparisonPredicate(operation.op) << ", "
+                     << left << ", " << right << " : " << textualType(leftRef.type)
+                     << '\n';
+                break;
+            default:
+                out_ << indent() << name << " = " << textualFloatBinaryOp(operation.op)
+                     << ' ' << left << ", " << right << " : "
+                     << textualType(result.type) << '\n';
+                break;
+            }
+            bindValue(result, name);
+            return;
+        }
 
         switch (operation.op) {
         case TokenKind::EqualEqual:

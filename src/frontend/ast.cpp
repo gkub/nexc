@@ -230,6 +230,10 @@ private:
             line("IntegerLiteral " + integer->raw);
             return;
         }
+        if (const auto* floating = dynamic_cast<const FloatLiteralExpr*>(&expr)) {
+            line("FloatLiteral " + floating->raw);
+            return;
+        }
 
         if (const auto* boolean = dynamic_cast<const BoolLiteralExpr*>(&expr)) {
             line(std::string("BoolLiteral ") + (boolean->value ? "true" : "false"));
@@ -517,6 +521,9 @@ private:
         if (const auto* integer = dynamic_cast<const IntegerLiteralExpr*>(&expr)) {
             return node("IntegerLiteral\n" + integer->raw);
         }
+        if (const auto* floating = dynamic_cast<const FloatLiteralExpr*>(&expr)) {
+            return node("FloatLiteral\n" + floating->raw);
+        }
 
         if (const auto* boolean = dynamic_cast<const BoolLiteralExpr*>(&expr)) {
             return node(std::string("BoolLiteral\n") +
@@ -621,6 +628,10 @@ std::string_view builtinTypeName(BuiltinTypeKind kind) {
         return "u32";
     case BuiltinTypeKind::U64:
         return "u64";
+    case BuiltinTypeKind::F32:
+        return "f32";
+    case BuiltinTypeKind::F64:
+        return "f64";
     case BuiltinTypeKind::Bool:
         return "bool";
     case BuiltinTypeKind::Str:

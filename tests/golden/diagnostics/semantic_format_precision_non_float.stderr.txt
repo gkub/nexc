@@ -1,0 +1,3 @@
+tests/semantic_format_precision_non_float.nexs:2:24: error: format precision is only supported for floating-point arguments
+  |     println("x={:.2}", 42);
+  |                        ^~

@@ -338,7 +338,7 @@ std::unique_ptr<Stmt> Parser::parseStmt() {
         return nullptr;
     }
     if (check(TokenKind::Identifier) || check(TokenKind::IntegerLiteral) ||
-        check(TokenKind::StringLiteral) || check(TokenKind::KwTrue) ||
+        check(TokenKind::FloatLiteral) || check(TokenKind::StringLiteral) || check(TokenKind::KwTrue) ||
         check(TokenKind::KwFalse) || check(TokenKind::LeftParen) ||
         check(TokenKind::LeftBracket) || check(TokenKind::Minus) ||
         check(TokenKind::Bang)) {
@@ -682,6 +682,11 @@ std::unique_ptr<Expr> Parser::parsePrimaryExpr() {
         return std::make_unique<IntegerLiteralExpr>(token.span, tokenText(token));
     }
 
+    if (match(TokenKind::FloatLiteral)) {
+        const Token token = previous();
+        return std::make_unique<FloatLiteralExpr>(token.span, tokenText(token));
+    }
+
     if (match(TokenKind::StringLiteral)) {
         const Token token = previous();
         return std::make_unique<StringLiteralExpr>(token.span, tokenText(token));
@@ -842,6 +847,12 @@ BuiltinTypeKind Parser::builtinTypeKind(const Token& token) const {
     }
     if (text == "u64") {
         return BuiltinTypeKind::U64;
+    }
+    if (text == "f32") {
+        return BuiltinTypeKind::F32;
+    }
+    if (text == "f64") {
+        return BuiltinTypeKind::F64;
     }
     if (text == "str") {
         return BuiltinTypeKind::Str;

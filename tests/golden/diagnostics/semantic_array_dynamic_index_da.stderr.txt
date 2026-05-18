@@ -1,0 +1,6 @@
+tests/semantic_array_dynamic_index_da.nexs:5:12: error: indexed read may access an uninitialized element of `a`
+  |     return a[0];
+  |            ^~~~
+tests/semantic_array_dynamic_index_da.nexs:4:7: note: non-constant index here prevents proving which array element was assigned
+  |     a[i] = 1;
+  |       ^
