@@ -15,12 +15,14 @@ Implemented today:
 - fixed-width integers, IEEE-754 `f32` / `f64`, `bool`, `str`, `void`, and
   fixed-size arrays
 - runtime-backed `print` / `println` with `{}` formatting and float precision
-  placeholders such as `{:.2}`
+  placeholders such as `{:.2}`, plus integer hex/binary placeholders
+  (`{:x}`, `{:X}`, `{:b}`)
 - selected input helpers such as `readln`, `parse_i32`, `parse_u64`,
   `parse_bool`, and `input_ok`
 - `if` / `else`, `while`, C-style `for`, `break`, and `continue`
 - fixed-size arrays for locals, function ABI, module constants, nested literals,
   indexing, and mutable element assignment
+- integer bitwise and shift operators: `&`, `|`, `^`, `~`, `<<`, `>>`
 
 See [`docs/reference/language`](./docs/reference/language/README.md) if you want to learn how to write nex code, and
 [`NEXC_HOLY_BOOK.md`](./NEXC_HOLY_BOOK.md) for an educational tour of how the nex compiler works.
@@ -55,6 +57,13 @@ Try a float/formatting example:
 ```sh
 build/nexc examples/float_format_print.nexs -o build/float_format_print
 ./build/float_format_print
+```
+
+Try hex/binary formatting:
+
+```sh
+build/nexc examples/int_format_print.nexs -o build/int_format_print
+./build/int_format_print
 ```
 
 Useful inspection commands:

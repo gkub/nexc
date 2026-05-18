@@ -24,11 +24,6 @@ This guide is about how the compiler implementation works.
 - [12. LLVM IR Lowering](#12-llvm-ir-lowering)
 - [13. Runtime Library And Language](#13-runtime-library-and-language-io)
 - [14. Native Executable Driver](#14-native-executable-driver)
-  - [End-to-end steps](#end-to-end-steps-what-actually-runs)
-  - [What `llc` is](#what-llc-is)
-  - [What `ld.lld` is](#what-ldlld-is)
-  - [Hosted linking stance](#hosted-linking-stance)
-  - [How this compares to `gcc`](#how-this-compares-to-gcc)
 - [15. CLI Inspection Modes](#15-cli-inspection-modes)
 - [16. Tests, Golden Files, and CI](#16-tests-golden-files-and-ci)
 - [17. Current Limitations](#17-current-limitations)
@@ -126,8 +121,8 @@ or:
 you are running `build/nexc` on a `.nexs` input file. That is the compiler
 pipeline.
 
-The compiler currently implements a checked frontend, a first typed IR
-dump, and a small MLIR lowering slice:
+The compiler currently implements a checked frontend, typed IR, MLIR/LLVM
+lowering, and native executable generation for the implemented language surface:
 
 ```text
 .nexs source file
@@ -139,6 +134,8 @@ dump, and a small MLIR lowering slice:
   -> SemanticAnalyzer
   -> typed IR
   -> MLIR
+  -> LLVM IR
+  -> native executable
 ```
 
 LLVM IR dumping and host executable generation are implemented for the current
@@ -152,8 +149,10 @@ Each stage has a narrow job:
 - **Semantic analysis:** decides whether the tree means something valid.
 - **Typed IR builder:** turns the checked AST into a backend-facing, typed,
 resolved representation.
-- **MLIR emitter:** lowers the first tiny typed IR slice into a real MLIR module
-and prints stable MLIR text.
+- **MLIR emitter:** lowers typed IR into a real MLIR module and prints stable
+MLIR text.
+- **LLVM/native path:** lowers MLIR toward LLVM IR, asks LLVM tools for object
+code, and links with the small nex runtime.
 
 That separation is important. For example, this can parse successfully:
 
@@ -230,6 +229,7 @@ fn main() -> i32 {
 
 This program uses function calls, parameters, mutable locals, assignment, a
 `while` loop, an `if` / `else`, arithmetic, remainder, comparison, and equality.
+Other examples cover fixed arrays, floats, bitwise operations, and runtime I/O.
 It is intentionally more useful for learning the pipeline than `return 42;`.
 
 At each current stage:
@@ -296,11 +296,14 @@ the helper script.
 
 ## 2. Build Shape
 
-The root [CMakeLists.txt](CMakeLists.txt) defines four main targets:
+The root [CMakeLists.txt](CMakeLists.txt) defines the main compiler/runtime
+targets:
 
 - `nexc_frontend`: reusable compiler frontend library
 - `nexc_ir`: typed IR model, builder, and dumper
 - `nexc_mlir`: first MLIR lowering layer
+- `nexc_llvm`: MLIR-to-LLVM IR lowering layer
+- `nexc_runtime`: bootstrap runtime archive linked into native executables
 - `nexc`: command-line executable
 
 The frontend library lives under:
@@ -322,6 +325,19 @@ The MLIR lowering layer lives under:
 ```text
 include/nexc/mlir/
 src/mlir/
+```
+
+The LLVM lowering wrapper lives under:
+
+```text
+include/nexc/llvm/
+src/llvm/
+```
+
+The bootstrap runtime lives under:
+
+```text
+runtime/
 ```
 
 The CLI lives at:
@@ -469,8 +485,9 @@ letx
 
 `letx` is one identifier, not the keyword `let` followed by identifier `x`.
 
-Integer type names such as `i32` and `u64` currently lex as identifiers. The
-parser recognizes them as built-in types only while parsing type syntax.
+Scalar type names such as `i32`, `u64`, `f32`, `f64`, and `str` currently lex as
+identifiers. The parser recognizes them as built-in types only while parsing
+type syntax.
 
 ## 6. Lexer
 
@@ -490,6 +507,7 @@ Its responsibilities are narrow:
 - recognize keywords
 - recognize identifiers
 - recognize integer literals
+- recognize float literals
 - recognize operators and punctuation
 - attach spans
 - report invalid characters and malformed literals
@@ -512,6 +530,10 @@ These helpers make multi-character tokens straightforward:
 -> -> Arrow
 =  -> Equal
 == -> EqualEqual
+<  -> Less
+<< -> LessLess
+&  -> Amp
+&& -> AmpAmp
 ```
 
 Whitespace and comments are often called **trivia**. They matter for source
@@ -555,21 +577,21 @@ production compilers still use hand-written parsers instead of parser generators
 
 ### Statement Ambiguity
 
-In the current language, a statement beginning with an identifier can mean either
-assignment or a call statement:
+In the current language, a statement beginning with an expression-like prefix can
+mean assignment or a call statement:
 
 ```nex
 x = x + 1;
+items[0] = 42;
 foo(x);
 ```
 
-The parser resolves this with one token of lookahead:
-
-- identifier followed by `=` means assignment
-- otherwise, parse an expression and require it to be a call expression
+The parser handles this by first parsing the left expression shape, then looking
+for `=`. If `=` appears, the left side must be a valid place (`name` or indexed
+array element). Otherwise, the expression statement must be a call.
 
 This will need to evolve when the language adds richer assignment targets such
-as indexing or field access.
+as field access or pointer dereference.
 
 ### Expression Parsing
 
@@ -631,6 +653,11 @@ BinaryExpr Plus
       IntegerLiteral 7
   IntegerLiteral 1
 ```
+
+The precedence table is intentionally C-like for familiar operators: postfix
+calls/indexing bind tightest; unary `-`, `!`, and `~` come next; multiplication
+beats addition; shifts bind looser than addition; comparisons and equality sit
+above bitwise `&`, `^`, `|`; logical `&&` and `||` are loosest.
 
 ## 8. AST
 
@@ -706,16 +733,23 @@ The current analyzer checks:
 - calls to undefined functions
 - function call argument counts
 - exact scalar type matching for locals, assignments, arguments, and returns
+- fixed arrays in locals, function ABI, and module constants
 - assignment only to `let mut`
 - `if` / `while` conditions using `bool` or integer types
 - `&&`, `||`, and `!` over `bool` or integer operands
-- integer arithmetic/comparison operands
+- integer and floating-point arithmetic/comparison operands
+- integer bitwise and shift operands
+- no implicit integer/float coercions
 - discarded call results: only `void` calls may be statements
 - string literals as `str`
-- built-in `print(str) -> void`, `println(str) -> void`, and `readln() -> str`
+- built-in `print` / `println` format calls, `readln() -> str`, parse helpers,
+  and `input_ok() -> bool`
 - `main`, if present, has no parameters and returns `void` or `i32`
 - module-level `const` initializers are compile-time expressions
 - integer literals fit their selected type
+- float literals fit `f32` / `f64`
+- definite assignment for uninitialized `let mut`, including per-element fixed
+  array tracking where indices are compile-time known
 
 The analyzer uses a symbol table. A **symbol** is the compiler's record for a
 declared name: for example, `x` is an `i32` local, or `add` is a function taking
@@ -724,9 +758,10 @@ two `i32` parameters and returning `i32`.
 Scopes are tracked as a stack. Entering a block pushes a new scope; leaving the
 block pops it. Lookup starts in the innermost scope and walks outward.
 
-The first analyzer is intentionally strict. It does not yet do integer
-promotions, coercions, inter-file lookup, full constant folding, or formatted
-string interpolation.
+The analyzer is intentionally strict. It does not yet do integer promotions,
+coercions, inter-file lookup, full constant folding, or general string
+interpolation. For now, conversion stays explicit and formatting is limited to
+the documented `print` / `println` placeholder forms.
 
 ## 10. Typed IR
 
@@ -789,11 +824,15 @@ The IR type wrapper currently reuses the frontend's `BuiltinTypeKind`:
 ```cpp
 struct Type {
     BuiltinTypeKind kind = BuiltinTypeKind::Invalid;
+    std::vector<std::uint64_t> arrayDimensions;
 };
 ```
 
-That keeps the first implementation small. It is still valuable because IR
-values are explicitly typed:
+Scalar values have an empty `arrayDimensions`. A type such as `[[i32; 3]; 2]`
+stores `kind = I32` and dimensions `{2, 3}`. This is still small, but it is rich
+enough for lowering to distinguish scalar values from ranked array memrefs.
+
+IR values are explicitly typed:
 
 ```text
 %2: i32 = Binary Plus %0, %1
@@ -848,6 +887,7 @@ small:
 
 ```text
 IntegerLiteral
+FloatLiteral
 BoolLiteral
 StringLiteral
 LoadLocal
@@ -859,8 +899,13 @@ ShortCircuitOr
 Call
 DeclareLocal
 StoreLocal
+ArrayLiteral
+IndexLoad
+IndexStore
 If
 While
+Break
+Continue
 ```
 
 This is not machine code. It is still close to nex source semantics. For
@@ -935,7 +980,8 @@ rather than trying to produce user-facing diagnostics.
 
 It first rebuilds the resolved top-level tables it needs:
 
-- built-ins: `print(str) -> void`, `println(str) -> void`, `readln() -> str`
+- built-ins: `print` / `println` format calls, `readln() -> str`, parse helpers,
+  and `input_ok() -> bool`
 - module constants and their types
 - functions, parameter types, and return types
 
@@ -989,7 +1035,9 @@ They cover:
 
 - constants, function calls, and `main` returning `i32`
 - mutable locals, assignment, and `while`
-- `println(str)` and `readln()` as resolved built-in calls
+- fixed arrays and nested arrays
+- floats, bitwise operators, and shifts
+- `println`, formatted printing, and `readln()` as resolved built-in calls
 - `if` / `else` where both branches return
 
 When IR shape changes intentionally, update the matching golden file in the same
@@ -997,10 +1045,9 @@ change as the implementation.
 
 ### 10.9 What This Is Not Yet
 
-The typed IR is not yet:
+The typed IR is not:
 
 - SSA
-- complete MLIR lowering beyond the first tiny slice
 - LLVM IR
 - executable code
 - a runtime ABI
@@ -1021,6 +1068,30 @@ checked AST -> typed IR -> MLIR
 That keeps the frontend independent from MLIR details while still letting the
 backend consume a resolved, typed representation.
 
+### 10.11 Feature Thread: Float Literals
+
+Floats are a useful example of how one language feature crosses the compiler:
+
+```nex
+let x: f64 = 1.0 / 3.0;
+println("x={:.2}", x);
+```
+
+The path is deliberately boring:
+
+- the lexer produces `FloatLiteral` tokens for `1.0` and `3.0`
+- the parser builds `FloatLiteralExpr` nodes
+- semantic analysis chooses `f64` from the local declaration, rejects implicit
+  integer/float coercions, and checks that the literal fits the selected type
+- typed IR emits `%n: f64 = FloatLiteral ...` and normal `Binary Slash`
+- MLIR lowering emits `arith.constant` with MLIR `f64` and `arith.divf`
+- the formatter lowers `{:.2}` into a runtime call that prints fixed precision
+
+The lesson is not "floats are special everywhere." The lesson is that a source
+feature has a small, explicit obligation at each compiler boundary. If one
+boundary is skipped, the feature works only in dumps, only in semantic checks, or
+only until native code generation.
+
 ## 11. MLIR Lowering
 
 MLIR means Multi-Level Intermediate Representation. It is part of the LLVM
@@ -1033,9 +1104,10 @@ types for one abstraction level. The current nex slice uses:
 
 - `builtin`: module containers and core MLIR infrastructure
 - `func`: function definitions, entry-block arguments, calls, and returns
-- `arith`: integer constants and arithmetic operations
+- `arith`: integer/float constants, arithmetic, comparison, and bitwise ops
 - `scf`: structured control flow such as `if` / `else`
 - `memref`: explicit local storage slots for `let` / `let mut`
+- `LLVM`: low-level pointer/global pieces used by strings and final lowering
 
 This small nex program:
 
@@ -1069,8 +1141,7 @@ fn main() -> i32 {
 }
 ```
 
-The newest slice lowers integer comparisons and returning `if` / `else`
-statements:
+Another useful slice lowers comparisons and returning `if` / `else` statements:
 
 ```nex
 fn less_than(a: i32, b: i32) -> bool {
@@ -1157,23 +1228,6 @@ storage slots in this first slice. Later MLIR/LLVM passes can promote obvious
 single-assignment locals away, but the initial lowering stays easy to inspect:
 allocation, store initializer, load when read, store when assigned.
 
-That produces:
-
-```mlir
-module {
-  func.func @add(%arg0: i32, %arg1: i32) -> i32 {
-    %0 = arith.addi %arg0, %arg1 : i32
-    return %0 : i32
-  }
-  func.func @main() -> i32 {
-    %c40_i32 = arith.constant 40 : i32
-    %c2_i32 = arith.constant 2 : i32
-    %0 = call @add(%c40_i32, %c2_i32) : (i32, i32) -> i32
-    return %0 : i32
-  }
-}
-```
-
 ### 11.1 Why MLIR Exists Here
 
 nex eventually wants native code, RISC-V support, shape-aware math lowering,
@@ -1226,13 +1280,16 @@ fusion, bounds-check elimination, and realtime/concurrency analysis. Until one
 of those becomes concrete, using MLIR first avoids reinventing a large compiler
 middle end prematurely.
 
-### 11.3 Boolean And Comparison Lowering
+### 11.3 Numeric, Boolean, And Comparison Lowering
 
-Source code uses `bool`, `true`, `false`, and operators such as `<` and
-`==`. MLIR does not have a nex-specific boolean type. In this slice:
+Source code uses integers, floats, `bool`, `true`, `false`, and operators such
+as `<`, `==`, `&`, and `<<`. MLIR does not have a nex-specific boolean type. In
+this slice:
 
 ```text
 nex bool -> MLIR i1
+nex f32  -> MLIR f32
+nex f64  -> MLIR f64
 ```
 
 `i1` means an integer type with one bit. That one bit is enough to represent
@@ -1259,10 +1316,16 @@ The predicate names are MLIR spellings:
 - `sgt`: signed greater than
 - `sge`: signed greater than or equal
 
-For now, lowering uses signed comparison predicates because the implemented MLIR
-slice only accepts `i32`. When unsigned integer lowering is expanded, the
-lowerer will need to choose unsigned predicates (`ult`, `ule`, `ugt`, `uge`) for
-`u*` source types.
+Unsigned integer comparisons use the corresponding unsigned predicates (`ult`,
+`ule`, `ugt`, `uge`). Floating-point comparisons use `arith.cmpf` predicates
+such as `oeq`, `olt`, and `une`.
+
+Arithmetic is similarly type-directed:
+
+- integers use `arith.addi`, `arith.subi`, `arith.muli`, signed/unsigned
+  division and remainder, and integer bitwise/shift operations
+- floats use `arith.addf`, `arith.subf`, `arith.mulf`, `arith.divf`, and
+  `arith.negf`
 
 Unary `!` lowers as a comparison against false:
 
@@ -1502,13 +1565,14 @@ metadata and the normal shell `PATH`; if it cannot find the tool, the validation
 tests are skipped rather than breaking frontend-only development machines.
 
 The current MLIR lowering now covers the implemented backend surface: fixed-width
-integer literals, `bool`, string literals, module constants, `+`, `-`, `*`, `/`,
-`%`, integer comparisons, **short-circuit** `&&` / `||` (via `scf.if` regions in
-function bodies; module `const` replays truthified eager `Binary` for
-initializers), unary `!`, function parameters,
-direct function calls, built-in `print` / `println` calls, function returns,
-local declarations, local loads/stores, assignment, returning `if`/`else`,
-fallthrough `if`/`else`, and `while`.
+integers, `f32` / `f64`, `bool`, string literals, fixed arrays, module
+constants, arithmetic, comparisons, integer bitwise/shifts, **short-circuit**
+`&&` / `||` (via `scf.if` regions in function bodies; module `const` replays
+truthified eager `Binary` for initializers), unary `!` / `~`, function
+parameters, direct function calls, built-in `print` / `println` calls, function
+returns, local declarations, local loads/stores, assignment, returning
+`if`/`else`, fallthrough `if`/`else`, `while`, `for`-as-while, `break`, and
+`continue`.
 
 String literals are the first place MLIR lowering has to care about runtime
 layout. The compiler decodes the source spelling, emits immutable LLVM-dialect
@@ -1517,8 +1581,8 @@ value. That pointer/length pair is what the printing runtime receives.
 
 ## 12. LLVM IR Lowering
 
-LLVM IR is the next representation below the current MLIR slice. It is much
-closer to machine code than nex typed IR or structured MLIR:
+LLVM IR is the next representation below MLIR lowering. It is much closer to
+machine code than nex typed IR or structured MLIR:
 
 ```text
 nex typed IR
@@ -1601,9 +1665,20 @@ That keeps parsing visible instead of hiding it inside a `scanf`-style API.
 
 ### Formatting
 
-`print` and `println` accept a string-literal format with `{}` placeholders and
-typed arguments. `println` writes one newline after the formatted output. The
-older single-`str` form is still accepted for patterns such as `println(readln())`.
+`print` and `println` accept a string-literal format with placeholders and typed
+arguments. `println` writes one newline after the formatted output. The older
+single-`str` form is still accepted for patterns such as `println(readln())`.
+
+The current formatter is intentionally small but useful:
+
+- `{}` prints the default spelling for integers, floats, `bool`, and `str`
+- `{:.N}` / `{:.Nf}` print floats with fixed digits after the decimal point
+- `{:x}` / `{:X}` / `{:b}` print integers as lowercase hex, uppercase hex, or binary
+
+This is a good example of frontend/runtime division. Semantic analysis checks
+that a placeholder is used with a valid argument type. MLIR lowering turns each
+placeholder into a call to a small runtime function. The runtime only knows how
+to write bytes and format primitive values; it does not parse nex source.
 
 This gives examples enough observable output without committing the language to
 string interpolation, heap allocation, or a full standard library string builder.
@@ -1709,8 +1784,8 @@ build/nexc examples/stdin_echo.nexs -o <temp>
 ```
 
 Expectations: exit code `42`; walkthrough returns `30` (`sum_even_to(10)`);
-backend coverage returns `33`; hello prints `Hello, world!`; stdin tests pipe
-bytes into `readln()`.
+backend coverage returns `33`; float and bitwise examples return `42`; hello and
+formatting examples check exact stdout; stdin tests pipe bytes into `readln()`.
 
 ## 15. CLI Inspection Modes
 
@@ -1743,7 +1818,7 @@ the resulting tree as either plain text or Graphviz DOT. `--check` parses the
 file and then runs semantic analysis without dumping the tree. `--dump-ir`,
 `--dump-mlir`, and `--dump-llvm` run the same parse and semantic checks, then
 build typed IR only if there were no diagnostics. `--dump-ir` prints the
-nex-owned typed IR; `--dump-mlir` lowers that IR into the current MLIR slice;
+nex-owned typed IR; `--dump-mlir` lowers that IR into MLIR and prints it;
 `--dump-llvm` lowers through MLIR's LLVM dialect and prints LLVM IR.
 
 These modes are intentionally early because they let us inspect every compiler
@@ -1771,13 +1846,14 @@ dumps
 `llvm-as` is available
 - native executable compile/run checks for selected programs when `llc` and
   `ld.lld` were discovered at CMake configure time, including stdout checks for
-  `hello.nexs`, stdin/stdout checks for `stdin_echo.nexs`, and a two-file merge
-  compile/run using `examples/multifile_lib.nexs` + `examples/multifile_main.nexs`
+  `hello.nexs`, numeric formatting checks, stdin/stdout checks for
+  `stdin_echo.nexs`, and a two-file merge compile/run using
+  `examples/multifile_lib.nexs` + `examples/multifile_main.nexs`
 - parser-negative fixtures
 - semantic success checks for valid examples
 - semantic-negative fixtures for type errors, undefined names, mutability,
-invalid `main`, discarded non-`void` calls, print argument types, and integer
-literal range errors
+invalid `main`, discarded non-`void` calls, print argument types, numeric format
+specifier misuse, integer literal range errors, and shift-count errors
 - golden diagnostic checks for selected semantic errors
 
 The scalable pattern for output-sensitive frontend tests is **golden files**:
@@ -1873,17 +1949,19 @@ The current compiler does not yet implement:
 
 - type coercions or integer promotions
 - precise signed negative constant values
-- formatting/interpolation for strings
+- general string interpolation or a full formatting mini-language
 - general I/O beyond stdout `print` / `println` and the tiny `readln()` slice
 - nested returning control flow beyond the currently tested shapes
-- array parameters, array returns, and array module constants (locals support
-  `[T; N]`; see language reference)
 - inter-file/module resolution beyond source concatenation for `nexc … -o`
-- embedding LLVM codegen inside `nexc` so object files are emitted without running the external `llc` subprocess (possible future refinement)
+- heap allocation, pointers/references, user-defined aggregate types, generics,
+  and hash maps/dictionaries
+- embedding LLVM codegen inside `nexc` so object files are emitted without
+  running the external `llc` subprocess (possible future refinement)
 
 Those are later stages. The current project state is a checked compiler
 path with typed IR, MLIR, LLVM IR dumps, and native executable generation,
-including runtime-backed stdout printing and one-line stdin input.
+including fixed arrays, floats, bitwise/shifts, runtime-backed stdout printing,
+and one-line stdin input.
 
 ## 18. Recommended Next Steps
 
@@ -1896,23 +1974,24 @@ chat: it tracks intent and ordering, not every open bug.
   sources and parses once (no separate `.nexh` / modules yet). See
   [§15 CLI Inspection Modes](#15-cli-inspection-modes) and
   `docs/reference/toolchain/compiler_cli.md`.
-
-**Fixed arrays (`[T; N]`) — locals landed:**
-
-- Compiler accepts `[T; N]` types, array literals, `expr[i]` loads, and `arr[i] =`
-  for `let mut` locals. Parameters, returns, and `const` arrays are still
-  rejected with diagnostics.
-- Example: `examples/array_fixed.nexs`; language reference:
-  `docs/reference/language/types.md`, `docs/reference/language/expressions.md`.
+- Fixed arrays now cover locals, function parameters/returns, module constants,
+  nested arrays, and per-element definite assignment for uninitialized mutable
+  arrays. See `examples/array_fixed.nexs`, `examples/array_abi.nexs`, and
+  `examples/array_nested.nexs`.
+- Floats (`f32` / `f64`), integer bitwise/shifts, and numeric formatting are in
+  the language and backend. See `examples/float_scalar.nexs`,
+  `examples/float_format_print.nexs`, `examples/bitwise_shift.nexs`, and
+  `examples/int_format_print.nexs`.
 
 **Still intentionally later:**
 
 1. `.nexh` interface files and real **module/import** resolution (named in
    `nex.md`; not implemented).
-2. Formatting/interpolation and the full **Nex I/O** surface (see I/O design
-   notes under `docs/design/`).
+2. The full **Nex I/O** surface beyond bootstrap stdin/stdout helpers (see I/O
+   design notes under `docs/design/`).
 3. **In-process LLVM object emission** instead of shelling out to `llc` (nice to
    have, not required for language features).
+4. Pointers/references, user-defined data types, and hash maps/dictionaries.
 
 **Standing rule:** keep typed IR, MLIR, LLVM IR, runtime, and executable tests
 growing with each language feature; update `docs/reference/language/` when user-
