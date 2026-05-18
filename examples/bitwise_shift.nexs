@@ -1,0 +1,21 @@
+const MASK: i32 = (0x0f << 2) | 3;
+
+fn mix(x: i32) -> i32 {
+    return ((x & MASK) ^ 17) >> 1;
+}
+
+fn unsigned_shift(x: u32) -> u32 {
+    return x >> 1;
+}
+
+fn main() -> i32 {
+    let a: i32 = mix(31);
+    let b: u32 = unsigned_shift(8);
+    let c: i32 = ~0;
+    let mut status: i32 = 1;
+
+    if (a == 7 && b == 4 && c == 0 - 1) {
+        status = 42;
+    }
+    return status;
+}

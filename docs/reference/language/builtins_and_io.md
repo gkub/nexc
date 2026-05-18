@@ -42,10 +42,14 @@ Writes formatted bytes to stdout.
 
 Formatting applies when the first argument is a string literal:
 
-- Placeholders are `{}` for default formatting, or `{:.N}` / `{:.Nf}` for
-  floating-point fixed precision (`N` digits after the decimal point).
+- Placeholders are `{}` for default formatting.
+- Integer base placeholders are `{:x}` for lowercase hex, `{:X}` for uppercase
+  hex, and `{:b}` for binary.
+- Floating-point precision placeholders are `{:.N}` / `{:.Nf}` for fixed
+  precision (`N` digits after the decimal point).
 - Each placeholder matches one following argument, in order. Supported default
   argument types: integers (`i*`/`u*`), floats (`f32`/`f64`), `bool`, and `str`.
+- Integer base placeholders are only valid for integer arguments.
 - Precision placeholders are only valid for `f32` / `f64`.
 - `print("...{}...", ...)` writes the formatted bytes only.
 
@@ -70,6 +74,7 @@ Examples:
 
 ```nex
 println("x={} rounded={:.2}", 2.5, 1.0 / 3.0);
+println("mask hex={:x} bin={:b}", 42, 42);
 ```
 
 ## Input

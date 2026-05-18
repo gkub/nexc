@@ -1,0 +1,3 @@
+tests/semantic_shift_too_large.nexs:2:17: error: shift count is greater than or equal to the bit width of `i32`
+  |     return 1 << 32;
+  |                 ^~

@@ -44,8 +44,8 @@ index-expression ::= expression "[" expression "]"
 | string literal | `"hello"` | Type is `str`. |
 | name reference | `count` | Resolves to a local, parameter, function, or module constant. |
 | function call | `add(a, b)` | Arguments are checked against the callee signature. |
-| unary operator | `-x`, `!ok` | `-` negates integers and floats; `!` accepts `bool` or integer condition values. |
-| binary operator | `a + b`, `x == y` | Arithmetic, comparison, equality, and logical operators. |
+| unary operator | `-x`, `!ok`, `~mask` | `-` negates integers and floats; `!` accepts `bool` or integer condition values; `~` is integer bitwise not. |
+| binary operator | `a + b`, `x == y`, `mask & flag` | Arithmetic, comparison, equality, bitwise, shift, and logical operators. `^` is bitwise XOR. |
 | parenthesized expression | `(a + b) * c` | Overrides default precedence. |
 | array literal | `[1, 2, 3]`, `[[1, 2], [3, 4]]` | Length and nested shape must match the contextual fixed-array type, or element types/shapes must agree for inference. |
 | indexing | `items[i]`, `grid[i][j]` | Base expression must have fixed array type. |
@@ -60,10 +60,14 @@ From highest to lowest:
 | 2 | unary `-`, `!` | right |
 | 3 | `*`, `/`, `%` | left |
 | 4 | `+`, `-` | left |
-| 5 | `<`, `>`, `<=`, `>=` | left |
-| 6 | `==`, `!=` | left |
-| 7 | `&&` | left |
-| 8 | logical or | left |
+| 5 | `<<`, `>>` | left |
+| 6 | `<`, `>`, `<=`, `>=` | left |
+| 7 | `==`, `!=` | left |
+| 8 | `&` | left |
+| 9 | `^` | left |
+| 10 | `|` | left |
+| 11 | `&&` | left |
+| 12 | `||` | left |
 
 ## Logical AND/OR (`&&`, `||`)
 
@@ -109,6 +113,13 @@ if (y != 0 && x / y > 1) {
 
 - arithmetic operators require integer or floating-point operands; `%` is
   integer-only
+- bitwise operators `&`, `|`, `^`, `~` and shifts `<<`, `>>` require integer
+  operands
+- `&` is bitwise AND, `|` is bitwise OR, `^` is bitwise XOR, and `~` is bitwise
+  NOT
+- shift operands currently have the same integer type; integer literal counts
+  are typed from the left operand
+- constant shift counts must be smaller than the bit width of the shifted type
 - comparison/equality produce `bool`
 - `!` accepts `bool` or integer-like condition values
 - call argument count/types are checked against resolved callee signature
@@ -120,8 +131,9 @@ if (y != 0 && x / y > 1) {
 fn main() -> i32 {
     let x: i32 = 10;
     let y: i32 = 2;
+    let masked: i32 = (x & 7) << 1;
     if ((x / y) > 3 && (x % y) == 0) {
-        return 1;
+        return masked;
     } else {
         return 0;
     }

@@ -715,6 +715,15 @@ private:
                             loc_, zero.getResult(), operand);
                     }
                     constValues.emplace(result.id, value);
+                } else if (op.op == TokenKind::Tilde) {
+                    const unsigned width = integerBitWidth(operandRef.type);
+                    auto allOnes = builder_.create<::mlir::arith::ConstantOp>(
+                        loc_, mlirType(builder_, operandRef.type),
+                        builder_.getIntegerAttr(mlirType(builder_, operandRef.type),
+                                                ::llvm::APInt::getAllOnes(width)));
+                    auto value = builder_.create<::mlir::arith::XOrIOp>(
+                        loc_, operand, allOnes.getResult());
+                    constValues.emplace(result.id, value.getResult());
                 } else if (op.op == TokenKind::Bang) {
                     const unsigned width = operandRef.type.kind == BuiltinTypeKind::Bool
                                                ? 1
@@ -786,6 +795,25 @@ private:
                                 ? builder_.create<::mlir::arith::RemUIOp>(loc_, left, right)
                                       .getResult()
                                 : builder_.create<::mlir::arith::RemSIOp>(loc_, left, right)
+                                      .getResult();
+                    break;
+                case TokenKind::Amp:
+                    value = builder_.create<::mlir::arith::AndIOp>(loc_, left, right);
+                    break;
+                case TokenKind::Pipe:
+                    value = builder_.create<::mlir::arith::OrIOp>(loc_, left, right);
+                    break;
+                case TokenKind::Caret:
+                    value = builder_.create<::mlir::arith::XOrIOp>(loc_, left, right);
+                    break;
+                case TokenKind::LessLess:
+                    value = builder_.create<::mlir::arith::ShLIOp>(loc_, left, right);
+                    break;
+                case TokenKind::GreaterGreater:
+                    value = isUnsignedInteger(leftRef.type)
+                                ? builder_.create<::mlir::arith::ShRUIOp>(loc_, left, right)
+                                      .getResult()
+                                : builder_.create<::mlir::arith::ShRSIOp>(loc_, left, right)
                                       .getResult();
                     break;
                 case TokenKind::EqualEqual:
@@ -1112,6 +1140,21 @@ private:
             throw std::logic_error("MLIR lowering only supports unary - for integers and floats");
         }
 
+        if (operation.op == TokenKind::Tilde) {
+            if (!operandRef.type.isInteger()) {
+                throw std::logic_error("MLIR lowering only supports unary ~ for integers");
+            }
+            const unsigned width = integerBitWidth(operandRef.type);
+            const ::mlir::Type type = mlirType(builder_, operandRef.type);
+            auto allOnes = builder_.create<::mlir::arith::ConstantOp>(
+                loc_, type,
+                builder_.getIntegerAttr(type, ::llvm::APInt::getAllOnes(width)));
+            auto lowered = builder_.create<::mlir::arith::XOrIOp>(
+                loc_, operand, allOnes.getResult());
+            bindValue(result, lowered.getResult());
+            return;
+        }
+
         if (operation.op != TokenKind::Bang) {
             throw std::logic_error("unsupported unary operator in MLIR lowering");
         }
@@ -1194,6 +1237,25 @@ private:
                 lowered = builder_.create<::mlir::arith::RemUIOp>(loc_, left, right);
             } else {
                 lowered = builder_.create<::mlir::arith::RemSIOp>(loc_, left, right);
+            }
+            break;
+        case TokenKind::Amp:
+            lowered = builder_.create<::mlir::arith::AndIOp>(loc_, left, right);
+            break;
+        case TokenKind::Pipe:
+            lowered = builder_.create<::mlir::arith::OrIOp>(loc_, left, right);
+            break;
+        case TokenKind::Caret:
+            lowered = builder_.create<::mlir::arith::XOrIOp>(loc_, left, right);
+            break;
+        case TokenKind::LessLess:
+            lowered = builder_.create<::mlir::arith::ShLIOp>(loc_, left, right);
+            break;
+        case TokenKind::GreaterGreater:
+            if (isUnsignedInteger(requiredValue(operation.left, "binary left operand").type)) {
+                lowered = builder_.create<::mlir::arith::ShRUIOp>(loc_, left, right);
+            } else {
+                lowered = builder_.create<::mlir::arith::ShRSIOp>(loc_, left, right);
             }
             break;
         case TokenKind::AmpAmp:
@@ -1296,6 +1358,10 @@ private:
                                          {});
     }
 
+    void ensureRuntimePrintU64BaseDeclaration(std::string_view name) {
+        ensureRuntimeFunctionDeclaration(name, {builder_.getI64Type()}, {});
+    }
+
     void ensureRuntimePrintBoolDeclaration() {
         ensureRuntimeFunctionDeclaration("nex_runtime_print_bool", {builder_.getI1Type()},
                                          {});
@@ -1353,6 +1419,21 @@ private:
         }
         if (type.isInteger()) {
             ::mlir::Value wide = widenIntegerArgumentToI64(ref);
+            if (hole.kind == FormatHole::Kind::HexLower ||
+                hole.kind == FormatHole::Kind::HexUpper ||
+                hole.kind == FormatHole::Kind::Binary) {
+                std::string_view runtimeName = "nex_runtime_print_u64_hex_lower";
+                if (hole.kind == FormatHole::Kind::HexUpper) {
+                    runtimeName = "nex_runtime_print_u64_hex_upper";
+                } else if (hole.kind == FormatHole::Kind::Binary) {
+                    runtimeName = "nex_runtime_print_u64_binary";
+                }
+                ensureRuntimePrintU64BaseDeclaration(runtimeName);
+                builder_.create<::mlir::func::CallOp>(
+                    loc_, runtimeName, ::mlir::TypeRange{},
+                    ::mlir::ValueRange{wide});
+                return;
+            }
             if (isUnsignedInteger(type)) {
                 ensureRuntimePrintU64Declaration();
                 builder_.create<::mlir::func::CallOp>(
@@ -1367,7 +1448,7 @@ private:
             return;
         }
         if (type.kind == BuiltinTypeKind::F32 || type.kind == BuiltinTypeKind::F64) {
-            const bool fixedPrecision = hole.precision.has_value();
+            const bool fixedPrecision = hole.kind == FormatHole::Kind::FloatFixed;
             const char* runtimeName = nullptr;
             if (type.kind == BuiltinTypeKind::F32) {
                 ensureRuntimePrintF32Declaration(fixedPrecision);
@@ -2123,6 +2204,16 @@ std::string textualBinaryOp(TokenKind op) {
         return "arith.divsi";
     case TokenKind::Percent:
         return "arith.remsi";
+    case TokenKind::Amp:
+        return "arith.andi";
+    case TokenKind::Pipe:
+        return "arith.ori";
+    case TokenKind::Caret:
+        return "arith.xori";
+    case TokenKind::LessLess:
+        return "arith.shli";
+    case TokenKind::GreaterGreater:
+        return "arith.shrsi";
     default:
         throw std::logic_error("textual MLIR lowering only supports integer arithmetic operators for now");
     }
@@ -2373,6 +2464,10 @@ private:
                     out_ << indent() << "%c0_i32 = arith.constant 0 : i32\n";
                     out_ << indent() << name << " = arith.subi %c0_i32, " << operand
                          << " : i32\n";
+                } else if (op.op == TokenKind::Tilde && operandRef.type.kind == BuiltinTypeKind::I32) {
+                    out_ << indent() << "%cm1_i32 = arith.constant -1 : i32\n";
+                    out_ << indent() << name << " = arith.xori " << operand
+                         << ", %cm1_i32 : i32\n";
                 } else if (op.op == TokenKind::Bang) {
                     const std::string zero = operandRef.type.kind == BuiltinTypeKind::Bool
                                                  ? "%false"
@@ -2776,6 +2871,17 @@ private:
                 return;
             }
             throw std::logic_error("textual MLIR lowering only supports unary - for i32 and floats");
+        }
+
+        if (operation.op == TokenKind::Tilde) {
+            if (operandRef.type.kind != BuiltinTypeKind::I32) {
+                throw std::logic_error("textual MLIR lowering only supports unary ~ for i32");
+            }
+            out_ << indent() << "%cm1_i32 = arith.constant -1 : i32\n";
+            out_ << indent() << name << " = arith.xori " << operand
+                 << ", %cm1_i32 : i32\n";
+            bindValue(result, name);
+            return;
         }
 
         if (operation.op != TokenKind::Bang) {

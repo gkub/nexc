@@ -237,6 +237,37 @@ void nex_runtime_print_u64(uint64_t v) {
     print_u64_decimal(v);
 }
 
+static void print_u64_base(uint64_t value, uint64_t base, const char* digits) {
+    if (value == 0) {
+        nex_runtime_print_str("0", 1);
+        return;
+    }
+
+    char buf[64];
+    int n = 0;
+    while (value > 0) {
+        buf[n++] = digits[value % base];
+        value /= base;
+    }
+    char forward[64];
+    for (int i = 0; i < n; ++i) {
+        forward[i] = buf[n - 1 - i];
+    }
+    nex_runtime_print_str(forward, (uint64_t)n);
+}
+
+void nex_runtime_print_u64_hex_lower(uint64_t v) {
+    print_u64_base(v, 16, "0123456789abcdef");
+}
+
+void nex_runtime_print_u64_hex_upper(uint64_t v) {
+    print_u64_base(v, 16, "0123456789ABCDEF");
+}
+
+void nex_runtime_print_u64_binary(uint64_t v) {
+    print_u64_base(v, 2, "01");
+}
+
 /*
  * Signed decimal printing without relying on printf. Negative magnitudes use
  * unsigned two's-complement arithmetic so `INT64_MIN` is handled portably.

@@ -594,6 +594,13 @@ add_nexc_golden_test(
 )
 
 add_nexc_golden_test(
+    dump_ir_bitwise_shift_golden
+    --dump-ir
+    examples/bitwise_shift.nexs
+    tests/golden/dump_ir/bitwise_shift.ir.txt
+)
+
+add_nexc_golden_test(
     dump_mlir_return_42_golden
     --dump-mlir
     examples/return_42.nexs
@@ -765,6 +772,11 @@ add_nexc_mlir_validation_test(
     examples/float_scalar.nexs
 )
 
+add_nexc_mlir_validation_test(
+    validate_mlir_bitwise_shift
+    examples/bitwise_shift.nexs
+)
+
 add_nexc_llvm_validation_test(
     validate_llvm_return_42
     examples/return_42.nexs
@@ -808,6 +820,11 @@ add_nexc_llvm_validation_test(
 add_nexc_llvm_validation_test(
     validate_llvm_float_scalar
     examples/float_scalar.nexs
+)
+
+add_nexc_llvm_validation_test(
+    validate_llvm_bitwise_shift
+    examples/bitwise_shift.nexs
 )
 
 add_nexc_executable_test(
@@ -882,6 +899,12 @@ add_nexc_executable_test(
     42
 )
 
+add_nexc_executable_test(
+    run_executable_bitwise_shift
+    examples/bitwise_shift.nexs
+    42
+)
+
 add_nexc_executable_stdout_test(
     run_executable_hello_stdout
     examples/hello.nexs
@@ -901,6 +924,13 @@ add_nexc_executable_stdout_test(
     examples/float_format_print.nexs
     0
     "a=0.33 b=2.500 raw=2.500000\n"
+)
+
+add_nexc_executable_stdout_test(
+    run_executable_int_format_print_stdout
+    examples/int_format_print.nexs
+    0
+    "dec=42 hex=2a HEX=2A bin=101010\n"
 )
 
 add_nexc_executable_stdin_stdout_test(
@@ -940,6 +970,11 @@ add_test(
 )
 
 add_test(
+    NAME semantic_check_bitwise_shift
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/bitwise_shift.nexs
+)
+
+add_test(
     NAME semantic_check_add
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/add.nexs
 )
@@ -967,6 +1002,11 @@ add_test(
 add_test(
     NAME semantic_check_float_format_print
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/float_format_print.nexs
+)
+
+add_test(
+    NAME semantic_check_int_format_print
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/int_format_print.nexs
 )
 
 add_test(
@@ -1194,6 +1234,27 @@ add_nexc_golden_diagnostic_test(
     --check
     tests/semantic_format_precision_non_float.nexs
     tests/golden/diagnostics/semantic_format_precision_non_float.stderr.txt
+)
+
+add_nexc_golden_diagnostic_test(
+    semantic_format_base_non_int_golden
+    --check
+    tests/semantic_format_base_non_int.nexs
+    tests/golden/diagnostics/semantic_format_base_non_int.stderr.txt
+)
+
+add_nexc_golden_diagnostic_test(
+    semantic_bitwise_float_golden
+    --check
+    tests/semantic_bitwise_float.nexs
+    tests/golden/diagnostics/semantic_bitwise_float.stderr.txt
+)
+
+add_nexc_golden_diagnostic_test(
+    semantic_shift_too_large_golden
+    --check
+    tests/semantic_shift_too_large.nexs
+    tests/golden/diagnostics/semantic_shift_too_large.stderr.txt
 )
 
 add_test(

@@ -19,6 +19,15 @@ bool splitFormatString(std::string_view decoded, std::vector<std::string>& liter
                        std::string& error);
 
 struct FormatHole {
+    enum class Kind {
+        Default,
+        FloatFixed,
+        HexLower,
+        HexUpper,
+        Binary,
+    };
+
+    Kind kind = Kind::Default;
     // Empty precision means the default formatting for the argument type. A
     // value means fixed fractional digits and is currently valid only for floats.
     std::optional<unsigned> precision;
@@ -30,7 +39,7 @@ struct FormatParts {
 };
 
 // Split a decoded format string into literal segments plus placeholder specs.
-// Supported placeholders are `{}`, `{:.N}`, and `{:.Nf}`.
+// Supported placeholders are `{}`, `{:.N}`, `{:.Nf}`, `{:x}`, `{:X}`, and `{:b}`.
 bool parseFormatString(std::string_view decoded, FormatParts& outParts,
                        std::string& error);
 

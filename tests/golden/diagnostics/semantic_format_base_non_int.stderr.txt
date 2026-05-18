@@ -1,0 +1,3 @@
+tests/semantic_format_base_non_int.nexs:2:23: error: integer base formatting is only supported for integer arguments
+  |     println("x={:x}", 1.0);
+  |                       ^~~

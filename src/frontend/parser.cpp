@@ -341,6 +341,7 @@ std::unique_ptr<Stmt> Parser::parseStmt() {
         check(TokenKind::FloatLiteral) || check(TokenKind::StringLiteral) || check(TokenKind::KwTrue) ||
         check(TokenKind::KwFalse) || check(TokenKind::LeftParen) ||
         check(TokenKind::LeftBracket) || check(TokenKind::Minus) ||
+        check(TokenKind::Tilde) ||
         check(TokenKind::Bang)) {
         return parseAssignmentOrCallStmt();
     }
@@ -622,7 +623,8 @@ std::unique_ptr<Expr> Parser::parseExpr(int minPrecedence) {
 // Prefix operators bind more tightly than binary operators, so they are parsed
 // before parseExpr starts consuming infix operators.
 std::unique_ptr<Expr> Parser::parseUnaryExpr() {
-    if (check(TokenKind::Minus) || check(TokenKind::Bang)) {
+    if (check(TokenKind::Minus) || check(TokenKind::Bang) ||
+        check(TokenKind::Tilde)) {
         const Token op = advance();
 
         // Unary operators recurse into parseUnaryExpr so chains like `!!x` and
@@ -786,21 +788,30 @@ int Parser::binaryPrecedence(TokenKind kind) const {
         return 1;
     case TokenKind::AmpAmp:
         return 2;
+    case TokenKind::Pipe:
+        return 3;
+    case TokenKind::Caret:
+        return 4;
+    case TokenKind::Amp:
+        return 5;
     case TokenKind::EqualEqual:
     case TokenKind::BangEqual:
-        return 3;
+        return 6;
     case TokenKind::Less:
     case TokenKind::LessEqual:
     case TokenKind::Greater:
     case TokenKind::GreaterEqual:
-        return 4;
+        return 7;
+    case TokenKind::LessLess:
+    case TokenKind::GreaterGreater:
+        return 8;
     case TokenKind::Plus:
     case TokenKind::Minus:
-        return 5;
+        return 9;
     case TokenKind::Star:
     case TokenKind::Slash:
     case TokenKind::Percent:
-        return 6;
+        return 10;
     default:
         return 0;
     }

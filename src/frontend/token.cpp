@@ -61,6 +61,8 @@ std::string_view tokenKindName(TokenKind kind) {
         return "Percent";
     case TokenKind::Bang:
         return "Bang";
+    case TokenKind::Tilde:
+        return "Tilde";
     case TokenKind::Equal:
         return "Equal";
     case TokenKind::EqualEqual:
@@ -71,14 +73,24 @@ std::string_view tokenKindName(TokenKind kind) {
         return "Less";
     case TokenKind::LessEqual:
         return "LessEqual";
+    case TokenKind::LessLess:
+        return "LessLess";
     case TokenKind::Greater:
         return "Greater";
     case TokenKind::GreaterEqual:
         return "GreaterEqual";
+    case TokenKind::GreaterGreater:
+        return "GreaterGreater";
+    case TokenKind::Amp:
+        return "Amp";
     case TokenKind::AmpAmp:
         return "AmpAmp";
+    case TokenKind::Pipe:
+        return "Pipe";
     case TokenKind::PipePipe:
         return "PipePipe";
+    case TokenKind::Caret:
+        return "Caret";
     case TokenKind::Arrow:
         return "Arrow";
     case TokenKind::LeftParen:

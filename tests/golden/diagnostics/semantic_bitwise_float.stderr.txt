@@ -1,0 +1,9 @@
+tests/semantic_bitwise_float.nexs:4:9: error: left operand must be an integer type
+  |     if (x & y) {
+  |         ^
+tests/semantic_bitwise_float.nexs:4:13: error: right operand must be an integer type
+  |     if (x & y) {
+  |             ^
+tests/semantic_bitwise_float.nexs:4:9: error: `if` condition must be `bool` or an integer type, not `f64`
+  |     if (x & y) {
+  |         ^~~~~

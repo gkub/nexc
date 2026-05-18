@@ -77,6 +77,7 @@ See [statements.md](statements.md) and
 ```nex
 let z: i32 = (a + b) * 2;
 let f: f64 = (3.0 + 4.0) / 2.0;
+let masked: i32 = (z & 0xff) << 1;
 let same: bool = z == 10;
 let guarded: bool = denom != 0 && z / denom > 1;
 let item: i32 = grid[1][0];
@@ -89,7 +90,10 @@ name
 callee(arg1, arg2)
 -x
 !condition
+~mask
 a + b
+a & b
+a << b
 a == b
 a && b
 a || b
@@ -153,6 +157,7 @@ Float formatting supports fixed decimal precision:
 
 ```nex
 println("pi-ish={:.2}", 3.14159);
+println("mask hex={:x} bin={:b}", 42, 42);
 ```
 
 See [builtins_and_io.md](builtins_and_io.md).

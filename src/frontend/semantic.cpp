@@ -1974,10 +1974,17 @@ private:
                                    "format argument has type `" + typeName(arg.type) +
                                        "`; supported types are integers, floats, bool, and str");
             }
-            if (parts.holes[i].precision && !arg.type.isFloat() &&
+            if (parts.holes[i].kind == FormatHole::Kind::FloatFixed && !arg.type.isFloat() &&
                 !arg.type.isInvalid()) {
                 diagnostics_.error(call.arguments[i + 1]->span,
                                    "format precision is only supported for floating-point arguments");
+            }
+            if ((parts.holes[i].kind == FormatHole::Kind::HexLower ||
+                 parts.holes[i].kind == FormatHole::Kind::HexUpper ||
+                 parts.holes[i].kind == FormatHole::Kind::Binary) &&
+                !arg.type.isInteger() && !arg.type.isInvalid()) {
+                diagnostics_.error(call.arguments[i + 1]->span,
+                                   "integer base formatting is only supported for integer arguments");
             }
         }
         for (std::size_t i = 1 + toCheck; i < call.arguments.size(); ++i) {
@@ -2084,6 +2091,20 @@ private:
             return ExprInfo{.type = operand.type, .isConstant = operand.isConstant};
         }
 
+        if (unary.op == TokenKind::Tilde) {
+            ExprInfo operand = analyzeExpr(*unary.operand, expected);
+            if (!operand.type.isInteger()) {
+                diagnostics_.error(unary.operand->span,
+                                   "`~` operand must be an integer type, not `" +
+                                       typeName(operand.type) + "`");
+            }
+            ExprInfo result{.type = operand.type, .isConstant = operand.isConstant};
+            if (operand.isConstant && operand.integerValue && operand.type.isInteger()) {
+                result.integerValue = (~(*operand.integerValue)) & maxIntegerValue(operand.type);
+            }
+            return result;
+        }
+
         return ExprInfo{.type = Type{}, .isConstant = false};
     }
 
@@ -2159,6 +2180,11 @@ private:
                                 binary.op == TokenKind::Star ||
                                 binary.op == TokenKind::Slash ||
                                 binary.op == TokenKind::Percent;
+        const bool bitwise = binary.op == TokenKind::Amp ||
+                             binary.op == TokenKind::Pipe ||
+                             binary.op == TokenKind::Caret;
+        const bool shift = binary.op == TokenKind::LessLess ||
+                           binary.op == TokenKind::GreaterGreater;
         const bool comparison = binary.op == TokenKind::Less ||
                                 binary.op == TokenKind::LessEqual ||
                                 binary.op == TokenKind::Greater ||
@@ -2182,6 +2208,17 @@ private:
             }
         }
 
+        if (bitwise || shift) {
+            if (!left.type.isInteger()) {
+                diagnostics_.error(binary.left->span,
+                                   "left operand must be an integer type");
+            }
+            if (!right.type.isInteger()) {
+                diagnostics_.error(binary.right->span,
+                                   "right operand must be an integer type");
+            }
+        }
+
         if (!sameType(left.type, right.type)) {
             diagnostics_.error(binary.span,
                                "binary operands must have the same type, got `" +
@@ -2189,7 +2226,7 @@ private:
                                    typeName(right.type) + "`");
         }
 
-        if (arithmetic) {
+        if (arithmetic || bitwise || shift) {
             // Arithmetic keeps the operand type. If both sides are constant, the
             // helper below also performs the small overflow checks.
             return analyzeConstantArithmetic(binary, left, right);
@@ -2279,6 +2316,37 @@ private:
                 return result;
             }
             result.integerValue = lhs % rhs;
+            return result;
+        case TokenKind::Amp:
+            result.integerValue = lhs & rhs;
+            return result;
+        case TokenKind::Pipe:
+            result.integerValue = lhs | rhs;
+            return result;
+        case TokenKind::Caret:
+            result.integerValue = lhs ^ rhs;
+            return result;
+        case TokenKind::LessLess:
+            if (rhs >= bitWidth(left.type)) {
+                diagnostics_.error(binary.right->span,
+                                   "shift count is greater than or equal to the bit width of `" +
+                                       typeName(left.type) + "`");
+                return result;
+            }
+            if (lhs > (max >> rhs)) {
+                overflow();
+                return result;
+            }
+            result.integerValue = (lhs << rhs) & max;
+            return result;
+        case TokenKind::GreaterGreater:
+            if (rhs >= bitWidth(left.type)) {
+                diagnostics_.error(binary.right->span,
+                                   "shift count is greater than or equal to the bit width of `" +
+                                       typeName(left.type) + "`");
+                return result;
+            }
+            result.integerValue = lhs >> rhs;
             return result;
         default:
             return result;

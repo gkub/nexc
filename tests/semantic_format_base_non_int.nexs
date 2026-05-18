@@ -1,0 +1,4 @@
+fn main() -> void {
+    println("x={:x}", 1.0);
+    return;
+}

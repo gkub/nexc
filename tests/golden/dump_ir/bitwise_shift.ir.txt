@@ -1,0 +1,81 @@
+Module
+  Const @MASK: i32
+    Block
+      %0: i32 = IntegerLiteral 0x0f
+      %1: i32 = IntegerLiteral 2
+      %2: i32 = Binary LessLess %0, %1
+      %3: i32 = IntegerLiteral 3
+      %4: i32 = Binary Pipe %2, %3
+      InitValue %4
+  Function @mix($0 x: i32) -> i32
+    Locals
+      $0 x: i32 parameter
+    Block
+      %0: i32 = LoadLocal $0
+      %1: i32 = LoadConst @MASK
+      %2: i32 = Binary Amp %0, %1
+      %3: i32 = IntegerLiteral 17
+      %4: i32 = Binary Caret %2, %3
+      %5: i32 = IntegerLiteral 1
+      %6: i32 = Binary GreaterGreater %4, %5
+      ReturnValue %6
+  Function @unsigned_shift($0 x: u32) -> u32
+    Locals
+      $0 x: u32 parameter
+    Block
+      %0: u32 = LoadLocal $0
+      %1: u32 = IntegerLiteral 1
+      %2: u32 = Binary GreaterGreater %0, %1
+      ReturnValue %2
+  Function @main() -> i32
+    Locals
+      $0 a: i32
+      $1 b: u32
+      $2 c: i32
+      $3 status: i32 mutable
+    Block
+      %0: i32 = IntegerLiteral 31
+      %1: i32 = Call @mix(%0)
+      DeclareLocal $0 = %1
+      %2: u32 = IntegerLiteral 8
+      %3: u32 = Call @unsigned_shift(%2)
+      DeclareLocal $1 = %3
+      %4: i32 = IntegerLiteral 0
+      %5: i32 = Unary Tilde %4
+      DeclareLocal $2 = %5
+      %6: i32 = IntegerLiteral 1
+      DeclareLocal $3 mutable = %6
+      %7: i32 = LoadLocal $0
+      %8: i32 = IntegerLiteral 7
+      %9: bool = Binary EqualEqual %7, %8
+      %11: bool = ShortCircuitAnd %9
+        Then
+          Block
+            %12: u32 = LoadLocal $1
+            %13: u32 = IntegerLiteral 4
+            %14: bool = Binary EqualEqual %12, %13
+            ReturnValue %14
+        Else
+          Block
+            %10: bool = BoolLiteral false
+            ReturnValue %10
+      %16: bool = ShortCircuitAnd %11
+        Then
+          Block
+            %17: i32 = LoadLocal $2
+            %18: i32 = IntegerLiteral 0
+            %19: i32 = IntegerLiteral 1
+            %20: i32 = Binary Minus %18, %19
+            %21: bool = Binary EqualEqual %17, %20
+            ReturnValue %21
+        Else
+          Block
+            %15: bool = BoolLiteral false
+            ReturnValue %15
+      If %16
+        Then
+          Block
+            %22: i32 = IntegerLiteral 42
+            StoreLocal $3 = %22
+      %23: i32 = LoadLocal $3
+      ReturnValue %23

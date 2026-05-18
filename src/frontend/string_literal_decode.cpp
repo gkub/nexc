@@ -114,14 +114,42 @@ bool parseFormatString(std::string_view decoded, FormatParts& outParts,
                     return false;
                 }
                 outParts.literals.emplace_back(decoded.substr(start, i - start));
-                outParts.holes.push_back(FormatHole{.precision = precision});
+                outParts.holes.push_back(
+                    FormatHole{.kind = FormatHole::Kind::FloatFixed,
+                               .precision = precision});
                 start = cursor + 1;
                 i = cursor;
                 continue;
             }
         }
 
-        error = "invalid format string: expected `{}`, `{:.N}`, or `{:.Nf}` placeholder";
+        if (i + 3 < decoded.size() && decoded[i + 1] == ':' &&
+            decoded[i + 3] == '}') {
+            FormatHole::Kind kind = FormatHole::Kind::Default;
+            switch (decoded[i + 2]) {
+            case 'x':
+                kind = FormatHole::Kind::HexLower;
+                break;
+            case 'X':
+                kind = FormatHole::Kind::HexUpper;
+                break;
+            case 'b':
+                kind = FormatHole::Kind::Binary;
+                break;
+            default:
+                break;
+            }
+            if (kind != FormatHole::Kind::Default) {
+                outParts.literals.emplace_back(decoded.substr(start, i - start));
+                outParts.holes.push_back(
+                    FormatHole{.kind = kind, .precision = std::nullopt});
+                start = i + 4;
+                i += 3;
+                continue;
+            }
+        }
+
+        error = "invalid format string: expected `{}`, `{:.N}`, `{:.Nf}`, `{:x}`, `{:X}`, or `{:b}` placeholder";
         outParts = FormatParts{};
         return false;
     }

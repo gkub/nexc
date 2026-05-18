@@ -1,0 +1,5 @@
+fn main() -> void {
+    let flags: u32 = (1 << 5) | 10;
+    println("dec={} hex={:x} HEX={:X} bin={:b}", flags, flags, flags, flags);
+    return;
+}

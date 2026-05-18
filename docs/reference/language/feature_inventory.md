@@ -46,14 +46,15 @@ Succinct checklist of **implemented surface** (and a few prominent gaps). Normat
 
 - **Literals:** integers (typed), floats (typed/default `f64`), `true`/`false`, string literals. [expressions.md](expressions.md)
 - **Arithmetic / compare** — integers and floats; `%` remains integer-only; no implicit int/float coercions. [expressions.md](expressions.md)
+- **Bitwise / shifts** — integer `&`, `|`, `^`, `~`, `<<`, `>>`; constant shift counts are checked against type width. [expressions.md](expressions.md)
 - **`&&` / `||`** — short-circuit; condition-like operands in runtime code; module `const` folding uses distinct lowering detail. [expressions.md](expressions.md)
-- **Unary `-`, `!`** — numeric negation for integers/floats; logical not for `bool`/integer conditions. [expressions.md](expressions.md)
+- **Unary `-`, `!`, `~`** — numeric negation for integers/floats; logical not for `bool`/integer conditions; bitwise not for integers. [expressions.md](expressions.md)
 - **Calls** — user functions and builtins; `void` only as statement. [functions_and_calls.md](functions_and_calls.md)
 - **Indexing** — fixed arrays, including chained indexing for nested arrays. [expressions.md](expressions.md)
 
 ## Built-ins and I/O
 
-- **`print` / `println`** — format string with `{}` placeholders + typed args; float precision placeholders `{:.N}` / `{:.Nf}`; legacy forms where still allowed. [builtins_and_io.md](builtins_and_io.md)
+- **`print` / `println`** — format string with `{}` placeholders + typed args; integer base placeholders `{:x}` / `{:X}` / `{:b}`; float precision placeholders `{:.N}` / `{:.Nf}`; legacy forms where still allowed. [builtins_and_io.md](builtins_and_io.md)
 - **`readln() -> str`**, **`parse_*`**, **`input_ok()`** — stdin helpers. [builtins_and_io.md](builtins_and_io.md)
 
 ## Statements (other)

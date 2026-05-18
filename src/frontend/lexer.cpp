@@ -216,25 +216,35 @@ Token Lexer::lexToken() {
     case '!':
         return match('=') ? single(TokenKind::BangEqual, start)
                           : single(TokenKind::Bang, start);
+    case '~':
+        return single(TokenKind::Tilde, start);
     case '=':
         return match('=') ? single(TokenKind::EqualEqual, start)
                           : single(TokenKind::Equal, start);
     case '<':
-        return match('=') ? single(TokenKind::LessEqual, start)
+        if (match('=')) {
+            return single(TokenKind::LessEqual, start);
+        }
+        return match('<') ? single(TokenKind::LessLess, start)
                           : single(TokenKind::Less, start);
     case '>':
-        return match('=') ? single(TokenKind::GreaterEqual, start)
+        if (match('=')) {
+            return single(TokenKind::GreaterEqual, start);
+        }
+        return match('>') ? single(TokenKind::GreaterGreater, start)
                           : single(TokenKind::Greater, start);
     case '&':
         if (match('&')) {
             return single(TokenKind::AmpAmp, start);
         }
-        break;
+        return single(TokenKind::Amp, start);
     case '|':
         if (match('|')) {
             return single(TokenKind::PipePipe, start);
         }
-        break;
+        return single(TokenKind::Pipe, start);
+    case '^':
+        return single(TokenKind::Caret, start);
     case '(':
         return single(TokenKind::LeftParen, start);
     case ')':
