@@ -44,7 +44,7 @@ index-expression ::= expression "[" expression "]"
 | string literal | `"hello"` | Type is `str`. |
 | name reference | `count` | Resolves to a local, parameter, function, or module constant. |
 | function call | `add(a, b)` | Arguments are checked against the callee signature. |
-| unary operator | `-x`, `!ok`, `~mask` | `-` negates integers and floats; `!` accepts `bool` or integer condition values; `~` is integer bitwise not. |
+| unary operator | `-x`, `!ok`, `~mask`, `&x`, `*p` | `-` negates integers and floats; `!` accepts `bool` or integer condition values; `~` is integer bitwise not; `&` takes a mutable local address; `*` dereferences a pointer. |
 | binary operator | `a + b`, `x == y`, `mask & flag` | Arithmetic, comparison, equality, bitwise, shift, and logical operators. `^` is bitwise XOR. |
 | parenthesized expression | `(a + b) * c` | Overrides default precedence. |
 | array literal | `[1, 2, 3]`, `[[1, 2], [3, 4]]` | Length and nested shape must match the contextual fixed-array type, or element types/shapes must agree for inference. |
@@ -57,7 +57,7 @@ From highest to lowest:
 | Level | Operators / forms | Associativity |
 | ----- | ----------------- | ------------- |
 | 1 | calls `f(args)`, indexing `a[i]` | left |
-| 2 | unary `-`, `!` | right |
+| 2 | unary `-`, `!`, `~`, `&`, `*` | right |
 | 3 | `*`, `/`, `%` | left |
 | 4 | `+`, `-` | left |
 | 5 | `<<`, `>>` | left |
@@ -108,6 +108,21 @@ if (y != 0 && x / y > 1) {
 - Chained indexing walks nested arrays one dimension at a time: `grid[1][0]`.
 - Assignment to `name[index]` or `name[index][...]` requires `let mut` on the
   root array binding.
+
+## Pointers
+
+The pointer MVP supports address-of and dereference for mutable scalar locals:
+
+```nex
+let mut x = 41;
+let p = &x;
+*p = *p + 1;
+```
+
+- `&name` currently requires `name` to be a mutable scalar local.
+- `*p` loads the value pointed to by `p`.
+- `*p = value;` stores through the pointer.
+- There is no pointer arithmetic, `null`, or pointer-to-array support yet.
 
 ## Type Rules
 

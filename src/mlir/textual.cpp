@@ -8,6 +8,7 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/MLIRContext.h"
@@ -223,6 +224,10 @@ bool isUnsignedInteger(ir::Type type) {
 // `void` returns an empty Type because MLIR function types represent "no result"
 // by omitting the result type entirely, not by using a first-class void value.
 ::mlir::Type mlirType(::mlir::OpBuilder& builder, ir::Type type) {
+    if (type.isPointer()) {
+        (void)builder;
+        throw std::logic_error("mlirType does not map pointer types to scalar values");
+    }
     if (type.isFixedArray()) {
         (void)builder;
         throw std::logic_error("mlirType does not map fixed array types to a single scalar");
@@ -250,6 +255,13 @@ bool isUnsignedInteger(ir::Type type) {
     }
 }
 
+::mlir::MemRefType pointerMemRefType(::mlir::OpBuilder& builder, ir::Type pointerType) {
+    if (!pointerType.isPointer()) {
+        throw std::logic_error("pointerMemRefType expects a pointer IR type");
+    }
+    return ::mlir::MemRefType::get({}, mlirType(builder, pointerType.pointeeType()));
+}
+
 ::mlir::MemRefType rankedArrayMemRefType(::mlir::OpBuilder& builder, ir::Type arrayType) {
     if (!arrayType.isFixedArray()) {
         throw std::logic_error("rankedArrayMemRefType expects a fixed array IR type");
@@ -271,6 +283,9 @@ bool isUnsignedInteger(ir::Type type) {
 ::mlir::Type mlirAbiType(::mlir::OpBuilder& builder, ir::Type type) {
     if (type.isFixedArray()) {
         return rankedArrayMemRefType(builder, type);
+    }
+    if (type.isPointer()) {
+        return pointerMemRefType(builder, type);
     }
     return mlirType(builder, type);
 }
@@ -525,6 +540,15 @@ private:
         case ir::Operation::Kind::IndexStore:
             lowerIndexStore(operation);
             return false;
+        case ir::Operation::Kind::AddressOfLocal:
+            lowerAddressOfLocal(operation);
+            return false;
+        case ir::Operation::Kind::PointerLoad:
+            lowerPointerLoad(operation);
+            return false;
+        case ir::Operation::Kind::PointerStore:
+            lowerPointerStore(operation);
+            return false;
         case ir::Operation::Kind::Unary:
             lowerUnary(operation);
             return false;
@@ -639,18 +663,124 @@ private:
                                        .length = length.getResult()});
     }
 
-    // Lower a module-level constant use by replaying its checked initializer.
+    std::string constArrayGlobalSymbol(const ir::Const& constant) const {
+        return "__nex_const_" + constant.name;
+    }
+
+    // Try to serialize an array const initializer into a dense MLIR attribute.
     //
-    // nex constants are compile-time values, not mutable storage. For the
-    // first backend implementation we inline the initializer at each use site:
-    // `const X: i32 = 40 + 2; return X;` lowers exactly like `return 40 + 2;`.
-    // That keeps constants simple while preserving the source language rule that
-    // a const has no address and cannot be assigned to.
+    // `memref.global` wants the initializer as static data, not as a list of
+    // executable stores. For now we accept the clean rodata-shaped case:
+    // fixed-array literals whose leaves are scalar literals. Any richer const
+    // expression falls back to replaying the initializer in the function body.
+    std::optional<::mlir::DenseElementsAttr> tryBuildConstArrayDenseAttr(
+        const ir::Const& constant) {
+        if (!constant.type.isFixedArray()) {
+            return std::nullopt;
+        }
+
+        std::unordered_map<std::size_t, const ir::Operation*> producers;
+        for (const ir::Operation& op : constant.initializer.operations) {
+            if (op.result) {
+                producers.emplace(op.result->id, &op);
+            }
+        }
+
+        std::function<bool(ir::ValueRef, llvm::SmallVectorImpl<::mlir::Attribute>&)>
+            appendValue;
+        appendValue =
+            [&](ir::ValueRef value,
+                llvm::SmallVectorImpl<::mlir::Attribute>& attrs) -> bool {
+            const auto found = producers.find(value.id);
+            if (found == producers.end()) {
+                return false;
+            }
+
+            const ir::Operation& op = *found->second;
+            if (value.type.isFixedArray()) {
+                if (op.kind != ir::Operation::Kind::ArrayLiteral) {
+                    return false;
+                }
+                for (ir::ValueRef element : op.arguments) {
+                    if (!appendValue(element, attrs)) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            const ::mlir::Type type = mlirType(builder_, value.type);
+            switch (op.kind) {
+            case ir::Operation::Kind::IntegerLiteral:
+                attrs.push_back(builder_.getIntegerAttr(
+                    type, parseIntegerLiteralApInt(op.text, integerBitWidth(value.type))));
+                return true;
+            case ir::Operation::Kind::FloatLiteral:
+                attrs.push_back(builder_.getFloatAttr(type, parseFloatLiteral(op.text)));
+                return true;
+            case ir::Operation::Kind::BoolLiteral:
+                attrs.push_back(builder_.getIntegerAttr(type, op.boolValue ? 1 : 0));
+                return true;
+            default:
+                return false;
+            }
+        };
+
+        const ir::ValueRef root =
+            requiredValue(constant.initializer.terminator.value, "const initializer");
+        llvm::SmallVector<::mlir::Attribute, 16> attrs;
+        if (!appendValue(root, attrs)) {
+            return std::nullopt;
+        }
+
+        const ::mlir::Type elemTy = mlirType(builder_, constant.type.elementScalarType());
+        const ::mlir::RankedTensorType tensorType =
+            ::mlir::RankedTensorType::get(rankedArrayShape(constant.type), elemTy);
+        return ::mlir::DenseElementsAttr::get(tensorType, attrs);
+    }
+
+    std::optional<::mlir::Value> tryLowerConstArrayGlobal(const ir::Const& constant) {
+        const std::optional<::mlir::DenseElementsAttr> initialValue =
+            tryBuildConstArrayDenseAttr(constant);
+        if (!initialValue) {
+            return std::nullopt;
+        }
+
+        const std::string symbol = constArrayGlobalSymbol(constant);
+        const ::mlir::MemRefType type = rankedArrayMemRefType(builder_, constant.type);
+
+        {
+            ::mlir::OpBuilder::InsertionGuard guard(builder_);
+            builder_.setInsertionPointToStart(module_.getBody());
+            if (!module_.lookupSymbol<::mlir::memref::GlobalOp>(symbol)) {
+                builder_.create<::mlir::memref::GlobalOp>(
+                    loc_, symbol, builder_.getStringAttr("private"), type, *initialValue,
+                    true, nullptr);
+            }
+        }
+
+        auto global = builder_.create<::mlir::memref::GetGlobalOp>(loc_, type, symbol);
+        return global.getResult();
+    }
+
+    // Lower a module-level constant use.
+    //
+    // Scalar consts still replay their checked initializer, which keeps const
+    // expressions such as `const N: i32 = 40 + 2` simple. Dense fixed-array
+    // literals get one immutable `memref.global` definition and each use lowers
+    // to `memref.get_global`, avoiding repeated stack allocation and stores.
     void lowerLoadConst(const ir::Operation& operation) {
         const ir::ValueRef result = requiredValue(operation.result, "const load");
         const auto found = constants_.find(operation.text);
         if (found == constants_.end()) {
             throw std::logic_error("MLIR lowering loaded an unknown module constant");
+        }
+        if (found->second->type.isFixedArray()) {
+            if (std::optional<::mlir::Value> global =
+                    tryLowerConstArrayGlobal(*found->second)) {
+                bindValue(result, *global);
+                return;
+            }
         }
         const ::mlir::Value value = lowerConstInitializer(*found->second);
         bindValue(result, value);
@@ -848,8 +978,15 @@ private:
                     auto idx = builder_.create<::mlir::arith::ConstantIndexOp>(
                         loc_, static_cast<int64_t>(i));
                     const ::mlir::Value elem = lookupConstValue(op.arguments[i]);
-                    builder_.create<::mlir::memref::StoreOp>(loc_, elem, slot.getResult(),
-                                                            idx.getResult());
+                    const ir::Type argTy = op.arguments[i].type;
+                    if (argTy.isFixedArray()) {
+                        const ::mlir::Value sub = firstDimSubview(
+                            builder_, loc_, slot.getResult(), idx.getResult(), result.type);
+                        copyRankedMemRef(builder_, loc_, elem, sub, argTy);
+                    } else {
+                        builder_.create<::mlir::memref::StoreOp>(
+                            loc_, elem, slot.getResult(), idx.getResult());
+                    }
                 }
                 constValues.emplace(result.id, slot.getResult());
                 break;
@@ -906,6 +1043,30 @@ private:
         bindValue(result, load.getResult());
     }
 
+    void lowerAddressOfLocal(const ir::Operation& operation) {
+        const ir::ValueRef result = requiredValue(operation.result, "address-of local");
+        const auto slot = localSlots_.find(operation.local.id);
+        if (slot == localSlots_.end()) {
+            throw std::logic_error("MLIR lowering took address of an unknown local slot");
+        }
+        bindValue(result, slot->second);
+    }
+
+    void lowerPointerLoad(const ir::Operation& operation) {
+        const ir::ValueRef result = requiredValue(operation.result, "pointer load");
+        const ir::ValueRef pointer = requiredValue(operation.value, "pointer load operand");
+        const ::mlir::Value ptr = lookupValue(pointer);
+        auto load = builder_.create<::mlir::memref::LoadOp>(loc_, ptr);
+        bindValue(result, load.getResult());
+    }
+
+    void lowerPointerStore(const ir::Operation& operation) {
+        const ir::ValueRef pointer = requiredValue(operation.left, "pointer store target");
+        const ir::ValueRef stored = requiredValue(operation.value, "pointer store value");
+        builder_.create<::mlir::memref::StoreOp>(loc_, lookupValue(stored),
+                                                 lookupValue(pointer));
+    }
+
     // Look up the IR element type for a function local/parameter slot.
     //
     // Declarations without initializers (`let mut x: T;`) still need `mlirType`
@@ -951,6 +1112,15 @@ private:
 
         const ir::ValueRef init = *operation.value;
         const ::mlir::Value initValue = lookupValue(init);
+
+        if (init.type.isPointer()) {
+            const auto [_, inserted] =
+                directLocals_.emplace(operation.local.id, initValue);
+            if (!inserted) {
+                throw std::logic_error("MLIR lowering declared a pointer local twice");
+            }
+            return;
+        }
 
         if (init.type.isFixedArray()) {
             const ::mlir::MemRefType slotType = rankedArrayMemRefType(builder_, init.type);
@@ -2380,6 +2550,11 @@ private:
         case ir::Operation::Kind::IndexStore:
             dumpIndexStore(operation);
             return false;
+        case ir::Operation::Kind::AddressOfLocal:
+        case ir::Operation::Kind::PointerLoad:
+        case ir::Operation::Kind::PointerStore:
+            throw std::logic_error(
+                "pointer MLIR dumping requires real MLIR support in this slice");
         case ir::Operation::Kind::Unary:
             dumpUnary(operation);
             return false;

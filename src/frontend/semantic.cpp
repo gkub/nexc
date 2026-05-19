@@ -31,28 +31,39 @@ struct Type {
     // Non-empty => fixed-size array type; lengths are outermost dimension first
     // (e.g. `{2, 3}` for `[[i32; 3]; 2]`). Empty => scalar `kind`.
     std::vector<std::uint64_t> arrayDimensions;
+    std::size_t pointerDepth = 0;
 
     bool isInvalid() const {
-        return kind == BuiltinTypeKind::Invalid && arrayDimensions.empty();
+        return kind == BuiltinTypeKind::Invalid && arrayDimensions.empty() && pointerDepth == 0;
     }
 
     bool isVoid() const {
-        return arrayDimensions.empty() && kind == BuiltinTypeKind::Void;
+        return pointerDepth == 0 && arrayDimensions.empty() && kind == BuiltinTypeKind::Void;
     }
 
     bool isBool() const {
-        return arrayDimensions.empty() && kind == BuiltinTypeKind::Bool;
+        return pointerDepth == 0 && arrayDimensions.empty() && kind == BuiltinTypeKind::Bool;
     }
 
     bool isString() const {
-        return arrayDimensions.empty() && kind == BuiltinTypeKind::Str;
+        return pointerDepth == 0 && arrayDimensions.empty() && kind == BuiltinTypeKind::Str;
     }
 
-    bool isFixedArray() const { return !arrayDimensions.empty(); }
+    bool isFixedArray() const { return pointerDepth == 0 && !arrayDimensions.empty(); }
+
+    bool isPointer() const { return pointerDepth != 0; }
+
+    Type pointeeType() const {
+        Type t{.kind = kind, .arrayDimensions = arrayDimensions, .pointerDepth = pointerDepth};
+        if (t.pointerDepth != 0) {
+            --t.pointerDepth;
+        }
+        return t;
+    }
 
     // Type after peeling one index dimension (still an array if more dims remain).
     Type afterIndex() const {
-        Type t{.kind = kind, .arrayDimensions = arrayDimensions};
+        Type t{.kind = kind, .arrayDimensions = arrayDimensions, .pointerDepth = pointerDepth};
         if (!t.arrayDimensions.empty()) {
             t.arrayDimensions.erase(t.arrayDimensions.begin());
         }
@@ -60,10 +71,12 @@ struct Type {
     }
 
     // Leaf scalar element as a scalar `Type` (for assignments and literals).
-    Type elementScalarType() const { return Type{.kind = kind, .arrayDimensions = {}}; }
+    Type elementScalarType() const {
+        return Type{.kind = kind, .arrayDimensions = {}, .pointerDepth = pointerDepth};
+    }
 
     bool isInteger() const {
-        if (isFixedArray()) {
+        if (isFixedArray() || isPointer()) {
             return false;
         }
         switch (kind) {
@@ -88,7 +101,7 @@ struct Type {
     }
 
     bool isFloat() const {
-        if (isFixedArray()) {
+        if (isFixedArray() || isPointer()) {
             return false;
         }
         return kind == BuiltinTypeKind::F32 || kind == BuiltinTypeKind::F64;
@@ -96,7 +109,7 @@ struct Type {
 };
 
 Type builtinScalar(BuiltinTypeKind k) {
-    return Type{.kind = k, .arrayDimensions = {}};
+    return Type{.kind = k, .arrayDimensions = {}, .pointerDepth = 0};
 }
 
 // Compare two semantic types for exact equality, with invalid acting as a
@@ -105,12 +118,13 @@ bool sameType(Type left, Type right) {
     if (left.isInvalid() || right.isInvalid()) {
         return true;
     }
-    return left.kind == right.kind && left.arrayDimensions == right.arrayDimensions;
+    return left.kind == right.kind && left.arrayDimensions == right.arrayDimensions &&
+           left.pointerDepth == right.pointerDepth;
 }
 
 // Convert a semantic type to the spelling used in diagnostics.
 std::string typeName(Type type) {
-    if (type.arrayDimensions.empty()) {
+    if (type.arrayDimensions.empty() && type.pointerDepth == 0) {
         return std::string(builtinTypeName(type.kind));
     }
     std::string t = std::string(builtinTypeName(type.kind));
@@ -118,12 +132,17 @@ std::string typeName(Type type) {
          ++it) {
         t = "[" + t + "; " + std::to_string(*it) + "]";
     }
+    for (std::size_t i = 0; i < type.pointerDepth; ++i) {
+        t = "*" + t;
+    }
     return t;
 }
 
 // Convert parser type syntax into semantic type information.
 Type typeFromSyntax(TypeSyntax syntax) {
-    return Type{.kind = syntax.kind, .arrayDimensions = syntax.arrayDimensions};
+    return Type{.kind = syntax.kind,
+                .arrayDimensions = syntax.arrayDimensions,
+                .pointerDepth = syntax.pointerDepth};
 }
 
 // Return true if a type is allowed in `if`, `while`, and `!` condition contexts.
@@ -574,11 +593,21 @@ private:
                 for (const ParameterSyntax& parameter : function->parameters) {
                     const Type pt = typeFromSyntax(parameter.type);
                     validateFixedArrayDecl(pt, parameter.type.span);
+                    validatePointerDecl(pt, parameter.type.span);
+                    if (pt.isPointer()) {
+                        diagnostics_.error(parameter.type.span,
+                                           "pointer parameters are not implemented yet");
+                    }
                     parameterTypes.push_back(pt);
                 }
 
                 const Type returnType = typeFromSyntax(function->returnType);
                 validateFixedArrayDecl(returnType, function->returnType.span);
+                validatePointerDecl(returnType, function->returnType.span);
+                if (returnType.isPointer()) {
+                    diagnostics_.error(function->returnType.span,
+                                       "pointer return types are not implemented yet");
+                }
 
                 functions_[function->name] = FunctionSymbol{
                     .nameSpan = function->nameSpan,
@@ -592,6 +621,11 @@ private:
                 declareTopLevel(constant->name, constant->nameSpan);
                 const Type constTy = typeFromSyntax(constant->type);
                 validateFixedArrayDecl(constTy, constant->type.span);
+                validatePointerDecl(constTy, constant->type.span);
+                if (constTy.isPointer()) {
+                    diagnostics_.error(constant->type.span,
+                                       "module const pointers are not implemented yet");
+                }
                 globals_[constant->name] = ValueSymbol{
                     .type = constTy,
                     .isMutable = false,
@@ -1290,6 +1324,19 @@ private:
         }
     }
 
+    void validatePointerDecl(Type type, SourceSpan span) {
+        if (!type.isPointer()) {
+            return;
+        }
+        if (type.pointerDepth != 1 || !type.arrayDimensions.empty() ||
+            type.kind == BuiltinTypeKind::Void || type.kind == BuiltinTypeKind::Str ||
+            type.kind == BuiltinTypeKind::Invalid) {
+            diagnostics_.error(span,
+                               "this pointer slice only supports `*T` where `T` is a scalar "
+                               "integer, float, or bool type");
+        }
+    }
+
     // Analyze one statement and report whether it definitely returns.
     //
     // The bool return is for return-path analysis only. It does not mean the
@@ -1311,13 +1358,27 @@ private:
         if (const auto* let = dynamic_cast<const LetStmt*>(&stmt)) {
             // Analyze the initializer before declaring the local, so `let x: i32
             // = x;` does not accidentally refer to the binding being declared.
-            const Type declared = typeFromSyntax(let->type);
-            validateFixedArrayDecl(declared, let->type.span);
+            const bool hasExplicitType = hasExplicitTypeSyntax(let->type);
+            Type declared = hasExplicitType ? typeFromSyntax(let->type) : Type{};
+            if (hasExplicitType) {
+                validateFixedArrayDecl(declared, let->type.span);
+                validatePointerDecl(declared, let->type.span);
+                if (declared.isPointer() && let->isMutable) {
+                    diagnostics_.error(let->type.span,
+                                       "mutable pointer variables are not implemented yet");
+                }
+            }
             if (!let->init) {
                 if (!let->isMutable) {
                     diagnostics_.error(let->span,
                                        "`let` requires an initializer; only `let mut` "
                                        "may omit `=`");
+                    return false;
+                }
+                if (!hasExplicitType) {
+                    diagnostics_.error(
+                        let->span,
+                        "uninitialized `let mut` requires an explicit type annotation");
                     return false;
                 }
                 if (declared.isFixedArray()) {
@@ -1338,8 +1399,23 @@ private:
                 return false;
             }
 
-            ExprInfo init = analyzeExpr(*let->init, declared);
-            if (!sameType(declared, init.type)) {
+            ExprInfo init = analyzeExpr(*let->init,
+                                        hasExplicitType ? std::optional<Type>{declared}
+                                                        : std::nullopt);
+            if (!hasExplicitType) {
+                declared = init.type;
+                if (declared.isVoid() || declared.isInvalid()) {
+                    diagnostics_.error(let->init->span,
+                                       "cannot infer type for local `" + let->name +
+                                           "`; add an explicit type annotation");
+                }
+                validateFixedArrayDecl(declared, let->init->span);
+                validatePointerDecl(declared, let->init->span);
+                if (declared.isPointer() && let->isMutable) {
+                    diagnostics_.error(let->nameSpan,
+                                       "mutable pointer variables are not implemented yet");
+                }
+            } else if (!sameType(declared, init.type)) {
                 diagnostics_.error(let->init->span,
                                    "cannot initialize local `" + let->name +
                                        "` of type `" + typeName(declared) +
@@ -1460,8 +1536,29 @@ private:
                 return false;
             }
 
+            if (const auto* unary = dynamic_cast<const UnaryExpr*>(assign->target.get());
+                unary && unary->op == TokenKind::Star) {
+                ExprInfo ptr = analyzeExpr(*unary->operand, std::nullopt);
+                if (!ptr.type.isPointer()) {
+                    diagnostics_.error(unary->operand->span,
+                                       "dereferenced assignment target must have pointer type");
+                    analyzeExpr(*assign->value, std::nullopt);
+                    return false;
+                }
+                const Type pointee = ptr.type.pointeeType();
+                ExprInfo value = analyzeExpr(*assign->value, pointee);
+                if (!sameType(pointee, value.type)) {
+                    diagnostics_.error(assign->value->span,
+                                       "cannot assign value of type `" +
+                                           typeName(value.type) + "` through pointer to `" +
+                                           typeName(pointee) + "`");
+                }
+                return false;
+            }
+
             diagnostics_.error(assign->target->span,
-                               "assignment target must be a local name or indexed place");
+                               "assignment target must be a local name, indexed place, or "
+                               "dereferenced pointer");
             analyzeExpr(*assign->value, std::nullopt);
             return false;
         }
@@ -2066,6 +2163,47 @@ private:
     // `!` is condition-like and always produces bool. Unary `-` accepts integer
     // and floating-point operands and keeps the operand type.
     ExprInfo analyzeUnaryExpr(const UnaryExpr& unary, std::optional<Type> expected) {
+        if (unary.op == TokenKind::Amp) {
+            const auto* name = dynamic_cast<const NameExpr*>(stripParensConst(unary.operand.get()));
+            if (!name) {
+                diagnostics_.error(unary.operand->span,
+                                   "`&` currently requires a mutable local name");
+                analyzeExpr(*unary.operand, std::nullopt);
+                return ExprInfo{.type = Type{}, .isConstant = false};
+            }
+            const ValueSymbol* symbol = lookupValue(name->name);
+            if (!symbol) {
+                diagnostics_.error(name->span,
+                                   "undefined local `" + name->name + "`");
+                return ExprInfo{.type = Type{}, .isConstant = false};
+            }
+            if (symbol->isConst || !symbol->isMutable) {
+                diagnostics_.error(name->span,
+                                   "`&` currently requires a mutable local binding");
+            }
+            requireReadableLocal(*symbol, name->span, name->name);
+            if (symbol->type.isFixedArray() || symbol->type.isPointer() ||
+                symbol->type.isString() || symbol->type.isVoid()) {
+                diagnostics_.error(name->span,
+                                   "`&` currently supports scalar integer, float, or bool locals");
+                return ExprInfo{.type = Type{}, .isConstant = false};
+            }
+            Type ptr = symbol->type;
+            ptr.pointerDepth = 1;
+            return ExprInfo{.type = ptr, .isConstant = false};
+        }
+
+        if (unary.op == TokenKind::Star) {
+            ExprInfo operand = analyzeExpr(*unary.operand, expected);
+            if (!operand.type.isPointer()) {
+                diagnostics_.error(unary.operand->span,
+                                   "`*` operand must be a pointer type, not `" +
+                                       typeName(operand.type) + "`");
+                return ExprInfo{.type = Type{}, .isConstant = false};
+            }
+            return ExprInfo{.type = operand.type.pointeeType(), .isConstant = false};
+        }
+
         if (unary.op == TokenKind::Bang) {
             // `!` always produces bool. nex accepts either bool or integer
             // operands as condition-like values.

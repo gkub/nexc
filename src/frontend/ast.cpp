@@ -95,8 +95,14 @@ private:
         }
 
         if (const auto* let = dynamic_cast<const LetStmt*>(&stmt)) {
-            line(std::string(let->isMutable ? "LetStmt mut " : "LetStmt ") +
-                 let->name + ": " + formatTypeSyntax(let->type));
+            std::string header =
+                std::string(let->isMutable ? "LetStmt mut " : "LetStmt ") + let->name;
+            if (hasExplicitTypeSyntax(let->type)) {
+                header += ": " + formatTypeSyntax(let->type);
+            } else {
+                header += ": <inferred>";
+            }
+            line(header);
             if (let->init) {
                 indent_ += 2;
                 dumpExpr(*let->init);
@@ -443,9 +449,15 @@ private:
         }
 
         if (const auto* let = dynamic_cast<const LetStmt*>(&stmt)) {
+            std::string label =
+                std::string(let->isMutable ? "LetStmt mut\n" : "LetStmt\n") + let->name;
+            if (hasExplicitTypeSyntax(let->type)) {
+                label += ": " + formatTypeSyntax(let->type);
+            } else {
+                label += ": <inferred>";
+            }
             const std::size_t id =
-                node(std::string(let->isMutable ? "LetStmt mut\n" : "LetStmt\n") +
-                     let->name + ": " + formatTypeSyntax(let->type));
+                node(label);
             if (let->init) {
                 edge(id, dumpExpr(*let->init), "init");
             }
@@ -597,13 +609,13 @@ private:
 // This helper is shared by AST dumps, diagnostics, and IR dumps so the project
 // does not accidentally print the same type in multiple inconsistent ways.
 std::string formatTypeSyntax(TypeSyntax syntax) {
-    if (syntax.arrayDimensions.empty()) {
-        return std::string(builtinTypeName(syntax.kind));
-    }
     std::string t = std::string(builtinTypeName(syntax.kind));
     for (auto it = syntax.arrayDimensions.rbegin(); it != syntax.arrayDimensions.rend();
          ++it) {
         t = "[" + t + "; " + std::to_string(*it) + "]";
+    }
+    for (std::size_t i = 0; i < syntax.pointerDepth; ++i) {
+        t = "*" + t;
     }
     return t;
 }

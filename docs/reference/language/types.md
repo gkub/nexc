@@ -9,6 +9,7 @@
 - [Boolean Type](#boolean-type)
 - [String Type](#string-type)
 - [Void Type](#void-type)
+- [Pointer Types](#pointer-types)
 - [Fixed-Size Arrays](#fixed-size-arrays)
 - [Type Rules](#type-rules)
 - [Examples](#examples)
@@ -17,8 +18,9 @@
 ## Summary
 
 nex currently has fixed-width integers, IEEE-754 floats, `bool`, `str`, `void`,
-and fixed-size arrays. Types appear in function signatures, local declarations,
-module constants, and array declarations where supported.
+one-level scalar pointers, and fixed-size arrays. Types appear in function
+signatures, local declarations, module constants, and array declarations where
+supported.
 
 ## Syntax
 
@@ -28,6 +30,7 @@ type ::= integer-type
        | "bool"
        | "str"
        | "void"
+       | "*" type
        | "[" type ";" integer-literal "]"
 
 integer-type ::= "i8" | "i16" | "i32" | "i64"
@@ -59,6 +62,7 @@ Built-in scalar types:
 - Float literals use decimal syntax such as `1.0`, `0.5`, `6.02e23`; without
   context they default to `f64`.
 - Context can choose `f32`, for example `let x: f32 = 1.25;`.
+- Local type inference uses that same default, so `let x = 1.25;` is `f64`.
 - There are no implicit integer/float coercions: write matching literal forms
   and parameter types explicitly.
 
@@ -79,6 +83,22 @@ Built-in scalar types:
 
 - `void` is valid as a function return type.
 - `void` is not a first-class value expression type.
+
+## Pointer Types
+
+The first pointer slice supports one-level raw pointer syntax:
+
+```nex
+let mut x = 41;
+let p: *i32 = &x;
+let q = &x; // inferred as *i32
+```
+
+Implemented pointer types are limited to `*T` where `T` is a scalar integer,
+`f32`, `f64`, or `bool`. Pointers are currently local values only: no pointer
+parameters, pointer returns, module `const` pointers, pointer arithmetic, `null`,
+pointers to arrays, pointers to `str`, pointers to `void`, or pointers to
+pointers yet. See [pointers_mvp.md](../../design/pointers_mvp.md).
 
 ## Fixed-Size Arrays
 
@@ -125,6 +145,12 @@ return xs[0] + ys[1] + grid[1][1];
 
 ## Type Rules
 
+- Initialized local declarations may omit the annotation: `let x = expr;` and
+  `let mut x = expr;`. Inference is local-only; function parameters, function
+  returns, module `const`, and uninitialized `let mut` still require explicit
+  types.
+- Integer literals with no contextual type default to `i32`; float literals with
+  no contextual type default to `f64`.
 - Arithmetic operators require integer or floating-point operands; `%` is
   integer-only.
 - Comparison/equality produce `bool`.
@@ -142,6 +168,7 @@ return xs[0] + ys[1] + grid[1][1];
 ```nex
 fn main() -> i32 {
     let a: i32 = 40;
+    let inferred = a + 2; // i32
     let b: u32 = 2;
     let ok: bool = a > 0;
     if (ok) {

@@ -21,18 +21,20 @@ Succinct checklist of **implemented surface** (and a few prominent gaps). Normat
 
 - **Scalars:** `i8` … `u64`, `f32`, `f64`, `bool`, `void`. [types.md](types.md)
 - **`str`:** string type with runtime support; literals; some builtins. [types.md](types.md)
+- **Pointers MVP `*T`:** local one-level pointers to mutable scalar locals via `&name`, `*p`, and `*p = value`. [types.md](types.md), [expressions.md](expressions.md), [pointers_mvp.md](../../design/pointers_mvp.md)
 - **Fixed arrays `[T; N]`:** locals, **`fn` parameters and returns**, module **`const`** (full array literal initializer), nested arrays, indexing, and `let mut` element assign. **`main`** may not return an array type. [types.md](types.md)
 
 ## Locals and definite assignment
 
-- **`let name: T = expr;`** — immutable; must have initializer.
-- **`let mut name: T = expr;`** — mutable with initial value.
+- **`let name: T = expr;`**, **`let name = expr;`** — immutable; must have initializer.
+- **`let mut name: T = expr;`**, **`let mut name = expr;`** — mutable with initial value.
 - **`let mut name: T;`** — mutable storage, no `=`; readable only after **flow-sensitive definite assignment** (`if`/`else` joins, conservative `while`/`for`). Fixed arrays also track per-element assignment for compile-time-known indices. [statements.md](statements.md), [definite_assignment.md](../../design/definite_assignment.md)
 
 ## Assignment
 
 - **`name = expr;`** — `let mut` names only. [statements.md](statements.md)
 - **`arr[i] = expr;`, `grid[i][j] = expr;`** — `let mut` array binding. [statements.md](statements.md), [expressions.md](expressions.md)
+- **`*ptr = expr;`** — pointer dereference store in the pointer MVP. [statements.md](statements.md), [expressions.md](expressions.md)
 
 ## Control flow
 
@@ -65,8 +67,8 @@ Succinct checklist of **implemented surface** (and a few prominent gaps). Normat
 ## Not implemented (representative)
 
 - Module system / imports, user `struct`, enums, traits, generics.
-- Heap allocation, ownership, **pointers**.
-- Type inference (`let x = expr` without `: T`).
+- Full pointer model: pointer params/returns, `null`, pointer arithmetic,
+  pointer-to-array/string interaction, heap allocation, ownership.
 - **`Option` / `Result`**, richer file I/O.
 
 ---

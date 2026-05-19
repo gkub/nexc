@@ -12,7 +12,7 @@ Type Type::elementType() const {
 // grows beyond BuiltinTypeKind, lowering code can continue asking this semantic
 // question without knowing the exact representation.
 bool Type::isInteger() const {
-    if (isFixedArray()) {
+    if (isFixedArray() || isPointer()) {
         return false;
     }
     switch (kind) {
@@ -38,7 +38,7 @@ bool Type::isInteger() const {
 }
 
 bool Type::isFloat() const {
-    return !isFixedArray() &&
+    return !isFixedArray() && !isPointer() &&
            (kind == BuiltinTypeKind::F32 || kind == BuiltinTypeKind::F64);
 }
 
@@ -46,13 +46,16 @@ bool Type::isFloat() const {
 // keeps AST dumps, semantic diagnostics, and IR dumps visually consistent.
 std::string_view typeName(Type type) {
     static thread_local std::string scratch;
-    if (type.arrayDimensions.empty()) {
+    if (type.arrayDimensions.empty() && type.pointerDepth == 0) {
         return builtinTypeName(type.kind);
     }
     scratch = std::string(builtinTypeName(type.kind));
     for (auto it = type.arrayDimensions.rbegin(); it != type.arrayDimensions.rend();
          ++it) {
         scratch = "[" + scratch + "; " + std::to_string(*it) + "]";
+    }
+    for (std::size_t i = 0; i < type.pointerDepth; ++i) {
+        scratch = "*" + scratch;
     }
     return scratch;
 }

@@ -52,7 +52,9 @@ struct ValueSymbol {
 // still useful as a named boundary: if IR types later grow layout/ABI details,
 // this becomes the one place where AST type syntax starts becoming IR type data.
 Type typeFromSyntax(TypeSyntax syntax) {
-    return Type{.kind = syntax.kind, .arrayDimensions = syntax.arrayDimensions};
+    return Type{.kind = syntax.kind,
+                .arrayDimensions = syntax.arrayDimensions,
+                .pointerDepth = syntax.pointerDepth};
 }
 
 const Expr* stripParensExpr(const Expr* e) {
@@ -285,19 +287,27 @@ private:
         }
 
         if (const auto* let = dynamic_cast<const LetStmt*>(&stmt)) {
-            const Type type = typeFromSyntax(let->type);
-            const LocalRef local =
-                declareLocal(let->name, let->nameSpan, type, let->isMutable,
-                             Local::Kind::Local);
+            Type type = hasExplicitTypeSyntax(let->type)
+                            ? typeFromSyntax(let->type)
+                            : inferExprType(*let->init, std::nullopt);
+            std::optional<ValueRef> init;
+            if (let->init) {
+                // The initializer is emitted before the new name enters scope,
+                // matching semantic analysis and preserving shadowing behavior:
+                // `let x = x + 1;` reads an outer `x`, not the local being made.
+                init = buildExpr(*let->init, type);
+            }
+            const LocalRef local = allocateLocal(let->name, let->nameSpan, type,
+                                                 let->isMutable, Local::Kind::Local);
+            bindLocalName(let->name, type, local);
             Operation op{
                 .kind = Operation::Kind::DeclareLocal,
                 .span = let->span,
             };
             op.local = local;
             op.isMutable = let->isMutable;
-            if (let->init) {
-                const ValueRef init = buildExpr(*let->init, type);
-                op.value = init;
+            if (init) {
+                op.value = *init;
             }
             append(std::move(op));
             return;
@@ -364,6 +374,20 @@ private:
                 st.right = lastIdx;
                 st.value = stored;
                 append(std::move(st));
+                return;
+            }
+
+            if (const auto* unary = dynamic_cast<const UnaryExpr*>(assign->target.get());
+                unary && unary->op == TokenKind::Star) {
+                const ValueRef ptr = buildExpr(*unary->operand, std::nullopt);
+                const ValueRef stored = buildExpr(*assign->value, ptr.type.pointeeType());
+                Operation op{
+                    .kind = Operation::Kind::PointerStore,
+                    .span = assign->span,
+                    .value = stored,
+                    .left = ptr,
+                };
+                append(std::move(op));
                 return;
             }
 
@@ -643,6 +667,39 @@ private:
         }
 
         if (const auto* unary = dynamic_cast<const UnaryExpr*>(&expr)) {
+            if (unary->op == TokenKind::Amp) {
+                const auto* name =
+                    dynamic_cast<const NameExpr*>(stripParensExpr(unary->operand.get()));
+                if (!name) {
+                    throw std::logic_error("address-of requires a local name in typed IR");
+                }
+                const ValueSymbol symbol = lookupValue(name->name);
+                Type pointerType = symbol.type;
+                pointerType.pointerDepth = 1;
+                Operation op{
+                    .kind = Operation::Kind::AddressOfLocal,
+                    .span = unary->span,
+                    .result = makeValue(pointerType),
+                    .local = symbol.local,
+                };
+                const ValueRef result = *op.result;
+                append(std::move(op));
+                return result;
+            }
+
+            if (unary->op == TokenKind::Star) {
+                const ValueRef pointer = buildExpr(*unary->operand, expected);
+                Operation op{
+                    .kind = Operation::Kind::PointerLoad,
+                    .span = unary->span,
+                    .result = makeValue(pointer.type.pointeeType()),
+                    .value = pointer,
+                };
+                const ValueRef result = *op.result;
+                append(std::move(op));
+                return result;
+            }
+
             if (unary->op == TokenKind::Bang) {
                 const ValueRef operand = buildExpr(*unary->operand, std::nullopt);
                 Operation op{
@@ -767,6 +824,97 @@ private:
         }
 
         throw std::logic_error("unsupported expression in typed IR builder");
+    }
+
+    // Infer the type of a checked expression without emitting IR operations.
+    //
+    // This exists for local type inference: the builder must know the local slot
+    // type before it can emit `DeclareLocal`, but it must not make the new local
+    // visible while the initializer is being lowered. Semantic analysis has
+    // already rejected mismatches, so this mirrors the accepted expression typing
+    // rules without producing user diagnostics.
+    Type inferExprType(const Expr& expr, std::optional<Type> expected) const {
+        if (dynamic_cast<const IntegerLiteralExpr*>(&expr)) {
+            return expected.value_or(Type{.kind = BuiltinTypeKind::I32, .arrayDimensions = {}});
+        }
+        if (dynamic_cast<const FloatLiteralExpr*>(&expr)) {
+            return expected.value_or(Type{.kind = BuiltinTypeKind::F64, .arrayDimensions = {}});
+        }
+        if (dynamic_cast<const BoolLiteralExpr*>(&expr)) {
+            return Type{.kind = BuiltinTypeKind::Bool, .arrayDimensions = {}};
+        }
+        if (dynamic_cast<const StringLiteralExpr*>(&expr)) {
+            return Type{.kind = BuiltinTypeKind::Str, .arrayDimensions = {}};
+        }
+        if (const auto* name = dynamic_cast<const NameExpr*>(&expr)) {
+            return lookupValue(name->name).type;
+        }
+        if (const auto* call = dynamic_cast<const CallExpr*>(&expr)) {
+            const auto* callee = dynamic_cast<const NameExpr*>(call->callee.get());
+            if (!callee) {
+                throw std::logic_error("typed IR only supports named callees");
+            }
+            const auto signature = functions_.find(callee->name);
+            if (signature == functions_.end()) {
+                throw std::logic_error("typed IR call target was not resolved");
+            }
+            return signature->second.returnType;
+        }
+        if (const auto* unary = dynamic_cast<const UnaryExpr*>(&expr)) {
+            if (unary->op == TokenKind::Amp) {
+                const auto* name =
+                    dynamic_cast<const NameExpr*>(stripParensExpr(unary->operand.get()));
+                if (!name) {
+                    return Type{};
+                }
+                Type type = lookupValue(name->name).type;
+                type.pointerDepth = 1;
+                return type;
+            }
+            if (unary->op == TokenKind::Star) {
+                return inferExprType(*unary->operand, std::nullopt).pointeeType();
+            }
+            if (unary->op == TokenKind::Bang) {
+                return Type{.kind = BuiltinTypeKind::Bool, .arrayDimensions = {}};
+            }
+            return inferExprType(*unary->operand, expected);
+        }
+        if (const auto* binary = dynamic_cast<const BinaryExpr*>(&expr)) {
+            if (binary->op == TokenKind::AmpAmp || binary->op == TokenKind::PipePipe ||
+                binary->op == TokenKind::Less ||
+                binary->op == TokenKind::LessEqual ||
+                binary->op == TokenKind::Greater ||
+                binary->op == TokenKind::GreaterEqual ||
+                binary->op == TokenKind::EqualEqual ||
+                binary->op == TokenKind::BangEqual) {
+                return Type{.kind = BuiltinTypeKind::Bool, .arrayDimensions = {}};
+            }
+            return inferExprType(*binary->left, expected);
+        }
+        if (const auto* arrayLit = dynamic_cast<const ArrayLiteralExpr*>(&expr)) {
+            if (expected && expected->isFixedArray()) {
+                return *expected;
+            }
+            if (arrayLit->elements.empty()) {
+                return Type{};
+            }
+            Type element = inferExprType(*arrayLit->elements[0], std::nullopt);
+            if (element.isFixedArray()) {
+                element.arrayDimensions.insert(element.arrayDimensions.begin(),
+                                               arrayLit->elements.size());
+                return element;
+            }
+            return Type{.kind = element.kind,
+                        .arrayDimensions = {arrayLit->elements.size()}};
+        }
+        if (const auto* indexExpr = dynamic_cast<const IndexExpr*>(&expr)) {
+            return inferExprType(*indexExpr->base, std::nullopt).afterIndex();
+        }
+        if (const auto* paren = dynamic_cast<const ParenExpr*>(&expr)) {
+            return inferExprType(*paren->inner, expected);
+        }
+
+        throw std::logic_error("unsupported expression in type inference");
     }
 
     // Lower a binary expression while choosing the correct result type.
@@ -1030,6 +1178,13 @@ private:
     // lowering can use the same LoadLocal operation for either one.
     LocalRef declareLocal(std::string_view name, SourceSpan span, Type type,
                           bool isMutable, Local::Kind kind) {
+        const LocalRef ref = allocateLocal(name, span, type, isMutable, kind);
+        bindLocalName(name, type, ref);
+        return ref;
+    }
+
+    LocalRef allocateLocal(std::string_view name, SourceSpan span, Type type,
+                           bool isMutable, Local::Kind kind) {
         if (!currentFunction_) {
             throw std::logic_error("typed IR locals can only be declared in functions");
         }
@@ -1046,12 +1201,15 @@ private:
             .kind = kind,
             .span = span,
         });
+        return ref;
+    }
+
+    void bindLocalName(std::string_view name, Type type, LocalRef ref) {
         scopes_.back()[std::string(name)] = ValueSymbol{
             .type = type,
             .local = ref,
             .isConst = false,
         };
-        return ref;
     }
 
     // Resolve a source-level value name to the storage or const it denotes.

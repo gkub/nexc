@@ -2,6 +2,15 @@
 
 This note compares two ways to lower immutable module constants whose type is a fixed (possibly nested) array.
 
+## Current status
+
+Implemented for dense literal fixed-array module constants, including nested
+arrays of scalar literal leaves. The MLIR path emits one private immutable
+`memref.global` and lowers each use with `memref.get_global`.
+
+Repeated materialization remains the fallback for scalar consts and for future
+array initializer shapes that are not yet serialized as dense static data.
+
 ## Option A — `memref.global` (or equivalent rodata)
 
 **Pros**

@@ -1,0 +1,17 @@
+// Local-only type inference: initialized `let` / `let mut` may omit `: T`.
+
+fn main() -> i32 {
+    let n = 40;
+    let mut total = 2;
+    let ratio = 6.0 / 2.0;
+    let xs = [1, 2, 3];
+    let grid = [[1, 2], [3, 4]];
+
+    total = total + xs[1];
+
+    if (ratio == 3.0 && grid[1][0] == 3) {
+        return n + total;
+    } else {
+        return 0;
+    }
+}

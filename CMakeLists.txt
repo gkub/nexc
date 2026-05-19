@@ -601,6 +601,20 @@ add_nexc_golden_test(
 )
 
 add_nexc_golden_test(
+    dump_ir_type_inference_golden
+    --dump-ir
+    examples/type_inference.nexs
+    tests/golden/dump_ir/type_inference.ir.txt
+)
+
+add_nexc_golden_test(
+    dump_ir_pointer_scalar_golden
+    --dump-ir
+    examples/pointer_scalar.nexs
+    tests/golden/dump_ir/pointer_scalar.ir.txt
+)
+
+add_nexc_golden_test(
     dump_mlir_return_42_golden
     --dump-mlir
     examples/return_42.nexs
@@ -705,6 +719,13 @@ if(MLIR_FOUND)
         examples/for_loop.nexs
         tests/golden/dump_mlir/for_loop.mlir
     )
+
+    add_nexc_golden_test(
+        dump_mlir_const_array_global_golden
+        --dump-mlir
+        examples/const_array_global.nexs
+        tests/golden/dump_mlir/const_array_global.mlir
+    )
 endif()
 
 add_nexc_mlir_validation_test(
@@ -768,6 +789,11 @@ add_nexc_mlir_validation_test(
 )
 
 add_nexc_mlir_validation_test(
+    validate_mlir_const_array_global
+    examples/const_array_global.nexs
+)
+
+add_nexc_mlir_validation_test(
     validate_mlir_float_scalar
     examples/float_scalar.nexs
 )
@@ -775,6 +801,16 @@ add_nexc_mlir_validation_test(
 add_nexc_mlir_validation_test(
     validate_mlir_bitwise_shift
     examples/bitwise_shift.nexs
+)
+
+add_nexc_mlir_validation_test(
+    validate_mlir_type_inference
+    examples/type_inference.nexs
+)
+
+add_nexc_mlir_validation_test(
+    validate_mlir_pointer_scalar
+    examples/pointer_scalar.nexs
 )
 
 add_nexc_llvm_validation_test(
@@ -894,6 +930,12 @@ add_nexc_executable_test(
 )
 
 add_nexc_executable_test(
+    run_executable_const_array_global
+    examples/const_array_global.nexs
+    9
+)
+
+add_nexc_executable_test(
     run_executable_float_scalar
     examples/float_scalar.nexs
     42
@@ -902,6 +944,18 @@ add_nexc_executable_test(
 add_nexc_executable_test(
     run_executable_bitwise_shift
     examples/bitwise_shift.nexs
+    42
+)
+
+add_nexc_executable_test(
+    run_executable_type_inference
+    examples/type_inference.nexs
+    44
+)
+
+add_nexc_executable_test(
+    run_executable_pointer_scalar
+    examples/pointer_scalar.nexs
     42
 )
 
@@ -972,6 +1026,16 @@ add_test(
 add_test(
     NAME semantic_check_bitwise_shift
     COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/bitwise_shift.nexs
+)
+
+add_test(
+    NAME semantic_check_type_inference
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/type_inference.nexs
+)
+
+add_test(
+    NAME semantic_check_pointer_scalar
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/examples/pointer_scalar.nexs
 )
 
 add_test(
@@ -1125,6 +1189,32 @@ add_nexc_golden_diagnostic_test(
     --check
     tests/semantic_float_no_implicit_coercion.nexs
     tests/golden/diagnostics/semantic_float_no_implicit_coercion.stderr.txt
+)
+
+add_test(
+    NAME semantic_infer_uninit
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_infer_uninit.nexs
+)
+set_tests_properties(semantic_infer_uninit PROPERTIES WILL_FAIL TRUE)
+
+add_nexc_golden_diagnostic_test(
+    semantic_infer_uninit_golden
+    --check
+    tests/semantic_infer_uninit.nexs
+    tests/golden/diagnostics/semantic_infer_uninit.stderr.txt
+)
+
+add_test(
+    NAME semantic_pointer_immutable
+    COMMAND nexc --check ${CMAKE_CURRENT_SOURCE_DIR}/tests/semantic_pointer_immutable.nexs
+)
+set_tests_properties(semantic_pointer_immutable PROPERTIES WILL_FAIL TRUE)
+
+add_nexc_golden_diagnostic_test(
+    semantic_pointer_immutable_golden
+    --check
+    tests/semantic_pointer_immutable.nexs
+    tests/golden/diagnostics/semantic_pointer_immutable.stderr.txt
 )
 
 add_test(

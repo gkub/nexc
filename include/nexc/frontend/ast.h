@@ -41,9 +41,19 @@ struct TypeSyntax {
     // a plain scalar type `kind`, not an array.
     std::vector<std::uint64_t> arrayDimensions;
 
+    // Leading pointer stars in type syntax. The first pointer slice accepts
+    // `*T` for scalar `T`; deeper pointers and pointer-to-array syntax are
+    // parsed so diagnostics can be precise, but rejected semantically for now.
+    std::size_t pointerDepth = 0;
+
     // The source span covers the full type spelling (`i32`, `[i32; 4]`, ...).
     SourceSpan span;
 };
+
+inline bool hasExplicitTypeSyntax(const TypeSyntax& syntax) {
+    return syntax.kind != BuiltinTypeKind::Invalid || !syntax.arrayDimensions.empty() ||
+           syntax.pointerDepth != 0;
+}
 
 // Parameters are stored by value because they are small records: name, span, and
 // type syntax. Larger recursive structures below use unique_ptr ownership.
@@ -195,8 +205,12 @@ struct LetStmt final : Stmt {
     // `let` and `let mut` share one AST node. Mutability is a semantic property
     // checked later when assignment statements target this binding.
     //
-    // `init` may be null only for `let mut name: T;` (no `=`). Immutable `let`
-    // always has an initializer expression.
+    // `type` may be Invalid when the source used local inference:
+    // `let name = expr;` or `let mut name = expr;`.
+    //
+    // `init` may be null only for `let mut name: T;` (no `=`). Uninitialized
+    // locals still require an explicit type because there is no expression to
+    // infer from. Immutable `let` always has an initializer expression.
     bool isMutable = false;
     std::string name;
     SourceSpan nameSpan;

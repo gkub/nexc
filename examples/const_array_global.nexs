@@ -1,0 +1,9 @@
+// Module const arrays lower to immutable memref globals when the initializer is
+// a literal blob. Local array initialization still copies out of the global.
+
+const GRID: [[i32; 2]; 2] = [[1, 2], [3, 4]];
+
+fn main() -> i32 {
+    let local: [[i32; 2]; 2] = GRID;
+    return local[0][1] + GRID[1][0] + GRID[1][1];
+}

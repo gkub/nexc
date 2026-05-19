@@ -1,0 +1,3 @@
+tests/semantic_infer_uninit.nexs:2:5: error: uninitialized `let mut` requires an explicit type annotation
+  |     let mut x;
+  |     ^~~~~~~~~~

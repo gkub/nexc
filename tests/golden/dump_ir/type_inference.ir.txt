@@ -1,0 +1,65 @@
+Module
+  Function @main() -> i32
+    Locals
+      $0 n: i32
+      $1 total: i32 mutable
+      $2 ratio: f64
+      $3 xs: [i32; 3]
+      $4 grid: [[i32; 2]; 2]
+    Block
+      %0: i32 = IntegerLiteral 40
+      DeclareLocal $0 = %0
+      %1: i32 = IntegerLiteral 2
+      DeclareLocal $1 mutable = %1
+      %2: f64 = FloatLiteral 6.0
+      %3: f64 = FloatLiteral 2.0
+      %4: f64 = Binary Slash %2, %3
+      DeclareLocal $2 = %4
+      %6: i32 = IntegerLiteral 1
+      %7: i32 = IntegerLiteral 2
+      %8: i32 = IntegerLiteral 3
+      %5: [i32; 3] = ArrayLiteral%6, %7, %8
+      DeclareLocal $3 = %5
+      %11: i32 = IntegerLiteral 1
+      %12: i32 = IntegerLiteral 2
+      %10: [i32; 2] = ArrayLiteral%11, %12
+      %14: i32 = IntegerLiteral 3
+      %15: i32 = IntegerLiteral 4
+      %13: [i32; 2] = ArrayLiteral%14, %15
+      %9: [[i32; 2]; 2] = ArrayLiteral%10, %13
+      DeclareLocal $4 = %9
+      %16: i32 = LoadLocal $1
+      %17: [i32; 3] = LoadLocal $3
+      %18: i32 = IntegerLiteral 1
+      %19: i32 = IndexLoad %17[%18]
+      %20: i32 = Binary Plus %16, %19
+      StoreLocal $1 = %20
+      %21: f64 = LoadLocal $2
+      %22: f64 = FloatLiteral 3.0
+      %23: bool = Binary EqualEqual %21, %22
+      %25: bool = ShortCircuitAnd %23
+        Then
+          Block
+            %26: [[i32; 2]; 2] = LoadLocal $4
+            %27: i32 = IntegerLiteral 1
+            %28: [i32; 2] = IndexLoad %26[%27]
+            %29: i32 = IntegerLiteral 0
+            %30: i32 = IndexLoad %28[%29]
+            %31: i32 = IntegerLiteral 3
+            %32: bool = Binary EqualEqual %30, %31
+            ReturnValue %32
+        Else
+          Block
+            %24: bool = BoolLiteral false
+            ReturnValue %24
+      If %25
+        Then
+          Block
+            %33: i32 = LoadLocal $0
+            %34: i32 = LoadLocal $1
+            %35: i32 = Binary Plus %33, %34
+            ReturnValue %35
+        Else
+          Block
+            %36: i32 = IntegerLiteral 0
+            ReturnValue %36

@@ -1,0 +1,10 @@
+// Pointer MVP: address-of mutable scalar locals, dereference load, dereference store.
+
+fn main() -> i32 {
+    let mut x = 41;
+    let p = &x;
+
+    *p = *p + 1;
+
+    return x;
+}

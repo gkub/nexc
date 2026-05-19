@@ -20,26 +20,39 @@ namespace nexc::ir {
 struct Type {
     BuiltinTypeKind kind = BuiltinTypeKind::Invalid;
     std::vector<std::uint64_t> arrayDimensions;
+    std::size_t pointerDepth = 0;
 
     // Return true for the special "no value" type used by void functions.
     //
     // Lowering frequently needs this check because MLIR function types represent "no result"
     // by omitting the result type entirely, not by using a first-class void value.
     bool isVoid() const {
-        return arrayDimensions.empty() && kind == BuiltinTypeKind::Void;
+        return pointerDepth == 0 && arrayDimensions.empty() && kind == BuiltinTypeKind::Void;
     }
 
-    bool isFixedArray() const { return !arrayDimensions.empty(); }
+    bool isFixedArray() const { return pointerDepth == 0 && !arrayDimensions.empty(); }
+
+    bool isPointer() const { return pointerDepth != 0; }
+
+    Type pointeeType() const {
+        Type t{.kind = kind, .arrayDimensions = arrayDimensions, .pointerDepth = pointerDepth};
+        if (t.pointerDepth != 0) {
+            --t.pointerDepth;
+        }
+        return t;
+    }
 
     Type afterIndex() const {
-        Type t{.kind = kind, .arrayDimensions = arrayDimensions};
+        Type t{.kind = kind, .arrayDimensions = arrayDimensions, .pointerDepth = pointerDepth};
         if (!t.arrayDimensions.empty()) {
             t.arrayDimensions.erase(t.arrayDimensions.begin());
         }
         return t;
     }
 
-    Type elementScalarType() const { return Type{.kind = kind, .arrayDimensions = {}}; }
+    Type elementScalarType() const {
+        return Type{.kind = kind, .arrayDimensions = {}, .pointerDepth = pointerDepth};
+    }
 
     // Element scalar type for memref element MLIR lowering (leaf `T` of `[… x T]`).
     Type elementType() const;
@@ -169,6 +182,11 @@ struct Operation {
 
         // `base[index] = value` for mutating an element.
         IndexStore,
+
+        // Pointer MVP: `&local`, `*ptr`, and `*ptr = value`.
+        AddressOfLocal,
+        PointerLoad,
+        PointerStore,
 
         // Structured control flow. These remain structured on purpose so the
         // first IR dump is easy to understand and can later lower naturally to

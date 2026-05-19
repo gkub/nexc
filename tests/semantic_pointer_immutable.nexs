@@ -1,0 +1,5 @@
+fn main() -> i32 {
+    let x = 41;
+    let p = &x;
+    return *p;
+}

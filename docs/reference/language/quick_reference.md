@@ -33,6 +33,7 @@ f32 f64
 bool
 str
 void
+*T
 [T; N]
 ```
 
@@ -43,8 +44,14 @@ let n: i32 = 42;
 let ratio: f64 = 3.5 / 2.0;
 let sample: f32 = 1.25;
 let ok: bool = true;
+let mut cell: i32 = 41;
+let p: *i32 = &cell;
 let xs: [i32; 3] = [1, 2, 3];
 let grid: [[i32; 2]; 2] = [[1, 2], [3, 4]];
+
+let inferred_int = 42;             // i32
+let inferred_float = 3.5 / 2.0;    // f64
+let inferred_array = [1, 2, 3];    // [i32; 3]
 ```
 
 See [types.md](types.md).
@@ -53,7 +60,9 @@ See [types.md](types.md).
 
 ```nex
 let x: i32 = 1;
+let inferred = x + 1;
 let mut y: i32 = 0;
+let mut inferred_mut = 0;
 y = y + 1;
 
 let mut late: i32;

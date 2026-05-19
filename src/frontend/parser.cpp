@@ -228,6 +228,14 @@ ParameterSyntax Parser::parseParameter() {
 // BuiltinTypeKind. Invalid type syntax still produces a TypeSyntax placeholder so
 // parsing can continue.
 TypeSyntax Parser::parseType() {
+    if (match(TokenKind::Star)) {
+        const Token star = previous();
+        TypeSyntax inner = parseType();
+        inner.pointerDepth += 1;
+        inner.span = SourceSpan{.start = star.span.start, .end = inner.span.end};
+        return inner;
+    }
+
     if (check(TokenKind::LeftBracket)) {
         const Token lb = advance();
         TypeSyntax inner = parseType();
@@ -253,6 +261,7 @@ TypeSyntax Parser::parseType() {
         TypeSyntax out;
         out.kind = inner.kind;
         out.arrayDimensions = inner.arrayDimensions;
+        out.pointerDepth = inner.pointerDepth;
         out.arrayDimensions.insert(out.arrayDimensions.begin(),
                                    static_cast<std::uint64_t>(lenVal));
         out.span = SourceSpan{.start = lb.span.start, .end = previous().span.end};
@@ -266,7 +275,10 @@ TypeSyntax Parser::parseType() {
         diagnostics_.error(token.span, "expected scalar type");
     }
 
-    return TypeSyntax{.kind = kind, .arrayDimensions = {}, .span = token.span};
+    return TypeSyntax{.kind = kind,
+                      .arrayDimensions = {},
+                      .pointerDepth = 0,
+                      .span = token.span};
 }
 
 // Parse a `{ ... }` statement block.
@@ -342,7 +354,7 @@ std::unique_ptr<Stmt> Parser::parseStmt() {
         check(TokenKind::KwFalse) || check(TokenKind::LeftParen) ||
         check(TokenKind::LeftBracket) || check(TokenKind::Minus) ||
         check(TokenKind::Tilde) ||
-        check(TokenKind::Bang)) {
+        check(TokenKind::Bang) || check(TokenKind::Star)) {
         return parseAssignmentOrCallStmt();
     }
 
@@ -360,8 +372,13 @@ std::unique_ptr<Stmt> Parser::parseLetStmt() {
     const Token keyword = expect(TokenKind::KwLet, "expected `let`");
     const bool isMutable = match(TokenKind::KwMut);
     const Token name = expect(TokenKind::Identifier, "expected local name");
-    expect(TokenKind::Colon, "expected `:` after local name");
-    TypeSyntax type = parseType();
+    TypeSyntax type{.kind = BuiltinTypeKind::Invalid,
+                    .arrayDimensions = {},
+                    .pointerDepth = 0,
+                    .span = name.span};
+    if (match(TokenKind::Colon)) {
+        type = parseType();
+    }
     std::unique_ptr<Expr> init;
     if (match(TokenKind::Equal)) {
         init = parseExpr();
@@ -504,14 +521,16 @@ std::unique_ptr<Stmt> Parser::parseForStepClause() {
     }
 
     const std::size_t stmtStart = peek().span.start;
-    std::unique_ptr<Expr> lhs = parsePostfixExpr();
+    std::unique_ptr<Expr> lhs = parseUnaryExpr();
 
     if (match(TokenKind::Equal)) {
         if (!dynamic_cast<const NameExpr*>(lhs.get()) &&
-            !dynamic_cast<const IndexExpr*>(lhs.get())) {
+            !dynamic_cast<const IndexExpr*>(lhs.get()) &&
+            !(dynamic_cast<const UnaryExpr*>(lhs.get()) &&
+              dynamic_cast<const UnaryExpr*>(lhs.get())->op == TokenKind::Star)) {
             diagnostics_.error(lhs->span,
                                "for step assignment target must be a local name or "
-                               "indexed place");
+                               "indexed/dereferenced place");
             parseExpr();
             if (!check(TokenKind::RightParen)) {
                 expect(TokenKind::RightParen, "expected `)` after for step");
@@ -555,13 +574,16 @@ std::unique_ptr<Stmt> Parser::parseForStepClause() {
 // with expression-looking tokens.
 std::unique_ptr<Stmt> Parser::parseAssignmentOrCallStmt() {
     const std::size_t stmtStart = peek().span.start;
-    std::unique_ptr<Expr> lhs = parsePostfixExpr();
+    std::unique_ptr<Expr> lhs = parseUnaryExpr();
 
     if (match(TokenKind::Equal)) {
         if (!dynamic_cast<const NameExpr*>(lhs.get()) &&
-            !dynamic_cast<const IndexExpr*>(lhs.get())) {
+            !dynamic_cast<const IndexExpr*>(lhs.get()) &&
+            !(dynamic_cast<const UnaryExpr*>(lhs.get()) &&
+              dynamic_cast<const UnaryExpr*>(lhs.get())->op == TokenKind::Star)) {
             diagnostics_.error(lhs->span,
-                               "assignment target must be a local name or indexed place");
+                               "assignment target must be a local name, indexed place, or "
+                               "dereferenced pointer");
             parseExpr();
             expect(TokenKind::Semicolon, "expected `;` after assignment");
             return nullptr;
@@ -624,7 +646,8 @@ std::unique_ptr<Expr> Parser::parseExpr(int minPrecedence) {
 // before parseExpr starts consuming infix operators.
 std::unique_ptr<Expr> Parser::parseUnaryExpr() {
     if (check(TokenKind::Minus) || check(TokenKind::Bang) ||
-        check(TokenKind::Tilde)) {
+        check(TokenKind::Tilde) || check(TokenKind::Amp) ||
+        check(TokenKind::Star)) {
         const Token op = advance();
 
         // Unary operators recurse into parseUnaryExpr so chains like `!!x` and

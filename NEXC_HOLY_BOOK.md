@@ -733,7 +733,9 @@ The current analyzer checks:
 - calls to undefined functions
 - function call argument counts
 - exact scalar type matching for locals, assignments, arguments, and returns
+- local type inference for initialized `let` / `let mut` declarations
 - fixed arrays in locals, function ABI, and module constants
+- pointer MVP checks for `*T`, `&local`, `*p`, and `*p = value`
 - assignment only to `let mut`
 - `if` / `while` conditions using `bool` or integer types
 - `&&`, `||`, and `!` over `bool` or integer operands
@@ -1036,6 +1038,8 @@ They cover:
 - constants, function calls, and `main` returning `i32`
 - mutable locals, assignment, and `while`
 - fixed arrays and nested arrays
+- local type inference for initialized `let` / `let mut`
+- pointer MVP operations
 - floats, bitwise operators, and shifts
 - `println`, formatted printing, and `readln()` as resolved built-in calls
 - `if` / `else` where both branches return
@@ -1091,6 +1095,52 @@ The lesson is not "floats are special everywhere." The lesson is that a source
 feature has a small, explicit obligation at each compiler boundary. If one
 boundary is skipped, the feature works only in dumps, only in semantic checks, or
 only until native code generation.
+
+### 10.12 Feature Thread: Pointer MVP
+
+Pointers are the first feature where nex has to distinguish a **value** from a
+**place** very explicitly.
+
+```nex
+let mut x = 41;
+let p = &x;
+*p = *p + 1;
+return x;
+```
+
+In that program, `x` is a place: it has storage that can be loaded from and
+stored to. The expression `&x` does not copy the integer `41`; it produces a
+pointer to the storage slot for `x`. The expression `*p` follows that pointer
+back to the slot and loads the current integer. The assignment `*p = ...` stores
+through the pointer, so reading `x` afterward observes the new value.
+
+The first slice is intentionally narrow:
+
+- pointer type syntax is `*T`
+- `T` must be a scalar integer, float, or `bool`
+- `&name` only works for mutable scalar local bindings
+- `*p` loads through a pointer
+- `*p = value;` stores through a pointer
+- no `null`, pointer arithmetic, pointer parameters/returns, pointer-to-array,
+  pointer-to-`str`, or heap allocation yet
+
+Typed IR makes the new operations visible:
+
+```text
+%1: *i32 = AddressOfLocal $0
+%4: i32 = PointerLoad %3
+PointerStore %2 = %6
+```
+
+The MLIR lowering uses the representation the compiler already has for local
+storage: a scalar local lives in a zero-dimensional `memref<T>`. In this MVP, a
+pointer value is that memref handle. Address-of returns the local slot, pointer
+load emits `memref.load`, and pointer store emits `memref.store`.
+
+That representation is a teaching bridge, not the final pointer ABI. A fuller
+model has to answer harder questions: can pointers be null, can they point into
+arrays or strings, do we separate read-only and writable pointers, and what
+counts as valid provenance when a pointer is copied or cast?
 
 ## 11. MLIR Lowering
 
@@ -1566,18 +1616,118 @@ tests are skipped rather than breaking frontend-only development machines.
 
 The current MLIR lowering now covers the implemented backend surface: fixed-width
 integers, `f32` / `f64`, `bool`, string literals, fixed arrays, module
-constants, arithmetic, comparisons, integer bitwise/shifts, **short-circuit**
-`&&` / `||` (via `scf.if` regions in function bodies; module `const` replays
-truthified eager `Binary` for initializers), unary `!` / `~`, function
-parameters, direct function calls, built-in `print` / `println` calls, function
-returns, local declarations, local loads/stores, assignment, returning
-`if`/`else`, fallthrough `if`/`else`, `while`, `for`-as-while, `break`, and
-`continue`.
+constants including dense array globals, arithmetic, comparisons, integer
+bitwise/shifts, **short-circuit** `&&` / `||` (via `scf.if` regions in function
+bodies; module `const` replays truthified eager `Binary` for initializers),
+unary `!` / `~`, pointer MVP address/deref operations, function parameters,
+direct function calls, built-in `print` / `println` calls, function returns,
+local declarations, local loads/stores, assignment, returning `if`/`else`,
+fallthrough `if`/`else`, `while`,
+`for`-as-while, `break`, and `continue`.
 
 String literals are the first place MLIR lowering has to care about runtime
 layout. The compiler decodes the source spelling, emits immutable LLVM-dialect
 global bytes, and remembers a pointer plus byte length for the typed IR `str`
 value. That pointer/length pair is what the printing runtime receives.
+
+### 11.9 Const Array Global Lowering
+
+Module-level scalar consts are still lowered by replaying their initializer at
+each use:
+
+```nex
+const N: i32 = 40 + 2;
+```
+
+When a function uses `N`, lowering emits the same `arith.constant`, `arith.addi`,
+and related operations that the initializer would have emitted inline. That is
+fine for scalars because the replay is tiny and it preserves arbitrary const
+expressions without needing a separate constant-folding engine.
+
+Array consts are different. This source:
+
+```nex
+const TABLE: [i32; 3] = [1, 2, 3];
+
+fn main() -> i32 {
+    return TABLE[0] + TABLE[2];
+}
+```
+
+could be lowered in two broad ways.
+
+**Repeated materialization** means every `TABLE` use rebuilds the array at that
+use site:
+
+```mlir
+%alloca = memref.alloca() : memref<3xi32>
+memref.store %c1_i32, %alloca[%c0] : memref<3xi32>
+memref.store %c2_i32, %alloca[%c1] : memref<3xi32>
+memref.store %c3_i32, %alloca[%c2] : memref<3xi32>
+```
+
+That is simple because it looks exactly like an array literal inside the current
+function. The downside is also obvious: two uses of the same const can mean two
+allocations and two identical store streams. In LLVM terms, the compiler is
+doing runtime work to reconstruct data that was already known at compile time.
+
+**Global lowering** emits one immutable module object and makes each use refer
+to it:
+
+```mlir
+memref.global "private" constant @__nex_const_TABLE
+    : memref<3xi32> = dense<[1, 2, 3]>
+
+%0 = memref.get_global @__nex_const_TABLE : memref<3xi32>
+```
+
+This is the MLIR version of a C-style static constant array that later becomes
+an LLVM `global constant`, usually placed in read-only data by the object file
+and linker. The important distinction is where the data lives and when the work
+happens:
+
+- repeated materialization: array data is rebuilt inside each function path that
+  uses it
+- global lowering: array data is stored once in the module/object file, and uses
+  load from that static storage
+
+The current implementation chooses global lowering for the clean rodata case:
+fixed-array module consts whose initializer is a literal blob, including nested
+fixed arrays such as:
+
+```nex
+const GRID: [[i32; 2]; 2] = [[1, 2], [3, 4]];
+```
+
+The lowering flattens the typed IR literal tree into a dense MLIR attribute with
+the same ranked shape. That gives MLIR a true static initializer instead of a
+program that computes the initializer.
+
+There is still a fallback on purpose. If a future const array initializer uses a
+richer constexpr form that is not yet serializable as dense static data, lowering
+can replay it as stores. That keeps the compiler correct while letting the
+common case be efficient.
+
+One subtle point for interviews: a `const` array global is not the same thing as
+a mutable local array. When source code says:
+
+```nex
+let local: [i32; 3] = TABLE;
+```
+
+lowering allocates a local `memref<3xi32>` and copies from the global into that
+slot. This preserves value-like local initialization: later mutation of a mutable
+local should not overwrite the module-level const. The global is the source of
+truth for immutable data; local storage remains the place for mutable state.
+
+The implementation lives in `src/mlir/textual.cpp`:
+
+- `tryBuildConstArrayDenseAttr` recognizes literal fixed-array const
+  initializers and builds the dense MLIR attribute
+- `tryLowerConstArrayGlobal` emits `memref.global` once and returns
+  `memref.get_global` for each use
+- `lowerConstInitializer` remains the replay fallback for scalar consts and
+  unsupported array initializer shapes
 
 ## 12. LLVM IR Lowering
 
@@ -1953,15 +2103,17 @@ The current compiler does not yet implement:
 - general I/O beyond stdout `print` / `println` and the tiny `readln()` slice
 - nested returning control flow beyond the currently tested shapes
 - inter-file/module resolution beyond source concatenation for `nexc … -o`
-- heap allocation, pointers/references, user-defined aggregate types, generics,
-  and hash maps/dictionaries
+- full pointer/reference model: pointer params/returns, `null`, pointer
+  arithmetic, pointer-to-array/string interaction, and provenance
+- heap allocation, user-defined aggregate types, generics, and hash
+  maps/dictionaries
 - embedding LLVM codegen inside `nexc` so object files are emitted without
   running the external `llc` subprocess (possible future refinement)
 
 Those are later stages. The current project state is a checked compiler
 path with typed IR, MLIR, LLVM IR dumps, and native executable generation,
 including fixed arrays, floats, bitwise/shifts, runtime-backed stdout printing,
-and one-line stdin input.
+one-line stdin input, and a pointer MVP for mutable scalar locals.
 
 ## 18. Recommended Next Steps
 

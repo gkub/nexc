@@ -45,18 +45,24 @@ Current statement forms include:
 
 ```text
 let name: Type = expr;
+let name = expr;
 let mut name: Type = expr;
+let mut name = expr;
 let mut name: Type;
 ```
 
 - `let x: T = expr;` creates immutable local binding (initializer required).
+- `let x = expr;` infers the local type from the initializer.
 - `let mut x: T = expr;` creates mutable local binding with an initial value.
+- `let mut x = expr;` infers the mutable local type from the initializer.
 - `let mut x: T;` declares mutable storage **without** an initializer. The name
   may be read only after the compiler proves an assignment on **every path** to
   that read (flow-sensitive **definite assignment**). Details and join/loop rules:
   [definite_assignment.md](../../design/definite_assignment.md).
 - `let x: T;` (no `mut`, no `=`) is invalid: the parser requires either `= expr`
   or `let mut` for uninitialized declarations.
+- `let mut x;` is invalid because there is no initializer to infer from; write
+  `let mut x: T;`.
 
 ## Assignment Statements
 
@@ -64,6 +70,7 @@ let mut name: Type;
 name = expr;
 name[index] = expr;
 name[index][...] = expr;
+*ptr = expr;
 ```
 
 - Assignment targets are either a **mutable local name** or an **indexed mutable
@@ -71,6 +78,8 @@ name[index][...] = expr;
   declared with `let mut`.
 - Assigning to immutable `let` or through an immutable array binding is a diagnostic
   error.
+- Dereferenced pointer assignment stores through the pointer. The first pointer
+  slice only creates pointers with `&` from mutable scalar locals.
 
 ## Return Statements
 

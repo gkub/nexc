@@ -14,6 +14,8 @@ Implemented today:
   configured Linux and macOS hosts
 - fixed-width integers, IEEE-754 `f32` / `f64`, `bool`, `str`, `void`, and
   fixed-size arrays
+- pointer MVP for mutable scalar locals: `*T`, `&x`, `*p`, and `*p = value`
+- local type inference for initialized `let` / `let mut`
 - runtime-backed `print` / `println` with `{}` formatting and float precision
   placeholders such as `{:.2}`, plus integer hex/binary placeholders
   (`{:x}`, `{:X}`, `{:b}`)

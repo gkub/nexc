@@ -206,6 +206,18 @@ private:
                  valueName(requiredValue(operation.right)) + "] = " +
                  valueName(requiredValue(operation.value)));
             return;
+        case Operation::Kind::AddressOfLocal:
+            dumpResultPrefix(operation);
+            out_ << "AddressOfLocal " << localName(operation.local) << '\n';
+            return;
+        case Operation::Kind::PointerLoad:
+            dumpResultPrefix(operation);
+            out_ << "PointerLoad " << valueName(requiredValue(operation.value)) << '\n';
+            return;
+        case Operation::Kind::PointerStore:
+            line("PointerStore " + valueName(requiredValue(operation.left)) + " = " +
+                 valueName(requiredValue(operation.value)));
+            return;
         case Operation::Kind::If:
             dumpIf(operation);
             return;
